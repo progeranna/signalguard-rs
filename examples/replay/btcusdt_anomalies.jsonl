@@ -1,0 +1,6 @@
+{"type":"quote","symbol":"BTCUSDT","exchange":"binance","best_bid_price":"64000.00","best_bid_quantity":"1.50","best_ask_price":"64002.00","best_ask_quantity":"1.30","event_time":"2026-01-01T00:10:00Z"}
+{"type":"trade","symbol":"BTCUSDT","exchange":"binance","trade_id":3001,"price":"64001.00","quantity":"0.020","event_time":"2026-01-01T00:10:01Z"}
+{"type":"quote","symbol":"BTCUSDT","exchange":"binance","best_bid_price":"64520.00","best_bid_quantity":"0.80","best_ask_price":"64540.00","best_ask_quantity":"0.75","event_time":"2026-01-01T00:10:02Z"}
+{"type":"trade","symbol":"BTCUSDT","exchange":"binance","trade_id":3002,"price":"64535.50","quantity":"0.450","event_time":"2026-01-01T00:10:03Z"}
+{"type":"quote","symbol":"BTCUSDT","exchange":"binance","best_bid_price":"64510.00","best_bid_quantity":"0.35","best_ask_price":"64600.00","best_ask_quantity":"0.28","event_time":"2026-01-01T00:10:04Z"}
+{"type":"trade","symbol":"BTCUSDT","exchange":"binance","trade_id":3003,"price":"64595.00","quantity":"0.600","event_time":"2026-01-01T00:10:05Z"}
