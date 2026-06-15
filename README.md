@@ -1,193 +1,153 @@
-# signalguard-rs
+# SignalGuard RS
 
-`signalguard-rs` is a Rust backend service for crypto market data integrity monitoring. It ingests public Binance market data and deterministic local replay fixtures, normalizes trade and quote events, computes per-symbol market state, detects rule-based anomalies, stores historical events in PostgreSQL, caches latest state snapshots in Redis, and exposes an Axum REST API.
+SignalGuard RS is a Rust backend service for monitoring crypto market data quality. It combines deterministic replay, Binance public WebSocket ingestion, rule-based anomaly detection, PostgreSQL, Redis, Axum, and Tokio into a compact trading-infrastructure-style service that answers a practical question: can this market data stream be trusted right now?
 
-The project is intentionally scoped as a production-minded MVP backend. It is not a trading bot, not a prediction system, and not a market manipulation detector.
+## What It Does
 
+- Replays deterministic JSONL fixtures for a local demo path
+- Ingests live Binance public `trade`, `bookTicker`, and diff-depth streams
+- Routes replay and live events through the same normalized pipeline
+- Uses a bounded Tokio MPSC channel, so ingestion backpressures instead of silently dropping events
+- Aggregates per-symbol market state in memory
+- Maintains a simplified local top-N order book and depth-derived state fields
+- Stores historical trades, quotes, and anomalies in PostgreSQL
+- Stores latest market state snapshots in Redis
+- Emits deterministic, rule-based anomalies such as `price_move`, `spread_spike`, `stale_data`, `trade_burst`, `quote_stuck`, `event_lag_spike`, and `depth_sequence_gap`
+- Exposes market state, recent anomalies, market health, pipeline health, and Prometheus-compatible metrics over HTTP
 
-## What SignalGuard does
+## Fast Demo
 
-SignalGuard turns normalized market events into an explainable market health API.
+Primary demo path:
 
-- `replay` mode reads local JSONL fixtures and is the deterministic default demo path.
-- `live` mode connects to Binance public WebSocket streams for configured symbols.
-- Both modes feed the same `NormalizedEvent` pipeline.
-- PostgreSQL stores historical trades, quotes, and anomaly events.
-- Redis stores only the latest market state snapshot per symbol.
-- In-memory state maintains sliding windows and the trade-burst warmup baseline.
-- The API exposes latest state, recent anomalies, and a heuristic market health score.
-
-## Features
-
-- Axum HTTP API with `GET /health`, `GET /symbols`, `GET /market/{symbol}/state`, `GET /anomalies`, and `GET /market/{symbol}/health`
-- Deterministic replay mode that does not require network access
-- Binance public WebSocket ingestion for trades and `bookTicker`
-- Shared normalization path for replay and live ingestion
-- Rule-based anomaly detectors:
-  - `price_move`
-  - `spread_spike`
-  - `stale_data`
-  - `trade_burst`
-- Explainable, penalty-based health score
-- PostgreSQL historical storage and Redis latest-state cache
-- In-process operational counters for parse errors, reconnect attempts, storage/cache errors, and last processed normalized message time
-
-## Architecture
-
-SignalGuard is a single-crate Rust service with explicit ownership boundaries:
-
-- PostgreSQL is historical truth.
-- Redis is a latest-state cache only.
-- Sliding windows and trade-burst baseline live in memory.
-- Replay and live ingestion converge before storage, state aggregation, and detection.
-
-See [docs/architecture.md](docs/architecture.md) for the full text diagram.
-
-## Quickstart
+```bash
+bash scripts/demo-replay.sh
+```
 
 Prerequisites:
 
 - Rust toolchain
-- Docker with Compose support
+- Docker daemon with Compose support
 - `sqlx-cli`
+- `curl`
 
-Start local dependencies:
+The demo uses deterministic replay, does not require Binance network access, and does not require API keys. It starts PostgreSQL and Redis, runs migrations, starts the service in replay mode, and runs smoke checks against health, state, anomalies, and metrics.
+
+To stop PostgreSQL and Redis automatically at the end:
+
+```bash
+DEMO_DOWN=1 bash scripts/demo-replay.sh
+```
+
+## Optional Docker App Profile
+
+The primary fast demo remains `bash scripts/demo-replay.sh`. There is also an optional local app-container path:
 
 ```bash
 docker compose up -d postgres redis
 export DATABASE_URL="postgres://signalguard:signalguard@localhost:5432/signalguard"
 sqlx migrate run
-cargo run
+docker compose --profile app up --build app
 ```
 
-The default configuration runs in replay mode with `examples/replay/sample.jsonl`. The server binds to `127.0.0.1:8080`.
-
-Stop local dependencies:
+Migrations stay explicit. The `app` profile is a local runtime helper, not a production deployment path. After the container is up:
 
 ```bash
-docker compose down
+bash scripts/smoke.sh
+docker compose --profile app down
 ```
 
-## Demo modes: replay and live
+## API Preview
 
-### Replay
-
-Replay mode is the deterministic default demo path. It does not need external network access and routes fixture events through the same normalization, storage, cache, aggregation, and detector path as live mode.
-
-For deterministic demo output, replay startup clears the PostgreSQL `trades`, `quotes`, and `anomalies` tables before ingesting the fixture by default.
-
-Set `SIGNALGUARD_REPLAY_RESET_STORAGE=false` if you want replay mode to preserve existing PostgreSQL history instead. Live mode never clears historical tables automatically.
-
-Default fixture:
-
-```bash
-examples/replay/sample.jsonl
-```
-
-Override the fixture path:
-
-```bash
-SIGNALGUARD_INGESTION_REPLAY_PATH=examples/replay/btcusdt_anomalies.jsonl cargo run
-```
-
-Preserve existing PostgreSQL history during replay:
-
-```bash
-SIGNALGUARD_REPLAY_RESET_STORAGE=false cargo run
-```
-
-Copy-paste replay demo:
-
-```bash
-docker compose up -d postgres redis
-export DATABASE_URL="postgres://signalguard:signalguard@localhost:5432/signalguard"
-sqlx migrate run
-cargo run
-curl --fail --silent --show-error http://127.0.0.1:8080/health
-curl --silent --show-error http://127.0.0.1:8080/symbols
-curl --silent --show-error http://127.0.0.1:8080/market/BTCUSDT/state
-curl --silent --show-error "http://127.0.0.1:8080/anomalies?symbol=BTCUSDT&limit=50"
-curl --silent --show-error http://127.0.0.1:8080/market/BTCUSDT/health
-docker compose down
-```
-
-### Live
-
-Live mode still requires PostgreSQL and Redis locally, but it reads market data from Binance public WebSocket streams only.
-
-```bash
-docker compose up -d postgres redis
-export DATABASE_URL="postgres://signalguard:signalguard@localhost:5432/signalguard"
-sqlx migrate run
-SIGNALGUARD_INGESTION_MODE=live SIGNALGUARD_INGESTION_SYMBOLS=BTCUSDT cargo run
-```
-
-Notes:
-
-- no API keys are required
-- no order execution or trading behavior exists
-- stop the service with `Ctrl+C`
-- live reliability depends on Binance public WebSocket availability and local network access
-- if you want live anomalies and health output without replay history, start from a fresh PostgreSQL database or clear the replay data first
-
-## API examples
-
-Replay-mode examples are documented in [docs/api-examples.md](docs/api-examples.md). They reflect the current response shapes for:
+Endpoints:
 
 - `GET /health`
+- `GET /pipeline/health`
+- `GET /metrics`
 - `GET /symbols`
-- `GET /market/BTCUSDT/state`
-- `GET /anomalies?symbol=BTCUSDT&limit=50`
-- `GET /market/BTCUSDT/health`
+- `GET /market/{symbol}/state`
+- `GET /anomalies`
+- `GET /market/{symbol}/health`
 
-Replay fixtures use historical `event_time` values, so `stale_data` anomalies and `degraded` health are expected in those examples.
+Compact `GET /market/BTCUSDT/state` example:
 
-## Design decisions
+```json
+{
+  "symbol": "BTCUSDT",
+  "last_trade_price": "65054.25",
+  "best_bid_price": "65048.00",
+  "best_ask_price": "65055.00",
+  "spread_pct": 0.01076070497990054,
+  "price_change_1m_pct": 0.08346153846153846,
+  "trades_per_minute": 2.0,
+  "depth_sequence_gap_count": 0
+}
+```
 
-- Single-crate modular architecture instead of a workspace for the MVP
-- `rust_decimal::Decimal` for price and quantity in domain models, with `f64` used pragmatically for percentage calculations
-- Replay and live ingestion share the same normalized event path
-- PostgreSQL stores historical trades, quotes, and anomalies
-- Redis stores only latest market state snapshots per symbol
-- Sliding windows and trade-burst baseline remain in-memory for MVP simplicity
-- Health score is heuristic, deterministic, explainable, configurable, and not trading advice
-- Internal counters are in-process only; they are not exposed via Prometheus or an HTTP endpoint
-- The recorded “last message” counter is the timestamp of the last processed normalized message, not exchange event time
+Full endpoint examples live in [docs/api-examples.md](docs/api-examples.md).
 
-## Failure modes
+## Architecture
 
-Failure-mode behavior is documented in [docs/failure-modes.md](docs/failure-modes.md).
+- Ingestion: replay fixtures and live Binance payloads are parsed once and normalized once
+- Pipeline: replay and live sources feed the same bounded event path
+- State: in-memory aggregation computes latest market state, rolling windows, and runtime depth-derived fields
+- Storage/cache: PostgreSQL stores historical events and anomalies, while Redis stores latest-state snapshots
+- Detectors: anomaly rules are deterministic, explainable, and configuration-driven
+- API: Axum exposes service health, pipeline health, state, anomalies, and market health
 
-Important cases:
+Deeper architecture notes: [docs/architecture.md](docs/architecture.md)
 
-- PostgreSQL unavailable at startup is fatal
-- Redis unavailable at startup causes degraded service behavior
-- replay startup clears historical demo tables by default so repeated replay runs stay deterministic
-- set `SIGNALGUARD_REPLAY_RESET_STORAGE=false` to preserve PostgreSQL history during replay
-- replay fixture parse failures are fatal by design
-- live malformed Binance payloads are logged and skipped
-- live WebSocket failures retry with bounded exponential backoff
+## Testing And Quality Gates
+
+Core checks:
+
+- `cargo fmt --check`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo test`
+
+Normal `cargo test` does not require Docker, PostgreSQL, Redis, or Binance network access. Optional Docker-backed integration and replay E2E tests remain opt-in and are documented in [docs/operations.md](docs/operations.md).
+
+## Design Decisions
+
+- PostgreSQL is the historical truth for trades, quotes, and anomalies
+- Redis is a latest-state cache only
+- Replay and live ingestion share the same normalized pipeline
+- Detectors are deterministic and rule-based
+- Depth and order-book state are runtime latest-state signals, not full historical order-book persistence
+- Market health is explainable and penalty-based rather than opaque scoring
 
 ## Limitations
 
-- Redis is a latest-state cache, not historical truth
-- PostgreSQL stores historical trades, quotes, and anomalies only
-- Sliding windows and trade-burst baseline are in-memory and lost on restart
-- No retention, partitioning, or downsampling is implemented
-- No Prometheus `/metrics` endpoint exists
-- Internal counters are not queryable through the API
-- No order book depth support exists
-- No real liquidity gap detection exists
-- Health score is heuristic and not trading advice
-- Replay historical timestamps can trigger `stale_data` anomalies and degraded health
-- Live mode depends on Binance public WebSocket availability
+- This is not a trading bot
+- There is no order execution logic
+- There is no private Binance API usage
+- There is no price prediction
+- There is no manipulation detection or proof
+- There is no production-grade Binance local order book correctness guarantee
+- There is no REST snapshot bootstrap or full resync yet
+- There is no historical full order-book persistence
+- Replay timestamps are intentionally historical and can trigger `stale_data` and `event_lag_spike` anomalies
 
 ## Roadmap
 
-- Prometheus `/metrics` and externalized metrics scraping
-- PostgreSQL retention, partitioning, or downsampling strategy
-- Order book depth ingestion
-- Top-of-book liquidity signal and later depth-based liquidity analysis
-- Additional detectors such as `parse_error_burst`, `quote_stuck`, and `event_lag_spike`
-- Better health diagnostics and pipeline-level visibility
-- Optional Docker-backed integration tests beyond the current unit-test-heavy MVP
+- REST snapshot bootstrap and local order-book resync
+- Retention and downsampling for historical storage
+- A second exchange integration
+- An optional dashboard or visual demo layer
+
+## Interview Talking Points
+
+- Shared replay/live pipeline keeps demo and runtime logic aligned
+- Bounded backpressure makes ingestion behavior explicit under load
+- PostgreSQL and Redis have clear, separate ownership boundaries
+- Detectors are deterministic and easy to test from fixtures
+- Depth sequence gap handling is visible in latest state and anomaly output
+- Health scoring is heuristic, explainable, and not trading advice
+- The local demo path is reproducible in a few minutes without exchange connectivity
+
+## Further Reading
+
+- [docs/operations.md](docs/operations.md)
+- [docs/architecture.md](docs/architecture.md)
+- [docs/api-examples.md](docs/api-examples.md)
+- [docs/replay-format.md](docs/replay-format.md)
+- [docs/failure-modes.md](docs/failure-modes.md)
