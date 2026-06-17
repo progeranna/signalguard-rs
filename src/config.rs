@@ -15,6 +15,8 @@ const DEFAULT_DATABASE_URL: &str = "postgres://signalguard:signalguard@127.0.0.1
 const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379";
 const DEFAULT_REPLAY_PATH: &str = "examples/replay/sample.jsonl";
 const DEFAULT_REPLAY_RESET_STORAGE: bool = true;
+const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 1_024;
+const MAX_EVENT_CHANNEL_CAPACITY: usize = 1_000_000;
 const DEFAULT_BINANCE_WEBSOCKET_BASE_URL: &str = "wss://stream.binance.com:9443";
 const DEFAULT_SYMBOLS: &[&str] = &["BTCUSDT"];
 const DEFAULT_BINANCE_RECONNECT_MIN_BACKOFF_MS: u64 = 500;
@@ -24,6 +26,9 @@ const DEFAULT_SPREAD_SPIKE_PCT_THRESHOLD: &str = "0.5";
 const DEFAULT_TRADE_BURST_MULTIPLIER: &str = "3.0";
 const DEFAULT_STALE_DATA_MS_THRESHOLD: u64 = 5_000;
 const DEFAULT_TRADE_BURST_MIN_WARMUP_WINDOWS: u32 = 5;
+const DEFAULT_QUOTE_STUCK_MS_THRESHOLD: u64 = 10_000;
+const DEFAULT_EVENT_LAG_SPIKE_MS_THRESHOLD: u64 = 3_000;
+const DEFAULT_DEPTH_SEQUENCE_GAP_MIN_INCREMENT: u64 = 1;
 const DEFAULT_HEALTH_BASE_SCORE: u8 = 100;
 const DEFAULT_HEALTH_INFO_PENALTY: u8 = 5;
 const DEFAULT_HEALTH_WARNING_PENALTY: u8 = 15;
@@ -73,6 +78,7 @@ pub struct IngestionSettings {
     pub replay_path: PathBuf,
     pub replay_delay_ms: u64,
     pub replay_reset_storage: bool,
+    pub event_channel_capacity: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -89,6 +95,9 @@ pub struct DetectorSettings {
     pub stale_data_ms_threshold: u64,
     pub trade_burst_multiplier: Decimal,
     pub trade_burst_min_warmup_windows: u32,
+    pub quote_stuck_ms_threshold: u64,
+    pub event_lag_spike_ms_threshold: u64,
+    pub depth_sequence_gap_min_increment: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -146,6 +155,20 @@ impl Settings {
             "SIGNALGUARD_REPLAY_RESET_STORAGE",
             DEFAULT_REPLAY_RESET_STORAGE,
         )?;
+        let event_channel_capacity = env_usize(
+            env_map,
+            "SIGNALGUARD_EVENT_CHANNEL_CAPACITY",
+            DEFAULT_EVENT_CHANNEL_CAPACITY,
+        )?;
+        let ingestion = IngestionSettings {
+            mode,
+            symbols,
+            replay_path,
+            replay_delay_ms,
+            replay_reset_storage,
+            event_channel_capacity,
+        };
+        ingestion.validate()?;
         let binance = BinanceSettings {
             websocket_base_url: env_value(env_map, "SIGNALGUARD_BINANCE_WEBSOCKET_BASE_URL")
                 .unwrap_or_else(|| DEFAULT_BINANCE_WEBSOCKET_BASE_URL.to_owned()),
@@ -187,6 +210,21 @@ impl Settings {
                 env_map,
                 "SIGNALGUARD_DETECTORS_TRADE_BURST_MIN_WARMUP_WINDOWS",
                 DEFAULT_TRADE_BURST_MIN_WARMUP_WINDOWS,
+            )?,
+            quote_stuck_ms_threshold: env_u64(
+                env_map,
+                "SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD",
+                DEFAULT_QUOTE_STUCK_MS_THRESHOLD,
+            )?,
+            event_lag_spike_ms_threshold: env_u64(
+                env_map,
+                "SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD",
+                DEFAULT_EVENT_LAG_SPIKE_MS_THRESHOLD,
+            )?,
+            depth_sequence_gap_min_increment: env_u64(
+                env_map,
+                "SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT",
+                DEFAULT_DEPTH_SEQUENCE_GAP_MIN_INCREMENT,
             )?,
         };
         detectors.validate()?;
@@ -243,13 +281,7 @@ impl Settings {
             server: ServerSettings { host, port },
             database: DatabaseSettings { url: database_url },
             redis: RedisSettings { url: redis_url },
-            ingestion: IngestionSettings {
-                mode,
-                symbols,
-                replay_path,
-                replay_delay_ms,
-                replay_reset_storage,
-            },
+            ingestion,
             binance,
             detectors,
             health,
@@ -274,6 +306,21 @@ impl IngestionMode {
             Self::Replay => "replay",
             Self::Live => "live",
         }
+    }
+}
+
+impl IngestionSettings {
+    fn validate(&self) -> Result<()> {
+        if self.event_channel_capacity == 0 {
+            bail!("SIGNALGUARD_EVENT_CHANNEL_CAPACITY must be greater than zero");
+        }
+        if self.event_channel_capacity > MAX_EVENT_CHANNEL_CAPACITY {
+            bail!(
+                "SIGNALGUARD_EVENT_CHANNEL_CAPACITY must be less than or equal to {MAX_EVENT_CHANNEL_CAPACITY}"
+            );
+        }
+
+        Ok(())
     }
 }
 
@@ -314,6 +361,17 @@ impl DetectorSettings {
         )?;
         if self.trade_burst_min_warmup_windows == 0 {
             bail!("SIGNALGUARD_DETECTORS_TRADE_BURST_MIN_WARMUP_WINDOWS must be greater than zero");
+        }
+        if self.quote_stuck_ms_threshold == 0 {
+            bail!("SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD must be greater than zero");
+        }
+        if self.event_lag_spike_ms_threshold == 0 {
+            bail!("SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD must be greater than zero");
+        }
+        if self.depth_sequence_gap_min_increment == 0 {
+            bail!(
+                "SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT must be greater than zero"
+            );
         }
 
         Ok(())
@@ -463,6 +521,13 @@ fn env_u8(env_map: &HashMap<String, String>, key: &str, default: u8) -> Result<u
     })
 }
 
+fn env_usize(env_map: &HashMap<String, String>, key: &str, default: usize) -> Result<usize> {
+    let raw_value = env_value(env_map, key).unwrap_or_else(|| default.to_string());
+    raw_value
+        .parse::<usize>()
+        .with_context(|| format!("{key} must be a valid integer value: {raw_value}"))
+}
+
 fn env_bool(env_map: &HashMap<String, String>, key: &str, default: bool) -> Result<bool> {
     let raw_value = env_value(env_map, key).unwrap_or_else(|| default.to_string());
     match raw_value.as_str() {
@@ -516,6 +581,7 @@ mod tests {
         );
         assert_eq!(settings.ingestion.replay_delay_ms, 0);
         assert!(settings.ingestion.replay_reset_storage);
+        assert_eq!(settings.ingestion.event_channel_capacity, 1_024);
         assert_eq!(
             settings.binance.websocket_base_url,
             "wss://stream.binance.com:9443"
@@ -533,6 +599,9 @@ mod tests {
         assert_eq!(settings.detectors.stale_data_ms_threshold, 5_000);
         assert_eq!(settings.detectors.trade_burst_multiplier.to_string(), "3.0");
         assert_eq!(settings.detectors.trade_burst_min_warmup_windows, 5);
+        assert_eq!(settings.detectors.quote_stuck_ms_threshold, 10_000);
+        assert_eq!(settings.detectors.event_lag_spike_ms_threshold, 3_000);
+        assert_eq!(settings.detectors.depth_sequence_gap_min_increment, 1);
         assert_eq!(settings.health.base_score, 100);
         assert_eq!(settings.health.severity_penalties.info, 5);
         assert_eq!(settings.health.severity_penalties.warning, 15);
@@ -601,6 +670,18 @@ mod tests {
                 String::from("SIGNALGUARD_REPLAY_RESET_STORAGE"),
                 String::from("false"),
             ),
+            (
+                String::from("SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD"),
+                String::from("15000"),
+            ),
+            (
+                String::from("SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD"),
+                String::from("4500"),
+            ),
+            (
+                String::from("SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT"),
+                String::from("2"),
+            ),
         ]);
 
         let loaded = Settings::load_from_map(&settings).unwrap();
@@ -612,6 +693,9 @@ mod tests {
         assert_eq!(loaded.ingestion.replay_delay_ms, 25);
         assert!(!loaded.ingestion.replay_reset_storage);
         assert_eq!(loaded.binance.reconnect_max_backoff_ms, 1_000);
+        assert_eq!(loaded.detectors.quote_stuck_ms_threshold, 15_000);
+        assert_eq!(loaded.detectors.event_lag_spike_ms_threshold, 4_500);
+        assert_eq!(loaded.detectors.depth_sequence_gap_min_increment, 2);
     }
 
     #[test]
@@ -631,6 +715,46 @@ mod tests {
         let loaded = Settings::load_from_map(&settings).unwrap();
 
         assert!(!loaded.ingestion.replay_reset_storage);
+    }
+
+    #[test]
+    fn event_channel_capacity_override_is_loaded() {
+        let settings = HashMap::from([(
+            String::from("SIGNALGUARD_EVENT_CHANNEL_CAPACITY"),
+            String::from("2048"),
+        )]);
+
+        let loaded = Settings::load_from_map(&settings).unwrap();
+
+        assert_eq!(loaded.ingestion.event_channel_capacity, 2_048);
+    }
+
+    #[test]
+    fn zero_event_channel_capacity_is_rejected() {
+        let settings = HashMap::from([(
+            String::from("SIGNALGUARD_EVENT_CHANNEL_CAPACITY"),
+            String::from("0"),
+        )]);
+
+        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
+
+        assert!(error.contains("SIGNALGUARD_EVENT_CHANNEL_CAPACITY must be greater than zero"));
+    }
+
+    #[test]
+    fn oversized_event_channel_capacity_is_rejected() {
+        let settings = HashMap::from([(
+            String::from("SIGNALGUARD_EVENT_CHANNEL_CAPACITY"),
+            String::from("1000001"),
+        )]);
+
+        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
+
+        assert!(
+            error.contains(
+                "SIGNALGUARD_EVENT_CHANNEL_CAPACITY must be less than or equal to 1000000"
+            )
+        );
     }
 
     #[test]
@@ -713,6 +837,50 @@ mod tests {
 
         assert!(error.contains(
             "SIGNALGUARD_DETECTORS_SPREAD_SPIKE_PCT_THRESHOLD must be greater than zero"
+        ));
+    }
+
+    #[test]
+    fn zero_quote_stuck_threshold_is_rejected() {
+        let settings = HashMap::from([(
+            String::from("SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD"),
+            String::from("0"),
+        )]);
+
+        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
+
+        assert!(
+            error.contains(
+                "SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD must be greater than zero"
+            )
+        );
+    }
+
+    #[test]
+    fn zero_event_lag_spike_threshold_is_rejected() {
+        let settings = HashMap::from([(
+            String::from("SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD"),
+            String::from("0"),
+        )]);
+
+        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
+
+        assert!(error.contains(
+            "SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD must be greater than zero"
+        ));
+    }
+
+    #[test]
+    fn zero_depth_sequence_gap_increment_is_rejected() {
+        let settings = HashMap::from([(
+            String::from("SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT"),
+            String::from("0"),
+        )]);
+
+        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
+
+        assert!(error.contains(
+            "SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT must be greater than zero"
         ));
     }
 

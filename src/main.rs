@@ -1,19 +1,11 @@
-mod api;
-pub mod config;
-mod detectors;
-pub mod domain;
-mod exchange;
-pub mod health;
-mod ingestion;
-mod state;
-pub mod storage;
-mod telemetry;
-
 use anyhow::{Context, Result};
-use api::AppState;
-use config::{IngestionMode, Settings};
-use storage::RedisCache;
-use telemetry::InternalCounters;
+use signalguard_rs::{
+    api::{self, AppState},
+    config::{IngestionMode, Settings},
+    ingestion,
+    storage::{self, RedisCache},
+    telemetry::{self, InternalCounters},
+};
 use tokio::sync::watch;
 use tracing::error;
 use tracing::info;
@@ -63,10 +55,11 @@ async fn main() -> Result<()> {
         configured_symbols = settings.ingestion.symbols.len(),
         replay_path = %settings.ingestion.replay_path.display(),
         replay_reset_storage = settings.ingestion.replay_reset_storage,
+        event_channel_capacity = settings.ingestion.event_channel_capacity,
         binance_websocket_base_url = %settings.binance.websocket_base_url,
         database_url_configured = !settings.database.url.trim().is_empty(),
         redis_url_configured = !settings.redis.url.trim().is_empty(),
-        "starting signalguard service"
+        "starting HTTP server"
     );
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);

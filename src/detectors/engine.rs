@@ -8,7 +8,10 @@ use crate::{
     domain::{AnomalyEvent, AnomalyType, MarketState, Symbol},
 };
 
-use super::{price_move, spread_spike, stale_data, trade_burst::TradeBurstState};
+use super::{
+    depth_sequence_gap::DepthSequenceGapState, event_lag_spike, price_move,
+    quote_stuck::QuoteStuckState, spread_spike, stale_data, trade_burst::TradeBurstState,
+};
 
 const DETECTOR_COOLDOWN: Duration = Duration::from_secs(30);
 
@@ -22,6 +25,8 @@ pub struct DetectionContext<'a> {
 #[derive(Default)]
 pub struct DetectorEngine {
     trade_burst_state: HashMap<Symbol, TradeBurstState>,
+    quote_stuck_state: HashMap<Symbol, QuoteStuckState>,
+    depth_sequence_gap_state: HashMap<Symbol, DepthSequenceGapState>,
     last_emitted: HashMap<(Symbol, AnomalyType), DateTime<Utc>>,
 }
 
@@ -44,12 +49,23 @@ impl DetectorEngine {
         anomalies.extend(price_move::detect(&context));
         anomalies.extend(spread_spike::detect(&context));
         anomalies.extend(stale_data::detect(&context));
+        anomalies.extend(event_lag_spike::detect(&context));
 
         let trade_burst_state = self
             .trade_burst_state
             .entry(state.symbol.clone())
             .or_default();
         anomalies.extend(trade_burst_state.evaluate(&state.symbol, &context));
+        let quote_stuck_state = self
+            .quote_stuck_state
+            .entry(state.symbol.clone())
+            .or_default();
+        anomalies.extend(quote_stuck_state.evaluate(&context));
+        let depth_sequence_gap_state = self
+            .depth_sequence_gap_state
+            .entry(state.symbol.clone())
+            .or_default();
+        anomalies.extend(depth_sequence_gap_state.evaluate(&context));
 
         anomalies
             .into_iter()
@@ -127,6 +143,100 @@ mod tests {
     }
 
     #[test]
+    fn quote_stuck_state_is_independent_per_symbol() {
+        let mut engine = DetectorEngine::default();
+        let settings = settings();
+
+        let btc_first = top_of_book_state(
+            "BTCUSDT",
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            Decimal::new(2, 0),
+        );
+        let eth_first = top_of_book_state(
+            "ETHUSDT",
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            Decimal::new(2, 0),
+        );
+        let btc_second = top_of_book_state(
+            "BTCUSDT",
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 11).unwrap(),
+            Decimal::new(2, 0),
+        );
+        let eth_changed = top_of_book_state(
+            "ETHUSDT",
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 11).unwrap(),
+            Decimal::new(3, 0),
+        );
+
+        assert!(
+            engine
+                .evaluate(
+                    &btc_first,
+                    &settings,
+                    Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+                )
+                .is_empty()
+        );
+        assert!(
+            engine
+                .evaluate(
+                    &eth_first,
+                    &settings,
+                    Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+                )
+                .is_empty()
+        );
+
+        let btc_anomalies = engine.evaluate(
+            &btc_second,
+            &settings,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 11).unwrap(),
+        );
+        let eth_anomalies = engine.evaluate(
+            &eth_changed,
+            &settings,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 11).unwrap(),
+        );
+
+        assert!(
+            btc_anomalies
+                .iter()
+                .any(|anomaly| anomaly.anomaly_type == crate::domain::AnomalyType::QuoteStuck)
+        );
+        assert!(
+            eth_anomalies
+                .iter()
+                .all(|anomaly| anomaly.anomaly_type != crate::domain::AnomalyType::QuoteStuck)
+        );
+    }
+
+    #[test]
+    fn depth_sequence_gap_state_is_independent_per_symbol() {
+        let mut engine = DetectorEngine::default();
+        let settings = settings();
+
+        let btc_gap = depth_gap_state("BTCUSDT", 1);
+        let eth_gap = depth_gap_state("ETHUSDT", 0);
+
+        let btc_anomalies = engine.evaluate(
+            &btc_gap,
+            &settings,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap(),
+        );
+        let eth_anomalies = engine.evaluate(
+            &eth_gap,
+            &settings,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap(),
+        );
+
+        assert!(btc_anomalies.iter().any(|anomaly| anomaly.anomaly_type
+            == crate::domain::AnomalyType::DepthSequenceGap));
+        assert!(eth_anomalies
+            .iter()
+            .all(|anomaly| anomaly.anomaly_type != crate::domain::AnomalyType::DepthSequenceGap));
+    }
+
+    #[test]
     fn duplicate_suppression_uses_cooldown() {
         let mut engine = DetectorEngine::default();
         let state = state_with(
@@ -194,6 +304,9 @@ mod tests {
             stale_data_ms_threshold: 5_000,
             trade_burst_multiplier: Decimal::new(3, 0),
             trade_burst_min_warmup_windows: 5,
+            quote_stuck_ms_threshold: 10_000,
+            event_lag_spike_ms_threshold: 3_000,
+            depth_sequence_gap_min_increment: 1,
         }
     }
 
@@ -211,6 +324,33 @@ mod tests {
             trades_per_minute,
         };
         state.last_event_time = Some(last_event_time);
+        state
+    }
+
+    fn top_of_book_state(
+        symbol: &str,
+        last_event_time: chrono::DateTime<Utc>,
+        top_ask_quantity: Decimal,
+    ) -> MarketState {
+        let mut state = MarketState::new(Symbol::new(symbol).unwrap());
+        state.best_bid_price = Some(Decimal::new(6500000, 2));
+        state.best_bid_quantity = Some(Decimal::new(125, 2));
+        state.best_ask_price = Some(Decimal::new(6500100, 2));
+        state.best_ask_quantity = Some(Decimal::new(150, 2));
+        state.top_bid_quantity = Some(Decimal::new(2, 0));
+        state.top_ask_quantity = Some(top_ask_quantity);
+        state.last_event_time = Some(last_event_time);
+        state.last_ingest_time = Some(last_event_time);
+        state
+    }
+
+    fn depth_gap_state(symbol: &str, depth_sequence_gap_count: u64) -> MarketState {
+        let last_event_time = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap();
+        let mut state = MarketState::new(Symbol::new(symbol).unwrap());
+        state.depth_sequence_gap_count = depth_sequence_gap_count;
+        state.last_event_time = Some(last_event_time);
+        state.last_ingest_time = Some(last_event_time);
+        state.last_depth_event_time = Some(last_event_time);
         state
     }
 }
