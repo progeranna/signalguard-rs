@@ -1,18 +1,24 @@
 # API Examples
 
-These examples are based on replay mode with the default fixture `examples/replay/sample.jsonl`.
+These examples are based on deterministic replay mode and the bundled fixtures in [`examples/replay/`](../examples/replay/).
 
-Replay fixtures use historical `event_time` values. Because of that, `stale_data` anomalies and a `degraded` health score are expected unless the fixture timestamps are near the current clock.
+The default fast-demo path uses `examples/replay/sample.jsonl`, which contains normalized trade and quote events for `BTCUSDT` and `ETHUSDT`. Replay fixtures use historical `event_time` values, so `stale_data` and `event_lag_spike` anomalies are expected in demo runs and `last_event_age_ms` will usually be large.
+
+## Endpoints
+
+- `GET /health`
+- `GET /pipeline/health`
+- `GET /metrics`
+- `GET /symbols`
+- `GET /market/{symbol}/state`
+- `GET /market/{symbol}/health`
+- `GET /anomalies`
 
 ## `GET /health`
-
-Request:
 
 ```bash
 curl --fail --silent --show-error http://127.0.0.1:8080/health
 ```
-
-Example response:
 
 ```json
 {
@@ -21,15 +27,30 @@ Example response:
 }
 ```
 
-## `GET /symbols`
-
-Request:
+## `GET /pipeline/health`
 
 ```bash
-curl --silent --show-error http://127.0.0.1:8080/symbols
+curl --fail --silent --show-error http://127.0.0.1:8080/pipeline/health
 ```
 
-Example response:
+```json
+{
+  "status": "healthy",
+  "last_message_age_ms": 1234,
+  "parse_errors": 0,
+  "reconnect_attempts": 0,
+  "storage_errors": 0,
+  "cache_errors": 0
+}
+```
+
+This endpoint reports ingestion and storage/cache counter health. It is separate from `GET /market/{symbol}/health`, which evaluates one symbol's latest market state and recent anomalies.
+
+## `GET /symbols`
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8080/symbols
+```
 
 ```json
 {
@@ -39,13 +60,11 @@ Example response:
 
 ## `GET /market/BTCUSDT/state`
 
-Request:
-
 ```bash
-curl --silent --show-error http://127.0.0.1:8080/market/BTCUSDT/state
+curl --fail --silent --show-error http://127.0.0.1:8080/market/BTCUSDT/state
 ```
 
-Example response:
+Trade/quote replay example from `examples/replay/sample.jsonl`:
 
 ```json
 {
@@ -56,56 +75,92 @@ Example response:
   "best_bid_quantity": "0.95",
   "best_ask_price": "65055.00",
   "best_ask_quantity": "0.90",
+  "top_bid_quantity": null,
+  "top_ask_quantity": null,
+  "top_bid_liquidity": null,
+  "top_ask_liquidity": null,
+  "book_imbalance": null,
+  "depth_sequence_gap_count": 0,
+  "last_depth_event_time": null,
+  "last_depth_ingest_time": null,
   "spread_pct": 0.01076070497990054,
   "price_change_1m_pct": 0.08346153846153846,
   "trades_per_minute": 2.0,
   "last_event_time": "2026-01-01T00:00:03Z",
   "last_ingest_time": "<ingest_time>",
-  "last_event_age_ms": 13171731308
+  "last_event_age_ms": 123456789
 }
 ```
 
-`last_ingest_time` and `last_event_age_ms` vary by run.
-
-## `GET /anomalies?symbol=BTCUSDT&limit=50`
-
-Request:
-
-```bash
-curl --silent --show-error "http://127.0.0.1:8080/anomalies?symbol=BTCUSDT&limit=50"
-```
-
-Example response:
+Depth-only replay example from `examples/replay/depth_gap_sample.jsonl`:
 
 ```json
 {
-  "anomalies": [
-    {
-      "id": "<uuid>",
-      "symbol": "BTCUSDT",
-      "anomaly_type": "stale_data",
-      "severity": "critical",
-      "message": "market data age is 13171703130 ms, exceeding the configured 5000 ms threshold",
-      "observed_value": 13171703130.0,
-      "threshold_value": 5000.0,
-      "event_time": "2026-01-01T00:00:00Z",
-      "created_at": "<created_at>"
-    }
-  ]
+  "symbol": "BTCUSDT",
+  "last_trade_price": null,
+  "last_trade_quantity": null,
+  "best_bid_price": null,
+  "best_bid_quantity": null,
+  "best_ask_price": null,
+  "best_ask_quantity": null,
+  "top_bid_quantity": "0.95",
+  "top_ask_quantity": "0.80",
+  "top_bid_liquidity": "61795.6000",
+  "top_ask_liquidity": "123605.0500",
+  "book_imbalance": "-0.3333829758553290545953282284",
+  "depth_sequence_gap_count": 1,
+  "last_depth_event_time": "2026-01-01T00:00:05Z",
+  "last_depth_ingest_time": "<ingest_time>",
+  "spread_pct": null,
+  "price_change_1m_pct": null,
+  "trades_per_minute": null,
+  "last_event_time": "2026-01-01T00:00:05Z",
+  "last_ingest_time": "<ingest_time>",
+  "last_event_age_ms": 123456789
 }
 ```
 
-`id` and `created_at` vary by run.
+`last_ingest_time` and `last_event_age_ms` vary by run. Depth fields are only populated when replaying normalized depth fixtures such as `depth_sample.jsonl` or `depth_gap_sample.jsonl`.
+
+## `GET /anomalies?symbol=BTCUSDT&limit=50`
+
+```bash
+curl --fail --silent --show-error "http://127.0.0.1:8080/anomalies?symbol=BTCUSDT&limit=50"
+```
+
+The response shape is the same for all anomaly types. Implemented anomaly types in v0.3 are:
+
+- `price_move`
+- `spread_spike`
+- `stale_data`
+- `trade_burst`
+- `quote_stuck`
+- `event_lag_spike`
+- `depth_sequence_gap`
+
+Example replay response item:
+
+```json
+{
+  "id": "<uuid>",
+  "symbol": "BTCUSDT",
+  "anomaly_type": "stale_data",
+  "severity": "critical",
+  "message": "market data age is 123456789 ms, exceeding the configured 5000 ms threshold",
+  "observed_value": 123456789.0,
+  "threshold_value": 5000.0,
+  "event_time": "2026-01-01T00:00:00Z",
+  "created_at": "<created_at>"
+}
+```
+
+Depth replay can emit the same shape with `anomaly_type: "depth_sequence_gap"` when the local order book sees a gap in update IDs.
 
 ## `GET /market/BTCUSDT/health`
 
-Request:
-
 ```bash
-curl --silent --show-error http://127.0.0.1:8080/market/BTCUSDT/health
+curl --fail --silent --show-error http://127.0.0.1:8080/market/BTCUSDT/health
 ```
-
-Example response:
 
 ```json
 {
@@ -120,7 +175,7 @@ Example response:
     "price_change_1m_pct": 0.08346153846153846,
     "trades_per_minute": 2.0,
     "last_event_time": "2026-01-01T00:00:03Z",
-    "last_event_age_ms": 13171732039
+    "last_event_age_ms": 123456789
   },
   "penalties": [
     {
@@ -128,7 +183,7 @@ Example response:
       "penalty": 25,
       "anomaly_type": "stale_data",
       "severity": "critical",
-      "observed_value": 13171703130.0,
+      "observed_value": 123456789.0,
       "threshold_value": 5000.0,
       "event_time": "2026-01-01T00:00:00Z"
     }
@@ -136,4 +191,35 @@ Example response:
 }
 ```
 
-`evaluated_at` and `last_event_age_ms` vary by run.
+The health score is penalty-based and explainable. Historical replay timestamps commonly drive this endpoint toward `degraded` or `unhealthy` unless the fixture timestamps are close to the current clock.
+
+## `GET /metrics`
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8080/metrics
+```
+
+Compact Prometheus example:
+
+```text
+signalguard_events_processed_total{source="replay",event_type="trade"} 4
+signalguard_events_processed_total{source="replay",event_type="quote"} 4
+signalguard_events_processed_total{source="replay",event_type="depth"} 0
+signalguard_events_processed_total{source="binance",event_type="trade"} 0
+signalguard_events_processed_total{source="binance",event_type="quote"} 0
+signalguard_events_processed_total{source="binance",event_type="depth"} 0
+signalguard_parse_errors_total 0
+signalguard_source_parse_errors_total{source="replay"} 0
+signalguard_source_parse_errors_total{source="binance"} 0
+signalguard_reconnect_attempts_total 0
+signalguard_source_reconnect_attempts_total{source="binance"} 0
+signalguard_storage_errors_total 0
+signalguard_cache_errors_total 0
+signalguard_last_message_age_ms 0
+```
+
+After replaying `examples/replay/depth_sample.jsonl` or `examples/replay/depth_gap_sample.jsonl`, the same metric family reports depth traffic, for example:
+
+```text
+signalguard_events_processed_total{source="replay",event_type="depth"} 2
+```

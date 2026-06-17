@@ -284,7 +284,9 @@ impl RedisCache {
 mod tests {
     use rust_decimal::Decimal;
 
-    use super::{CacheError, RedisCache, market_state_pattern, symbol_set_key};
+    use super::{
+        CacheError, RedisCache, deserialize, market_state_pattern, serialize, symbol_set_key,
+    };
     use crate::domain::{MarketState, Symbol};
 
     #[tokio::test]
@@ -332,5 +334,21 @@ mod tests {
     fn market_state_cache_cleanup_targets_only_signalguard_keys() {
         assert_eq!(symbol_set_key(), "signalguard:symbols");
         assert_eq!(market_state_pattern(), "signalguard:market_state:*");
+    }
+
+    #[test]
+    fn market_state_with_depth_fields_serializes_for_cache_round_trip() {
+        let mut state = MarketState::new(Symbol::new("BTCUSDT").unwrap());
+        state.top_bid_quantity = Some(Decimal::new(120, 2));
+        state.top_ask_quantity = Some(Decimal::new(80, 2));
+        state.top_bid_liquidity = Some(Decimal::new(7805760, 2));
+        state.top_ask_liquidity = Some(Decimal::new(5204400, 2));
+        state.book_imbalance = Some(Decimal::new(2, 1));
+        state.depth_sequence_gap_count = 3;
+
+        let payload = serialize("test_market_state", &state).unwrap();
+        let decoded: MarketState = deserialize("test_market_state", &payload).unwrap();
+
+        assert_eq!(decoded, state);
     }
 }

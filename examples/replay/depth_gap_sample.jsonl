@@ -1,0 +1,2 @@
+{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","first_update_id":100,"final_update_id":101,"bids":[["65048.00","1.20"],["65047.50","0"]],"asks":[["65055.00","0.80"]]}
+{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:05Z","first_update_id":103,"final_update_id":104,"bids":[["65048.00","0.95"]],"asks":[["65055.50","1.10"],["65056.00","0"]]}

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use sqlx::PgPool;
 use tokio::{sync::watch, time::sleep};
@@ -14,7 +15,7 @@ use crate::{
     telemetry::InternalCounters,
 };
 
-use super::{NormalizedEvent, pipeline};
+use super::{IngestedEvent, IngestionSource, pipeline};
 
 #[derive(Debug, Default)]
 pub struct LiveRunReport {
@@ -30,7 +31,7 @@ pub async fn run_live_ingestion(
     counters: InternalCounters,
     shutdown: watch::Receiver<bool>,
 ) -> Result<LiveRunReport> {
-    let (sender, receiver) = tokio::sync::mpsc::channel(super::EVENT_CHANNEL_CAPACITY);
+    let (sender, receiver) = super::event_channel(settings.event_channel_capacity);
     let pipeline_task = tokio::spawn(pipeline::run_event_pipeline(
         receiver,
         pool,
@@ -55,7 +56,7 @@ pub async fn run_live_ingestion(
 async fn run_live_source(
     settings: &IngestionSettings,
     binance_settings: &BinanceSettings,
-    sender: tokio::sync::mpsc::Sender<NormalizedEvent>,
+    sender: tokio::sync::mpsc::Sender<IngestedEvent>,
     counters: InternalCounters,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<LiveRunReport> {
@@ -92,17 +93,15 @@ async fn run_live_source(
                         message = reader.next() => {
                             match message {
                                 Some(Ok(Message::Text(payload))) => {
-                                    match binance::parse_combined_stream_message(&payload, chrono::Utc::now()) {
-                                        Ok(event) => {
-                                            if sender.send(event).await.is_err() {
-                                                anyhow::bail!("live event pipeline receiver dropped");
-                                            }
-                                            received_events += 1;
-                                        }
-                                        Err(error) => {
-                                            counters.increment_parse_errors();
-                                            warn!(%error, "failed to parse Binance stream payload");
-                                        }
+                                    if handle_binance_text_message(
+                                        &payload,
+                                        &sender,
+                                        &counters,
+                                        Utc::now(),
+                                    )
+                                    .await?
+                                    {
+                                        received_events += 1;
                                     }
                                 }
                                 Some(Ok(Message::Binary(_))) => {}
@@ -132,7 +131,7 @@ async fn run_live_source(
         }
 
         let backoff = reconnect_backoff(reconnect_attempt, min_backoff, max_backoff);
-        counters.increment_reconnect_attempts();
+        counters.increment_binance_reconnect_attempts();
         warn!(
             attempt = reconnect_attempt + 1,
             backoff_ms = backoff.as_millis() as u64,
@@ -153,6 +152,28 @@ async fn run_live_source(
     Ok(LiveRunReport { received_events })
 }
 
+async fn handle_binance_text_message(
+    payload: &str,
+    sender: &tokio::sync::mpsc::Sender<IngestedEvent>,
+    counters: &InternalCounters,
+    ingest_time: DateTime<Utc>,
+) -> Result<bool> {
+    match binance::parse_combined_stream_message(payload, ingest_time) {
+        Ok(event) => {
+            sender
+                .send(IngestedEvent::new(IngestionSource::Binance, event))
+                .await
+                .map_err(|_| anyhow::anyhow!("live event pipeline receiver dropped"))?;
+            Ok(true)
+        }
+        Err(error) => {
+            counters.increment_binance_parse_errors();
+            warn!(%error, "failed to parse Binance stream payload");
+            Ok(false)
+        }
+    }
+}
+
 fn reconnect_backoff(attempt: u32, min_backoff: Duration, max_backoff: Duration) -> Duration {
     let multiplier = 1u128 << attempt.min(16);
     let backoff_ms = min_backoff.as_millis().saturating_mul(multiplier);
@@ -164,7 +185,11 @@ fn reconnect_backoff(attempt: u32, min_backoff: Duration, max_backoff: Duration)
 mod tests {
     use std::time::Duration;
 
-    use super::reconnect_backoff;
+    use chrono::{TimeZone, Utc};
+
+    use crate::{ingestion::NormalizedEvent, telemetry::InternalCounters};
+
+    use super::{handle_binance_text_message, reconnect_backoff};
 
     #[test]
     fn reconnect_backoff_is_bounded_and_deterministic() {
@@ -179,5 +204,45 @@ mod tests {
             reconnect_backoff(12, min, max),
             Duration::from_millis(5_000)
         );
+    }
+
+    #[tokio::test]
+    async fn live_text_message_forwards_depth_event_without_network() {
+        let counters = InternalCounters::default();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let forwarded = handle_binance_text_message(
+            r#"{"stream":"btcusdt@depth","data":{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"b":[["65048.00","1.20"]],"a":[["65055.00","0.80"]]}}"#,
+            &sender,
+            &counters,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert!(forwarded);
+        assert_eq!(counters.snapshot_at(Utc::now()).binance_parse_errors, 0);
+
+        let event = receiver.recv().await.unwrap();
+        assert_eq!(event.source, crate::ingestion::IngestionSource::Binance);
+        assert!(matches!(event.event, NormalizedEvent::Depth(_)));
+    }
+
+    #[tokio::test]
+    async fn malformed_live_depth_payload_increments_binance_parse_error_counter() {
+        let counters = InternalCounters::default();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let forwarded = handle_binance_text_message(
+            r#"{"stream":"btcusdt@depth","data":{"e":"depthUpdate""#,
+            &sender,
+            &counters,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert!(!forwarded);
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(counters.snapshot_at(Utc::now()).parse_errors, 1);
+        assert_eq!(counters.snapshot_at(Utc::now()).binance_parse_errors, 1);
     }
 }

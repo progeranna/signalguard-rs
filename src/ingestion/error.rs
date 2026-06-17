@@ -29,7 +29,7 @@ pub enum ReplayParseError {
     },
     #[error("missing required field `{field}`")]
     MissingField { field: &'static str },
-    #[error("field `type` must be `trade` or `quote`: {value}")]
+    #[error("field `type` must be `trade`, `quote`, or `depth`: {value}")]
     UnknownEventType { value: String },
     #[error("invalid symbol `{value}`: {message}")]
     InvalidSymbol { value: String, message: String },
@@ -37,12 +37,16 @@ pub enum ReplayParseError {
     InvalidExchange { value: String, message: String },
     #[error("field `{field}` must be a string")]
     InvalidStringField { field: &'static str },
+    #[error("field `{field}` must be an array")]
+    InvalidArrayField { field: &'static str },
     #[error("field `{field}` must be a valid decimal value: {value}")]
     InvalidDecimal { field: &'static str, value: String },
     #[error("field `{field}` must be a valid RFC3339 timestamp: {value}")]
     InvalidTimestamp { field: &'static str, value: String },
     #[error("field `{field}` must be a valid unsigned integer: {value}")]
     InvalidUnsignedInteger { field: &'static str, value: String },
+    #[error("field `{field}` level {index} must be [price, quantity] strings")]
+    InvalidDepthLevelShape { field: &'static str, index: usize },
     #[error("{message}")]
     InvalidEvent { message: String },
 }

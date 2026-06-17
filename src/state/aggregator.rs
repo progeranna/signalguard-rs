@@ -4,10 +4,11 @@ use chrono::{DateTime, Duration, Utc};
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::{
-    domain::{MarketState, QuoteEvent, Symbol, TradeEvent},
+    domain::{DepthUpdate, MarketState, QuoteEvent, Symbol, TradeEvent},
     ingestion::NormalizedEvent,
 };
 
+use super::order_book::{OrderBook, OrderBookSnapshot};
 use super::window::{TradeSample, TradeWindow};
 
 const TRADE_WINDOW_SECONDS: i64 = 60;
@@ -23,6 +24,7 @@ struct SymbolState {
     latest_trade_event_time: Option<DateTime<Utc>>,
     latest_quote_event_time: Option<DateTime<Utc>>,
     trades: TradeWindow,
+    order_book: OrderBook,
 }
 
 impl MarketStateAggregator {
@@ -36,6 +38,11 @@ impl MarketStateAggregator {
             NormalizedEvent::Quote(quote) => {
                 let symbol = quote.symbol.clone();
                 self.symbol_state_mut(&symbol).apply_quote(quote);
+                symbol
+            }
+            NormalizedEvent::Depth(depth) => {
+                let symbol = depth.symbol.clone();
+                self.symbol_state_mut(&symbol).apply_depth(depth);
                 symbol
             }
         }
@@ -53,6 +60,7 @@ impl SymbolState {
             latest_trade_event_time: None,
             latest_quote_event_time: None,
             trades: TradeWindow::new(Duration::seconds(TRADE_WINDOW_SECONDS)),
+            order_book: OrderBook::default(),
         }
     }
 
@@ -109,6 +117,36 @@ impl SymbolState {
                 .last_ingest_time
                 .map_or(quote.ingest_time, |current| current.max(quote.ingest_time)),
         );
+    }
+
+    fn apply_depth(&mut self, depth: &DepthUpdate) {
+        if !self.order_book.apply(depth) {
+            return;
+        }
+
+        let snapshot = self.order_book.snapshot();
+        self.apply_order_book_snapshot(&snapshot);
+        self.latest_state.last_event_time = Some(
+            self.latest_state
+                .last_event_time
+                .map_or(depth.event_time, |current| current.max(depth.event_time)),
+        );
+        self.latest_state.last_ingest_time = Some(
+            self.latest_state
+                .last_ingest_time
+                .map_or(depth.ingest_time, |current| current.max(depth.ingest_time)),
+        );
+    }
+
+    fn apply_order_book_snapshot(&mut self, snapshot: &OrderBookSnapshot) {
+        self.latest_state.top_bid_quantity = snapshot.best_bid_quantity;
+        self.latest_state.top_ask_quantity = snapshot.best_ask_quantity;
+        self.latest_state.top_bid_liquidity = Some(snapshot.top_bid_liquidity);
+        self.latest_state.top_ask_liquidity = Some(snapshot.top_ask_liquidity);
+        self.latest_state.book_imbalance = snapshot.book_imbalance;
+        self.latest_state.depth_sequence_gap_count = snapshot.depth_sequence_gap_count;
+        self.latest_state.last_depth_event_time = snapshot.last_depth_event_time;
+        self.latest_state.last_depth_ingest_time = snapshot.last_depth_ingest_time;
     }
 
     fn refresh_trade_signals(&mut self) {
@@ -180,7 +218,9 @@ mod tests {
 
     use super::{MarketStateAggregator, last_event_age_ms};
     use crate::{
-        domain::{Exchange, QuoteEvent, Symbol, TopOfBookQuote, TradeEvent},
+        domain::{
+            DepthLevel, DepthUpdate, Exchange, QuoteEvent, Symbol, TopOfBookQuote, TradeEvent,
+        },
         ingestion::NormalizedEvent,
     };
 
@@ -484,6 +524,148 @@ mod tests {
         );
     }
 
+    #[test]
+    fn depth_event_creates_market_state_for_symbol() {
+        let mut aggregator = MarketStateAggregator::default();
+
+        let symbol = aggregator.apply(&NormalizedEvent::Depth(depth_update(
+            "BTCUSDT",
+            Some(100),
+            Some(101),
+            vec![depth_level(100, 0, 2, 0)],
+            vec![depth_level(101, 0, 3, 0)],
+            4,
+        )));
+        let state = aggregator.snapshot(&symbol).unwrap();
+
+        assert_eq!(state.symbol.as_str(), "BTCUSDT");
+        assert!(state.last_trade_price.is_none());
+        assert!(state.best_bid_price.is_none());
+        assert!(state.signals.spread_pct.is_none());
+        assert!(state.signals.price_change_1m_pct.is_none());
+        assert!(state.signals.trades_per_minute.is_none());
+    }
+
+    #[test]
+    fn depth_event_updates_order_book_through_aggregator() {
+        let mut aggregator = MarketStateAggregator::default();
+
+        let symbol = aggregator.apply(&NormalizedEvent::Depth(depth_update(
+            "BTCUSDT",
+            Some(100),
+            Some(101),
+            vec![depth_level(100, 0, 2, 0), depth_level(102, 0, 5, 0)],
+            vec![depth_level(103, 0, 3, 0), depth_level(101, 0, 4, 0)],
+            4,
+        )));
+        let state = aggregator.snapshot(&symbol).unwrap();
+
+        assert_eq!(state.top_bid_quantity, Some(Decimal::new(5, 0)));
+        assert_eq!(state.top_ask_quantity, Some(Decimal::new(4, 0)));
+    }
+
+    #[test]
+    fn depth_state_includes_liquidity_and_imbalance() {
+        let mut aggregator = MarketStateAggregator::default();
+
+        let symbol = aggregator.apply(&NormalizedEvent::Depth(depth_update(
+            "BTCUSDT",
+            Some(100),
+            Some(101),
+            vec![depth_level(10, 0, 10, 0), depth_level(5, 0, 10, 0)],
+            vec![depth_level(10, 0, 5, 0)],
+            4,
+        )));
+        let state = aggregator.snapshot(&symbol).unwrap();
+
+        assert_eq!(state.top_bid_liquidity, Some(Decimal::new(150, 0)));
+        assert_eq!(state.top_ask_liquidity, Some(Decimal::new(50, 0)));
+        assert_eq!(state.book_imbalance, Some(Decimal::new(5, 1)));
+    }
+
+    #[test]
+    fn depth_state_includes_sequence_gap_count() {
+        let mut aggregator = MarketStateAggregator::default();
+
+        let symbol = aggregator.apply(&NormalizedEvent::Depth(depth_update(
+            "BTCUSDT",
+            Some(100),
+            Some(101),
+            vec![depth_level(100, 0, 1, 0)],
+            vec![],
+            4,
+        )));
+        aggregator.apply(&NormalizedEvent::Depth(depth_update(
+            "BTCUSDT",
+            Some(105),
+            Some(106),
+            vec![depth_level(101, 0, 1, 0)],
+            vec![],
+            5,
+        )));
+        let state = aggregator.snapshot(&symbol).unwrap();
+
+        assert_eq!(state.depth_sequence_gap_count, 1);
+    }
+
+    #[test]
+    fn depth_event_preserves_existing_trade_and_quote_fields() {
+        let mut aggregator = MarketStateAggregator::default();
+
+        let symbol = aggregator.apply(&NormalizedEvent::Trade(trade(
+            "BTCUSDT",
+            Decimal::new(10000, 2),
+            Decimal::new(1, 0),
+            1,
+        )));
+        aggregator.apply(&NormalizedEvent::Quote(quote(
+            "BTCUSDT",
+            Decimal::new(9990, 2),
+            Decimal::new(2, 0),
+            Decimal::new(10010, 2),
+            Decimal::new(3, 0),
+            2,
+        )));
+        aggregator.apply(&NormalizedEvent::Depth(depth_update(
+            "BTCUSDT",
+            Some(100),
+            Some(101),
+            vec![depth_level(100, 0, 5, 0)],
+            vec![depth_level(101, 0, 6, 0)],
+            3,
+        )));
+        let state = aggregator.snapshot(&symbol).unwrap();
+
+        assert_eq!(state.last_trade_price, Some(Decimal::new(10000, 2)));
+        assert_eq!(state.last_trade_quantity, Some(Decimal::new(1, 0)));
+        assert_eq!(state.best_bid_price, Some(Decimal::new(9990, 2)));
+        assert_eq!(state.best_bid_quantity, Some(Decimal::new(2, 0)));
+        assert_eq!(state.best_ask_price, Some(Decimal::new(10010, 2)));
+        assert_eq!(state.best_ask_quantity, Some(Decimal::new(3, 0)));
+        assert!(state.signals.spread_pct.is_some());
+    }
+
+    #[test]
+    fn depth_event_updates_depth_and_latest_timestamps() {
+        let mut aggregator = MarketStateAggregator::default();
+
+        let symbol = aggregator.apply(&NormalizedEvent::Depth(depth_update(
+            "BTCUSDT",
+            Some(100),
+            Some(101),
+            vec![depth_level(100, 0, 5, 0)],
+            vec![],
+            4,
+        )));
+        let state = aggregator.snapshot(&symbol).unwrap();
+        let expected_event_time = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 4).unwrap();
+
+        assert_eq!(state.last_depth_event_time, Some(expected_event_time));
+        assert_eq!(state.last_depth_ingest_time, Some(expected_event_time));
+        assert_eq!(state.last_event_time, Some(expected_event_time));
+        assert_eq!(state.last_ingest_time, Some(expected_event_time));
+    }
+
     fn trade(symbol: &str, price: Decimal, quantity: Decimal, second: u32) -> TradeEvent {
         let minute = second / 60;
         let second = second % 60;
@@ -515,6 +697,42 @@ mod tests {
             TopOfBookQuote::new(bid_price, bid_quantity, ask_price, ask_quantity).unwrap(),
             Utc.with_ymd_and_hms(2026, 1, 1, 0, minute, second).unwrap(),
             Utc.with_ymd_and_hms(2026, 1, 1, 0, minute, second).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn depth_update(
+        symbol: &str,
+        first_update_id: Option<u64>,
+        final_update_id: Option<u64>,
+        bids: Vec<DepthLevel>,
+        asks: Vec<DepthLevel>,
+        second: u32,
+    ) -> DepthUpdate {
+        let minute = second / 60;
+        let second = second % 60;
+        DepthUpdate::new(
+            Symbol::new(symbol).unwrap(),
+            Exchange::Binance,
+            first_update_id,
+            final_update_id,
+            bids,
+            asks,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, minute, second).unwrap(),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, minute, second).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn depth_level(
+        price_units: i64,
+        price_scale: u32,
+        quantity_units: i64,
+        quantity_scale: u32,
+    ) -> DepthLevel {
+        DepthLevel::new(
+            Decimal::new(price_units, price_scale),
+            Decimal::new(quantity_units, quantity_scale),
         )
         .unwrap()
     }

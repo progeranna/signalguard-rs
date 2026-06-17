@@ -14,11 +14,9 @@ use crate::{
     telemetry::InternalCounters,
 };
 
-pub use event::NormalizedEvent;
+pub use event::{IngestedEvent, IngestionSource, NormalizedEvent};
 pub use live::LiveRunReport;
 pub use replay::{ReplayOptions, ReplayRunReport};
-
-const EVENT_CHANNEL_CAPACITY: usize = 128;
 
 pub async fn run_replay_ingestion(
     settings: &IngestionSettings,
@@ -27,7 +25,7 @@ pub async fn run_replay_ingestion(
     detector_settings: DetectorSettings,
     counters: InternalCounters,
 ) -> Result<ReplayRunReport> {
-    let (sender, receiver) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+    let (sender, receiver) = event_channel(settings.event_channel_capacity);
     let pipeline_task = tokio::spawn(pipeline::run_event_pipeline(
         receiver,
         pool,
@@ -78,4 +76,72 @@ pub async fn run_live_ingestion(
     )
     .await
     .context("live ingestion failed")
+}
+
+fn event_channel(capacity: usize) -> (mpsc::Sender<IngestedEvent>, mpsc::Receiver<IngestedEvent>) {
+    mpsc::channel(capacity)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+    use futures_util::poll;
+    use rust_decimal::Decimal;
+
+    use super::{IngestedEvent, IngestionSource, NormalizedEvent, event_channel};
+    use crate::domain::{Exchange, Symbol, TradeEvent};
+
+    #[tokio::test]
+    async fn event_channel_applies_backpressure_at_configured_capacity() {
+        let (sender, mut receiver) = event_channel(1);
+
+        sender.send(test_event(1)).await.unwrap();
+
+        let second_sender = sender.clone();
+        let mut second_send =
+            std::pin::pin!(async move { second_sender.send(test_event(2)).await });
+
+        assert!(poll!(&mut second_send).is_pending());
+
+        let first = receiver.recv().await.unwrap();
+        assert_eq!(trade_id(&first), Some(1));
+
+        assert!(matches!(
+            poll!(&mut second_send),
+            std::task::Poll::Ready(Ok(()))
+        ));
+
+        let second = receiver.recv().await.unwrap();
+        assert_eq!(trade_id(&second), Some(2));
+    }
+
+    fn test_event(trade_id: u64) -> IngestedEvent {
+        IngestedEvent::new(
+            IngestionSource::Replay,
+            NormalizedEvent::Trade(
+                TradeEvent::new(
+                    Symbol::new("BTCUSDT").unwrap(),
+                    Exchange::Binance,
+                    Some(trade_id),
+                    Decimal::new(6500010, 2),
+                    Decimal::new(125, 3),
+                    test_now(),
+                    test_now(),
+                )
+                .unwrap(),
+            ),
+        )
+    }
+
+    fn trade_id(event: &IngestedEvent) -> Option<u64> {
+        match &event.event {
+            NormalizedEvent::Trade(trade) => trade.trade_id,
+            NormalizedEvent::Quote(_) => None,
+            NormalizedEvent::Depth(_) => None,
+        }
+    }
+
+    fn test_now() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()
+    }
 }

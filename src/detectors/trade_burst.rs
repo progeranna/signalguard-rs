@@ -159,6 +159,9 @@ mod tests {
             stale_data_ms_threshold: 5_000,
             trade_burst_multiplier: Decimal::new(3, 0),
             trade_burst_min_warmup_windows: 5,
+            quote_stuck_ms_threshold: 10_000,
+            event_lag_spike_ms_threshold: 3_000,
+            depth_sequence_gap_min_increment: 1,
         }
     }
 

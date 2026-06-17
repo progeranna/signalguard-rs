@@ -11,6 +11,9 @@ pub enum AnomalyType {
     SpreadSpike,
     StaleData,
     TradeBurst,
+    QuoteStuck,
+    EventLagSpike,
+    DepthSequenceGap,
 }
 
 impl AnomalyType {
@@ -20,6 +23,9 @@ impl AnomalyType {
             Self::SpreadSpike => "spread_spike",
             Self::StaleData => "stale_data",
             Self::TradeBurst => "trade_burst",
+            Self::QuoteStuck => "quote_stuck",
+            Self::EventLagSpike => "event_lag_spike",
+            Self::DepthSequenceGap => "depth_sequence_gap",
         }
     }
 
@@ -29,6 +35,9 @@ impl AnomalyType {
             "spread_spike" => Ok(Self::SpreadSpike),
             "stale_data" => Ok(Self::StaleData),
             "trade_burst" => Ok(Self::TradeBurst),
+            "quote_stuck" => Ok(Self::QuoteStuck),
+            "event_lag_spike" => Ok(Self::EventLagSpike),
+            "depth_sequence_gap" => Ok(Self::DepthSequenceGap),
             _ => anyhow::bail!("unsupported anomaly type value: {value}"),
         }
     }
@@ -100,5 +109,24 @@ mod tests {
         );
 
         assert_ne!(anomaly.id, uuid::Uuid::nil());
+    }
+
+    #[test]
+    fn new_depth_related_anomaly_types_parse_and_render() {
+        assert_eq!(AnomalyType::QuoteStuck.as_str(), "quote_stuck");
+        assert_eq!(AnomalyType::EventLagSpike.as_str(), "event_lag_spike");
+        assert_eq!(AnomalyType::DepthSequenceGap.as_str(), "depth_sequence_gap");
+        assert_eq!(
+            AnomalyType::parse("quote_stuck").unwrap(),
+            AnomalyType::QuoteStuck
+        );
+        assert_eq!(
+            AnomalyType::parse("event_lag_spike").unwrap(),
+            AnomalyType::EventLagSpike
+        );
+        assert_eq!(
+            AnomalyType::parse("depth_sequence_gap").unwrap(),
+            AnomalyType::DepthSequenceGap
+        );
     }
 }

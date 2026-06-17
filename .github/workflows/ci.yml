@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run cargo check
+        run: cargo check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Check replay E2E target discovery
+        run: cargo test --test replay_e2e
+
+      - name: Validate Docker Compose config
+        run: docker compose config
+
+      - name: Validate Docker Compose app profile config
+        run: docker compose --profile app config
+
+      - name: Check demo script syntax
+        run: bash -n scripts/demo-replay.sh
+
+      - name: Check smoke script syntax
+        run: bash -n scripts/smoke.sh
