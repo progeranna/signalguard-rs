@@ -5,6 +5,8 @@ use super::handlers;
 pub fn router() -> Router<super::AppState> {
     Router::new()
         .route("/health", get(handlers::health))
+        .route("/metrics", get(handlers::metrics))
+        .route("/pipeline/health", get(handlers::pipeline_health))
         .route("/symbols", get(handlers::symbols))
         .route("/market/{symbol}/state", get(handlers::market_state))
         .route("/market/{symbol}/health", get(handlers::market_health))
@@ -15,7 +17,7 @@ pub fn router() -> Router<super::AppState> {
 mod tests {
     use axum::{
         body::Body,
-        http::{Request, StatusCode},
+        http::{Request, StatusCode, header},
     };
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use tower::ServiceExt;
@@ -40,6 +42,98 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_route_returns_ok() {
+        let response = router()
+            .with_state(unavailable_state())
+            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_route_returns_prometheus_metrics() {
+        let counters = InternalCounters::default();
+        counters.increment_parse_errors();
+        counters.increment_binance_quote_events();
+
+        let response = router()
+            .with_state(AppState {
+                pg_pool: unused_test_pool(),
+                redis_cache: RedisCache::unavailable(),
+                detector_settings: detector_settings(),
+                health_settings: health_settings(),
+                counters,
+            })
+            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/plain; version=0.0.4; charset=utf-8"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(body.contains("signalguard_parse_errors_total"));
+        assert!(body.contains(
+            "signalguard_events_processed_total{source=\"binance\",event_type=\"quote\"} 1"
+        ));
+    }
+
+    #[tokio::test]
+    async fn pipeline_health_route_returns_ok() {
+        let response = router()
+            .with_state(unavailable_state())
+            .oneshot(
+                Request::get("/pipeline/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn pipeline_health_route_returns_expected_fields() {
+        let counters = InternalCounters::default();
+        counters.increment_parse_errors();
+        let response = router()
+            .with_state(AppState {
+                pg_pool: unused_test_pool(),
+                redis_cache: RedisCache::unavailable(),
+                detector_settings: detector_settings(),
+                health_settings: health_settings(),
+                counters,
+            })
+            .oneshot(
+                Request::get("/pipeline/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(body.contains("\"status\""));
+        assert!(body.contains("\"parse_errors\":1"));
+        assert!(body.contains("\"reconnect_attempts\""));
+        assert!(body.contains("\"storage_errors\""));
+        assert!(body.contains("\"cache_errors\""));
     }
 
     #[tokio::test]
@@ -170,6 +264,9 @@ mod tests {
             stale_data_ms_threshold: 5_000,
             trade_burst_multiplier: Decimal::new(3, 0),
             trade_burst_min_warmup_windows: 5,
+            quote_stuck_ms_threshold: 10_000,
+            event_lag_spike_ms_threshold: 3_000,
+            depth_sequence_gap_min_increment: 1,
         }
     }
 

@@ -1,7 +1,10 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
+    http::header,
+    response::IntoResponse,
 };
+use chrono::Utc;
 use serde::Deserialize;
 
 use crate::{
@@ -9,12 +12,13 @@ use crate::{
     health::{HealthScoringInput, evaluate_health},
     state,
     storage::{CacheError, StorageError, get_recent_anomalies},
+    telemetry::render_prometheus_metrics,
 };
 
 use super::{
     dto::{
         AnomaliesResponse, AnomalyResponse, HealthResponse, MarketHealthResponse,
-        MarketStateResponse, SymbolsResponse,
+        MarketStateResponse, PipelineHealthResponse, SymbolsResponse,
     },
     error::ApiError,
     state::AppState,
@@ -35,6 +39,25 @@ pub async fn health() -> Json<HealthResponse> {
         status: "ok",
         service: "signalguard-rs",
     })
+}
+
+pub async fn pipeline_health(State(state): State<AppState>) -> Json<PipelineHealthResponse> {
+    Json(PipelineHealthResponse::from_snapshot(
+        &state.counters.snapshot_at(Utc::now()),
+    ))
+}
+
+pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    let snapshot = state.counters.snapshot_at(Utc::now());
+    let body = render_prometheus_metrics(&snapshot);
+
+    (
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        body,
+    )
 }
 
 pub async fn symbols(State(state): State<AppState>) -> Result<Json<SymbolsResponse>, ApiError> {
@@ -176,10 +199,13 @@ fn parse_anomaly_limit(value: &str) -> Result<u32, ApiError> {
 #[cfg(test)]
 mod tests {
     use axum::extract::{Path, State};
+    use axum::response::IntoResponse;
+    use chrono::{Duration, TimeZone, Utc};
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
     use super::{
-        AnomaliesQuery, anomalies, market_health, market_state, parse_anomalies_query, symbols,
+        AnomaliesQuery, anomalies, market_health, market_state, metrics, parse_anomalies_query,
+        pipeline_health, symbols,
     };
     use crate::api::AppState;
     use crate::config::{
@@ -294,6 +320,78 @@ mod tests {
         assert!(matches!(error, crate::api::error::ApiError::Internal(_)));
     }
 
+    #[tokio::test]
+    async fn metrics_handler_returns_ok_without_external_services() {
+        let response = metrics(State(unavailable_state())).await.into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_handler_contains_parse_error_metric() {
+        let counters = InternalCounters::default();
+        counters.increment_parse_errors();
+        counters.increment_replay_trade_events();
+        counters.record_message_at(fixed_now() - Duration::seconds(1));
+        let response = metrics(State(AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::unavailable(),
+            detector_settings: test_detector_settings(),
+            health_settings: test_health_settings(),
+            counters,
+        }))
+        .await
+        .into_response();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(body.contains("signalguard_parse_errors_total"));
+        assert!(body.contains(
+            "signalguard_events_processed_total{source=\"replay\",event_type=\"trade\"} 1"
+        ));
+    }
+
+    #[tokio::test]
+    async fn pipeline_health_handler_returns_ok_without_external_services() {
+        let response = pipeline_health(State(unavailable_state()))
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn pipeline_health_handler_response_contains_expected_fields() {
+        let counters = InternalCounters::default();
+        counters.increment_parse_errors();
+        counters.increment_storage_errors();
+        counters.record_message_at(fixed_now());
+        let response = pipeline_health(State(AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::unavailable(),
+            detector_settings: test_detector_settings(),
+            health_settings: test_health_settings(),
+            counters,
+        }))
+        .await
+        .into_response();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(body.contains("\"status\""));
+        assert!(body.contains("\"last_message_age_ms\""));
+        assert!(body.contains("\"parse_errors\""));
+        assert!(body.contains("\"reconnect_attempts\""));
+        assert!(body.contains("\"storage_errors\""));
+        assert!(body.contains("\"cache_errors\""));
+    }
+
     #[test]
     fn anomalies_query_defaults_limit() {
         let (symbol, limit) = parse_anomalies_query(AnomaliesQuery {
@@ -390,6 +488,9 @@ mod tests {
             stale_data_ms_threshold: 5_000,
             trade_burst_multiplier: Decimal::new(3, 0),
             trade_burst_min_warmup_windows: 5,
+            quote_stuck_ms_threshold: 10_000,
+            event_lag_spike_ms_threshold: 3_000,
+            depth_sequence_gap_min_increment: 1,
         }
     }
 
@@ -408,6 +509,10 @@ mod tests {
                 degraded_min_score: 50,
             },
         }
+    }
+
+    fn fixed_now() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()
     }
 
     fn unused_test_pool() -> sqlx::PgPool {

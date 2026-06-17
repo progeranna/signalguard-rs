@@ -1,4 +1,5 @@
 mod aggregator;
+mod order_book;
 mod window;
 
 use chrono::{DateTime, Utc};
