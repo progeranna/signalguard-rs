@@ -4,9 +4,11 @@ This document summarizes the current MVP behavior for expected degraded and fata
 
 ## Startup behavior
 
+- Missing `SIGNALGUARD_DATABASE_URL` or `SIGNALGUARD_REDIS_URL`: startup fails fast in both `local` and `production` profiles. Local demo values are supplied by `.env.example`, Docker Compose, or `scripts/demo-replay.sh`.
 - PostgreSQL unavailable at startup: the service fails to start. Historical storage is required for the MVP, so startup does not continue without PostgreSQL.
 - Redis unavailable at startup: the service starts in degraded mode. `GET /symbols` and `GET /market/{symbol}/state` return `503` until the latest-state cache is available.
 - Redis cache cleanup failure at startup: the service degrades instead of continuing with potentially stale latest-state cache entries from a previous run.
+- HTTP port already in use: startup fails before replay reset or ingestion mutates PostgreSQL or Redis.
 - Replay startup resets the `trades`, `quotes`, and `anomalies` tables by default so repeated replay runs produce deterministic API output.
 - `SIGNALGUARD_REPLAY_RESET_STORAGE=false` disables that replay reset and preserves existing PostgreSQL history.
 

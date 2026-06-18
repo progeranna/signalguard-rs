@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This is a local and development runbook for SignalGuard RS v0.3.
+This is a local and development runbook for SignalGuard RS v0.4.
 
 It is not a production deployment guide.
 
@@ -16,6 +16,8 @@ It is not a production deployment guide.
 
 ## Environment variables
 
+- `SIGNALGUARD_PROFILE`
+  `local` or `production`. Defaults to `local` for the Docker Compose demo path. In both profiles, `SIGNALGUARD_DATABASE_URL` and `SIGNALGUARD_REDIS_URL` must be set explicitly by `.env`, Docker Compose, or a local script.
 - `SIGNALGUARD_HOST`
   Default bind host for the HTTP server.
 - `SIGNALGUARD_PORT`
@@ -46,6 +48,12 @@ It is not a production deployment guide.
   Maximum live reconnect backoff.
 
 See [`.env.example`](../.env.example) for the full local set.
+
+## Configuration profiles
+
+SignalGuard is local-first for this release. The default `local` profile keeps the replay demo small, but PostgreSQL and Redis URLs still come from explicit environment configuration such as `.env.example`, Docker Compose, or `scripts/demo-replay.sh`.
+
+Use `SIGNALGUARD_PROFILE=production` when you want production-style configuration validation. In that profile, the service fails fast if `SIGNALGUARD_DATABASE_URL` or `SIGNALGUARD_REDIS_URL` is missing, rather than silently using local demo credentials. Local profile also fails fast when those URLs are missing and points users to `.env.example`, Docker Compose, or `scripts/demo-replay.sh`. This runbook is still not a production deployment guide.
 
 ## Fast scripted replay demo
 
@@ -89,7 +97,11 @@ Manual flow:
 
 ```bash
 docker compose up -d postgres redis
+export SIGNALGUARD_PROFILE=local
 export DATABASE_URL="postgres://signalguard:signalguard@localhost:5432/signalguard"
+export REDIS_URL="redis://127.0.0.1:6379"
+export SIGNALGUARD_DATABASE_URL="${DATABASE_URL}"
+export SIGNALGUARD_REDIS_URL="${REDIS_URL}"
 sqlx migrate run
 cargo run
 ```
@@ -144,7 +156,11 @@ Copy-paste flow:
 
 ```bash
 docker compose up -d postgres redis
+export SIGNALGUARD_PROFILE=local
 export DATABASE_URL="postgres://signalguard:signalguard@localhost:5432/signalguard"
+export REDIS_URL="redis://127.0.0.1:6379"
+export SIGNALGUARD_DATABASE_URL="${DATABASE_URL}"
+export SIGNALGUARD_REDIS_URL="${REDIS_URL}"
 sqlx migrate run
 SIGNALGUARD_INGESTION_MODE=live SIGNALGUARD_INGESTION_SYMBOLS=BTCUSDT cargo run
 ```
@@ -153,7 +169,7 @@ Notes:
 
 - Live mode uses Binance public `trade`, `bookTicker`, and `depth` WebSocket streams only.
 - No API keys are required.
-- No order execution exists.
+- The service does not submit, cancel, or route exchange orders.
 - Internet access is required.
 - Live mode does not reset PostgreSQL history automatically.
 - The local depth view is still a simplified top-N runtime book without REST snapshot bootstrap or resync.
@@ -171,7 +187,7 @@ Main groups:
 - Last message freshness:
   `signalguard_last_message_age_ms`
 
-This project does not ship a Grafana dashboard or a larger metrics framework in this v0.3 checkpoint.
+This project does not ship a Grafana dashboard or a larger metrics framework in this v0.4 checkpoint.
 
 ## Reading `/pipeline/health`
 
@@ -244,6 +260,8 @@ Replay historical timestamps can trigger `stale_data` and `event_lag_spike` anom
   service startup fails because historical storage is required.
 - Redis unavailable:
   service starts in degraded mode and latest-state endpoints return `503`.
+- `SIGNALGUARD_PROFILE=local` or `SIGNALGUARD_PROFILE=production` without explicit storage/cache URLs:
+  service startup fails before connecting to PostgreSQL or Redis.
 - Binance unavailable or network blocked:
   live mode retries with bounded exponential backoff.
 - Replay historical timestamps:
@@ -266,11 +284,11 @@ find . -name ".DS_Store" -delete
 Archive command with exclusions if needed:
 
 ```bash
-zip -r signalguard-rs-v0.3.zip signalguard-rs-v0.3 \
-  -x "signalguard-rs-v0.3/target/*" \
-  -x "signalguard-rs-v0.3/.git/*" \
-  -x "signalguard-rs-v0.3/.idea/*" \
-  -x "signalguard-rs-v0.3/.vscode/*" \
+zip -r signalguard-rs-v0.4.zip signalguard-rs-v0.4 \
+  -x "signalguard-rs-v0.4/target/*" \
+  -x "signalguard-rs-v0.4/.git/*" \
+  -x "signalguard-rs-v0.4/.idea/*" \
+  -x "signalguard-rs-v0.4/.vscode/*" \
   -x "*/.DS_Store" \
   -x "__MACOSX/*" \
   -x "*/__MACOSX/*"

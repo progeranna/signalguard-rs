@@ -15,6 +15,8 @@ const TRADE_WINDOW_SECONDS: i64 = 60;
 
 #[derive(Debug, Default)]
 pub struct MarketStateAggregator {
+    // Source selection is expected to bound this set to configured symbols or replay fixtures.
+    // This demo service keeps no eviction policy for per-symbol state.
     states: HashMap<Symbol, SymbolState>,
 }
 
@@ -78,16 +80,7 @@ impl SymbolState {
             event_time: trade.event_time,
             price: trade.price,
         });
-        self.latest_state.last_event_time = Some(
-            self.latest_state
-                .last_event_time
-                .map_or(trade.event_time, |current| current.max(trade.event_time)),
-        );
-        self.latest_state.last_ingest_time = Some(
-            self.latest_state
-                .last_ingest_time
-                .map_or(trade.ingest_time, |current| current.max(trade.ingest_time)),
-        );
+        self.advance_timestamps(trade.event_time, trade.ingest_time);
         self.refresh_trade_signals();
     }
 
@@ -107,16 +100,7 @@ impl SymbolState {
             self.latest_quote_event_time = Some(quote.event_time);
         }
 
-        self.latest_state.last_event_time = Some(
-            self.latest_state
-                .last_event_time
-                .map_or(quote.event_time, |current| current.max(quote.event_time)),
-        );
-        self.latest_state.last_ingest_time = Some(
-            self.latest_state
-                .last_ingest_time
-                .map_or(quote.ingest_time, |current| current.max(quote.ingest_time)),
-        );
+        self.advance_timestamps(quote.event_time, quote.ingest_time);
     }
 
     fn apply_depth(&mut self, depth: &DepthUpdate) {
@@ -126,15 +110,19 @@ impl SymbolState {
 
         let snapshot = self.order_book.snapshot();
         self.apply_order_book_snapshot(&snapshot);
+        self.advance_timestamps(depth.event_time, depth.ingest_time);
+    }
+
+    fn advance_timestamps(&mut self, event_time: DateTime<Utc>, ingest_time: DateTime<Utc>) {
         self.latest_state.last_event_time = Some(
             self.latest_state
                 .last_event_time
-                .map_or(depth.event_time, |current| current.max(depth.event_time)),
+                .map_or(event_time, |current| current.max(event_time)),
         );
         self.latest_state.last_ingest_time = Some(
             self.latest_state
                 .last_ingest_time
-                .map_or(depth.ingest_time, |current| current.max(depth.ingest_time)),
+                .map_or(ingest_time, |current| current.max(ingest_time)),
         );
     }
 

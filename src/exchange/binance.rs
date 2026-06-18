@@ -5,6 +5,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::{
+    depth_json::parse_depth_level_pair_strings,
     domain::{DepthLevel, DepthUpdate, Exchange, QuoteEvent, Symbol, TopOfBookQuote, TradeEvent},
     ingestion::NormalizedEvent,
 };
@@ -76,6 +77,13 @@ struct BinanceBookTickerPayload {
     event_time: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BinanceStreamKind {
+    Trade,
+    BookTicker,
+    Depth,
+}
+
 pub fn combined_stream_url(base_url: &str, symbols: &[Symbol]) -> anyhow::Result<String> {
     if symbols.is_empty() {
         anyhow::bail!("at least one symbol is required for Binance live ingestion");
@@ -104,27 +112,41 @@ pub fn parse_combined_stream_message(
     let message = serde_json::from_str::<CombinedStreamMessage>(payload)
         .map_err(|source| BinanceParseError::MalformedJson { source })?;
 
-    if message.stream.ends_with(TRADE_STREAM_SUFFIX) {
-        let trade = serde_json::from_value::<BinanceTradePayload>(message.data)
-            .map_err(|source| BinanceParseError::MalformedJson { source })?;
-        return parse_trade_payload(trade, ingest_time).map(NormalizedEvent::Trade);
+    match classify_stream(&message.stream) {
+        Some(BinanceStreamKind::Trade) => {
+            let trade = serde_json::from_value::<BinanceTradePayload>(message.data)
+                .map_err(|source| BinanceParseError::MalformedJson { source })?;
+            parse_trade_payload(trade, ingest_time).map(NormalizedEvent::Trade)
+        }
+        Some(BinanceStreamKind::BookTicker) => {
+            let quote = serde_json::from_value::<BinanceBookTickerPayload>(message.data)
+                .map_err(|source| BinanceParseError::MalformedJson { source })?;
+            parse_book_ticker_payload(quote, ingest_time).map(NormalizedEvent::Quote)
+        }
+        Some(BinanceStreamKind::Depth) => {
+            parse_depth_payload(message.data, ingest_time).map(NormalizedEvent::Depth)
+        }
+        None => Err(BinanceParseError::UnknownStream {
+            stream: message.stream,
+        }),
     }
-    if message
-        .stream
+}
+
+fn classify_stream(stream: &str) -> Option<BinanceStreamKind> {
+    if stream.ends_with(TRADE_STREAM_SUFFIX) {
+        return Some(BinanceStreamKind::Trade);
+    }
+    if stream
         .to_ascii_lowercase()
         .ends_with(BOOK_TICKER_STREAM_SUFFIX)
     {
-        let quote = serde_json::from_value::<BinanceBookTickerPayload>(message.data)
-            .map_err(|source| BinanceParseError::MalformedJson { source })?;
-        return parse_book_ticker_payload(quote, ingest_time).map(NormalizedEvent::Quote);
+        return Some(BinanceStreamKind::BookTicker);
     }
-    if is_depth_stream(&message.stream) {
-        return parse_depth_payload(message.data, ingest_time).map(NormalizedEvent::Depth);
+    if is_depth_stream(stream) {
+        return Some(BinanceStreamKind::Depth);
     }
 
-    Err(BinanceParseError::UnknownStream {
-        stream: message.stream,
-    })
+    None
 }
 
 fn parse_trade_payload(
@@ -303,23 +325,12 @@ fn parse_depth_level(
     price_field: &'static str,
     quantity_field: &'static str,
 ) -> Result<DepthLevel, BinanceParseError> {
-    let values = level
-        .as_array()
-        .filter(|values| values.len() == 2)
-        .ok_or(BinanceParseError::InvalidDepthLevelShape { field, index })?;
-
-    let price = values[0]
-        .as_str()
-        .ok_or(BinanceParseError::InvalidDepthLevelShape { field, index })?
-        .to_owned();
-    let quantity = values[1]
-        .as_str()
-        .ok_or(BinanceParseError::InvalidDepthLevelShape { field, index })?
-        .to_owned();
+    let invalid_shape = || BinanceParseError::InvalidDepthLevelShape { field, index };
+    let (price, quantity) = parse_depth_level_pair_strings(level, invalid_shape)?;
 
     DepthLevel::new(
-        parse_decimal(price_field, price)?,
-        parse_decimal(quantity_field, quantity)?,
+        parse_decimal(price_field, price.to_owned())?,
+        parse_decimal(quantity_field, quantity.to_owned())?,
     )
     .map_err(|error| BinanceParseError::InvalidEvent {
         message: error.to_string(),
@@ -429,110 +440,100 @@ mod tests {
 
     #[test]
     fn malformed_depth_json_returns_error() {
-        let error = parse_combined_stream_message(
+        assert_parse_error_contains(
             r#"{"stream":"btcusdt@depth","data":{"e":"depthUpdate""#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 2).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
-
-        assert!(error.contains("malformed Binance payload"));
+            "malformed Binance payload",
+        );
     }
 
     #[test]
     fn invalid_decimal_in_depth_bid_is_rejected() {
-        let error = parse_combined_stream_message(
-            r#"{"stream":"btcusdt@depth","data":{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"b":[["invalid","1.20"]],"a":[["65055.00","0.80"]]}}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
-
-        assert!(error.contains("field `b.price` must be a decimal string"));
+        assert_depth_error_contains(
+            r#"{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"b":[["invalid","1.20"]],"a":[["65055.00","0.80"]]}"#,
+            "field `b.price` must be a decimal string",
+        );
     }
 
     #[test]
     fn malformed_depth_level_shape_is_rejected() {
-        let error = parse_combined_stream_message(
-            r#"{"stream":"btcusdt@depth","data":{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"b":[["65048.00"]],"a":[["65055.00","0.80"]]}}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
-
-        assert!(error.contains("field `b` level 0 must be [price, quantity] strings"));
+        assert_depth_error_contains(
+            r#"{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"b":[["65048.00"]],"a":[["65055.00","0.80"]]}"#,
+            "field `b` level 0 must be [price, quantity] strings",
+        );
     }
 
     #[test]
     fn invalid_depth_symbol_is_rejected() {
-        let error = parse_combined_stream_message(
-            r#"{"stream":"btc-usdt@depth","data":{"e":"depthUpdate","E":1767225602000,"s":"BTC-USDT","U":100,"u":101,"b":[["65048.00","1.20"]],"a":[["65055.00","0.80"]]}}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
-
-        assert!(error.contains("invalid symbol `BTC-USDT`"));
+        assert_depth_stream_error_contains(
+            "btc-usdt@depth",
+            r#"{"e":"depthUpdate","E":1767225602000,"s":"BTC-USDT","U":100,"u":101,"b":[["65048.00","1.20"]],"a":[["65055.00","0.80"]]}"#,
+            "invalid symbol `BTC-USDT`",
+        );
     }
 
     #[test]
     fn missing_depth_symbol_is_rejected() {
-        let error = parse_combined_stream_message(
-            r#"{"stream":"btcusdt@depth","data":{"e":"depthUpdate","E":1767225602000,"U":100,"u":101,"b":[["65048.00","1.20"]],"a":[["65055.00","0.80"]]}}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
-
-        assert!(error.contains("missing required field `s`"));
+        assert_depth_error_contains(
+            r#"{"e":"depthUpdate","E":1767225602000,"U":100,"u":101,"b":[["65048.00","1.20"]],"a":[["65055.00","0.80"]]}"#,
+            "missing required field `s`",
+        );
     }
 
     #[test]
     fn missing_depth_bids_field_is_rejected() {
-        let error = parse_combined_stream_message(
-            r#"{"stream":"btcusdt@depth","data":{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"a":[["65055.00","0.80"]]}}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
-
-        assert!(error.contains("missing required field `b`"));
+        assert_depth_error_contains(
+            r#"{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"a":[["65055.00","0.80"]]}"#,
+            "missing required field `b`",
+        );
     }
 
     #[test]
     fn invalid_depth_update_id_range_is_rejected() {
-        let error = parse_combined_stream_message(
-            r#"{"stream":"btcusdt@depth","data":{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":101,"u":100,"b":[["65048.00","1.20"]],"a":[["65055.00","0.80"]]}}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
-
-        assert!(error.contains("final_update_id must be greater than or equal to first_update_id"));
+        assert_depth_error_contains(
+            r#"{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":101,"u":100,"b":[["65048.00","1.20"]],"a":[["65055.00","0.80"]]}"#,
+            "final_update_id must be greater than or equal to first_update_id",
+        );
     }
 
     #[test]
     fn unknown_depth_event_type_is_rejected() {
-        let error = parse_combined_stream_message(
-            r#"{"stream":"btcusdt@depth","data":{"e":"bookTicker","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"b":[["65048.00","1.20"]],"a":[["65055.00","0.80"]]}}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
-
-        assert!(error.contains("unsupported Binance event type `bookTicker`"));
+        assert_depth_error_contains(
+            r#"{"e":"bookTicker","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"b":[["65048.00","1.20"]],"a":[["65055.00","0.80"]]}"#,
+            "unsupported Binance event type `bookTicker`",
+        );
     }
 
     #[test]
     fn empty_depth_update_is_rejected() {
-        let error = parse_combined_stream_message(
-            r#"{"stream":"btcusdt@depth","data":{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"b":[],"a":[]}}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        assert_depth_error_contains(
+            r#"{"e":"depthUpdate","E":1767225602000,"s":"BTCUSDT","U":100,"u":101,"b":[],"a":[]}"#,
+            "depth update must contain at least one bid or ask level",
+        );
+    }
 
-        assert!(error.contains("depth update must contain at least one bid or ask level"));
+    fn assert_depth_error_contains(data: &str, expected: &str) {
+        assert_depth_stream_error_contains("btcusdt@depth", data, expected);
+    }
+
+    fn assert_depth_stream_error_contains(stream: &str, data: &str, expected: &str) {
+        let payload = format!(r#"{{"stream":"{stream}","data":{data}}}"#);
+
+        assert_parse_error_contains(&payload, expected);
+    }
+
+    fn assert_parse_error_contains(payload: &str, expected: &str) {
+        let error = parse_combined_stream_message(payload, fixed_ingest_time())
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains(expected),
+            "expected error to contain {expected:?}, got {error:?}"
+        );
+    }
+
+    fn fixed_ingest_time() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap()
     }
 
     #[test]

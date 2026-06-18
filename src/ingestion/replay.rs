@@ -15,6 +15,7 @@ use tokio::{
 use tracing::info;
 
 use crate::{
+    depth_json::parse_depth_level_pair_strings,
     domain::{DepthLevel, DepthUpdate, Exchange, QuoteEvent, Symbol, TopOfBookQuote, TradeEvent},
     telemetry::InternalCounters,
 };
@@ -113,44 +114,25 @@ fn parse_jsonl_line_with_ingest_time(
         return Ok(None);
     }
 
-    let value = serde_json::from_str::<Value>(line).map_err(|source| ReplayError::Parse {
-        path: path.clone(),
-        line: line_number,
-        kind: ReplayParseError::MalformedJson { source },
-    })?;
-    let event_type = required_string(&value, "type").map_err(|kind| ReplayError::Parse {
+    let parse_error = |kind| ReplayError::Parse {
         path: path.clone(),
         line: line_number,
         kind,
-    })?;
+    };
+
+    let value = serde_json::from_str::<Value>(line)
+        .map_err(|source| parse_error(ReplayParseError::MalformedJson { source }))?;
+    let event_type = required_string(&value, "type").map_err(&parse_error)?;
 
     let event = match event_type.as_str() {
         "trade" => {
-            NormalizedEvent::Trade(parse_trade_event(&value, ingest_time).map_err(|kind| {
-                ReplayError::Parse {
-                    path: path.clone(),
-                    line: line_number,
-                    kind,
-                }
-            })?)
+            NormalizedEvent::Trade(parse_trade_event(&value, ingest_time).map_err(&parse_error)?)
         }
         "quote" => {
-            NormalizedEvent::Quote(parse_quote_event(&value, ingest_time).map_err(|kind| {
-                ReplayError::Parse {
-                    path: path.clone(),
-                    line: line_number,
-                    kind,
-                }
-            })?)
+            NormalizedEvent::Quote(parse_quote_event(&value, ingest_time).map_err(&parse_error)?)
         }
         "depth" => {
-            NormalizedEvent::Depth(parse_depth_event(&value, ingest_time).map_err(|kind| {
-                ReplayError::Parse {
-                    path: path.clone(),
-                    line: line_number,
-                    kind,
-                }
-            })?)
+            NormalizedEvent::Depth(parse_depth_event(&value, ingest_time).map_err(&parse_error)?)
         }
         other => {
             return Err(ReplayError::Parse {
@@ -224,8 +206,8 @@ fn parse_depth_event(
     let event_time = parse_timestamp(value, "event_time")?;
     let first_update_id = optional_u64(value, "first_update_id")?;
     let final_update_id = optional_u64(value, "final_update_id")?;
-    let bids = parse_depth_levels(value, "bids")?;
-    let asks = parse_depth_levels(value, "asks")?;
+    let bids = parse_depth_levels(value, "bids", "bids.price", "bids.quantity")?;
+    let asks = parse_depth_levels(value, "asks", "asks.price", "asks.quantity")?;
 
     DepthUpdate::new(
         symbol,
@@ -278,12 +260,20 @@ fn parse_timestamp(value: &Value, field: &'static str) -> Result<DateTime<Utc>, 
 fn parse_depth_levels(
     value: &Value,
     field: &'static str,
+    price_field: &'static str,
+    quantity_field: &'static str,
 ) -> Result<Vec<DepthLevel>, ReplayParseError> {
     let levels = required_array(value, field)?;
     let mut parsed_levels = Vec::with_capacity(levels.len());
 
     for (index, level) in levels.iter().enumerate() {
-        parsed_levels.push(parse_depth_level(level, field, index)?);
+        parsed_levels.push(parse_depth_level(
+            level,
+            field,
+            index,
+            price_field,
+            quantity_field,
+        )?);
     }
 
     Ok(parsed_levels)
@@ -293,49 +283,29 @@ fn parse_depth_level(
     value: &Value,
     field: &'static str,
     index: usize,
+    price_field: &'static str,
+    quantity_field: &'static str,
 ) -> Result<DepthLevel, ReplayParseError> {
-    let Value::Array(entries) = value else {
-        return Err(ReplayParseError::InvalidDepthLevelShape { field, index });
-    };
-
-    if entries.len() != 2 {
-        return Err(ReplayParseError::InvalidDepthLevelShape { field, index });
-    }
-
-    let price = entries[0]
-        .as_str()
-        .ok_or(ReplayParseError::InvalidDepthLevelShape { field, index })?;
-    let quantity = entries[1]
-        .as_str()
-        .ok_or(ReplayParseError::InvalidDepthLevelShape { field, index })?;
+    let invalid_shape = || ReplayParseError::InvalidDepthLevelShape { field, index };
+    let (price, quantity) = parse_depth_level_pair_strings(value, invalid_shape)?;
 
     DepthLevel::new(
         price
             .parse::<Decimal>()
             .map_err(|_| ReplayParseError::InvalidDecimal {
-                field: depth_decimal_field(field, "price"),
+                field: price_field,
                 value: price.to_owned(),
             })?,
         quantity
             .parse::<Decimal>()
             .map_err(|_| ReplayParseError::InvalidDecimal {
-                field: depth_decimal_field(field, "quantity"),
+                field: quantity_field,
                 value: quantity.to_owned(),
             })?,
     )
     .map_err(|error| ReplayParseError::InvalidEvent {
         message: error.to_string(),
     })
-}
-
-fn depth_decimal_field(field: &'static str, component: &'static str) -> &'static str {
-    match (field, component) {
-        ("bids", "price") => "bids.price",
-        ("bids", "quantity") => "bids.quantity",
-        ("asks", "price") => "asks.price",
-        ("asks", "quantity") => "asks.quantity",
-        _ => unreachable!("unexpected depth field component"),
-    }
 }
 
 fn optional_u64(value: &Value, field: &'static str) -> Result<Option<u64>, ReplayParseError> {
@@ -386,7 +356,7 @@ fn required_string(value: &Value, field: &'static str) -> Result<String, ReplayP
 mod tests {
     use std::{fs, time::SystemTime};
 
-    use chrono::{TimeZone, Utc};
+    use chrono::{DateTime, TimeZone, Utc};
     use rust_decimal::Decimal;
     use tokio::sync::mpsc;
 
@@ -395,15 +365,11 @@ mod tests {
 
     #[test]
     fn replay_trade_line_parses() {
-        let ingest_time = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap();
-        let event = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let ingest_time = fixed_ingest_time();
+        let event = parse_event(
             1,
             r#"{"type":"trade","symbol":"BTCUSDT","exchange":"binance","trade_id":42,"price":"100000.10","quantity":"0.125","event_time":"2026-01-01T00:00:00Z"}"#,
-            ingest_time,
-        )
-        .unwrap()
-        .unwrap();
+        );
 
         match event {
             NormalizedEvent::Trade(trade) => {
@@ -419,15 +385,11 @@ mod tests {
 
     #[test]
     fn replay_quote_line_parses() {
-        let ingest_time = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap();
-        let event = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let ingest_time = fixed_ingest_time();
+        let event = parse_event(
             2,
             r#"{"type":"quote","symbol":"ETHUSDT","exchange":"binance","best_bid_price":"4000.10","best_bid_quantity":"2.5","best_ask_price":"4000.60","best_ask_quantity":"1.8","event_time":"2026-01-01T00:00:01Z"}"#,
-            ingest_time,
-        )
-        .unwrap()
-        .unwrap();
+        );
 
         match event {
             NormalizedEvent::Quote(quote) => {
@@ -442,15 +404,11 @@ mod tests {
 
     #[test]
     fn replay_depth_line_parses() {
-        let ingest_time = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap();
-        let event = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let ingest_time = fixed_ingest_time();
+        let event = parse_event(
             3,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","first_update_id":100,"final_update_id":101,"bids":[["65048.00","1.20"],["65047.50","0"]],"asks":[["65055.00","0.80"]]}"#,
-            ingest_time,
-        )
-        .unwrap()
-        .unwrap();
+        );
 
         match event {
             NormalizedEvent::Depth(depth) => {
@@ -473,28 +431,17 @@ mod tests {
 
     #[test]
     fn invalid_symbol_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             3,
             r#"{"type":"trade","symbol":"BTC-USDT","exchange":"binance","price":"1","quantity":"1","event_time":"2026-01-01T00:00:00Z"}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("invalid symbol `BTC-USDT`"));
     }
 
     #[test]
     fn malformed_json_is_reported() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
-            4,
-            r#"{"type":"trade""#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        let error = parse_error_string(4, r#"{"type":"trade""#);
 
         assert!(error.contains("line 4"));
         assert!(error.contains("malformed JSON"));
@@ -502,11 +449,9 @@ mod tests {
 
     #[test]
     fn unknown_event_type_is_reported() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_line(
             5,
             r#"{"type":"order_book","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:00Z"}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
         )
         .unwrap_err();
 
@@ -524,14 +469,10 @@ mod tests {
 
     #[test]
     fn malformed_depth_level_shape_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             6,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","bids":[["65048.00"]],"asks":[["65055.00","0.80"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("line 6"));
         assert!(error.contains("field `bids` level 0 must be [price, quantity] strings"));
@@ -539,42 +480,30 @@ mod tests {
 
     #[test]
     fn invalid_depth_decimal_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             7,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","bids":[["oops","1.20"]],"asks":[["65055.00","0.80"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("field `bids.price` must be a valid decimal value: oops"));
     }
 
     #[test]
     fn invalid_depth_symbol_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             8,
             r#"{"type":"depth","symbol":"BTC-USDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","bids":[["65048.00","1.20"]],"asks":[["65055.00","0.80"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("invalid symbol `BTC-USDT`"));
     }
 
     #[test]
     fn invalid_depth_exchange_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             9,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"kraken","event_time":"2026-01-01T00:00:04Z","bids":[["65048.00","1.20"]],"asks":[["65055.00","0.80"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("line 9"));
         assert!(error.contains("invalid exchange `kraken`"));
@@ -582,14 +511,10 @@ mod tests {
 
     #[test]
     fn invalid_depth_event_time_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             10,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"not-a-timestamp","bids":[["65048.00","1.20"]],"asks":[["65055.00","0.80"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("line 10"));
         assert!(error.contains("field `event_time` must be a valid RFC3339 timestamp"));
@@ -597,14 +522,10 @@ mod tests {
 
     #[test]
     fn missing_depth_bids_field_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             11,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","asks":[["65055.00","0.80"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("line 11"));
         assert!(error.contains("missing required field `bids`"));
@@ -612,14 +533,10 @@ mod tests {
 
     #[test]
     fn missing_depth_asks_field_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             12,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","bids":[["65048.00","1.20"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("line 12"));
         assert!(error.contains("missing required field `asks`"));
@@ -627,14 +544,10 @@ mod tests {
 
     #[test]
     fn non_array_depth_bids_field_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             13,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","bids":"65048.00","asks":[["65055.00","0.80"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("line 13"));
         assert!(error.contains("field `bids` must be an array"));
@@ -642,14 +555,10 @@ mod tests {
 
     #[test]
     fn non_array_depth_asks_field_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             14,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","bids":[["65048.00","1.20"]],"asks":"65055.00"}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("line 14"));
         assert!(error.contains("field `asks` must be an array"));
@@ -657,39 +566,30 @@ mod tests {
 
     #[test]
     fn invalid_depth_update_id_range_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             15,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","first_update_id":101,"final_update_id":100,"bids":[["65048.00","1.20"]],"asks":[["65055.00","0.80"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("final_update_id must be greater than or equal to first_update_id"));
     }
 
     #[test]
     fn empty_depth_update_is_rejected() {
-        let error = parse_jsonl_line_with_ingest_time(
-            "fixture.jsonl".into(),
+        let error = parse_error_string(
             16,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","bids":[],"asks":[]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
-        )
-        .unwrap_err()
-        .to_string();
+        );
 
         assert!(error.contains("depth update must contain at least one bid or ask level"));
     }
 
     #[test]
     fn depth_parse_error_contains_path_and_line_context() {
-        let error = parse_jsonl_line_with_ingest_time(
+        let error = parse_line_at_path(
             "depth-fixture.jsonl".into(),
             17,
             r#"{"type":"depth","symbol":"BTCUSDT","exchange":"binance","event_time":"2026-01-01T00:00:04Z","bids":[["65048.00","1.20"]],"asks":[["bad","0.80"]]}"#,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
         )
         .unwrap_err()
         .to_string();
@@ -723,6 +623,30 @@ mod tests {
         assert_eq!(snapshot.parse_errors, 1);
         assert_eq!(snapshot.replay_parse_errors, 1);
         assert_eq!(snapshot.binance_parse_errors, 0);
+    }
+
+    fn parse_event(line_number: usize, line: &str) -> NormalizedEvent {
+        parse_line(line_number, line).unwrap().unwrap()
+    }
+
+    fn parse_error_string(line_number: usize, line: &str) -> String {
+        parse_line(line_number, line).unwrap_err().to_string()
+    }
+
+    fn parse_line(line_number: usize, line: &str) -> Result<Option<NormalizedEvent>, ReplayError> {
+        parse_line_at_path("fixture.jsonl".into(), line_number, line)
+    }
+
+    fn parse_line_at_path(
+        path: std::path::PathBuf,
+        line_number: usize,
+        line: &str,
+    ) -> Result<Option<NormalizedEvent>, ReplayError> {
+        parse_jsonl_line_with_ingest_time(path, line_number, line, fixed_ingest_time())
+    }
+
+    fn fixed_ingest_time() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap()
     }
 
     fn temporary_fixture_path(prefix: &str) -> std::path::PathBuf {

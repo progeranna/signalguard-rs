@@ -128,7 +128,7 @@ Depth-only replay example from `examples/replay/depth_gap_sample.jsonl`:
 curl --fail --silent --show-error "http://127.0.0.1:8080/anomalies?symbol=BTCUSDT&limit=50"
 ```
 
-The response shape is the same for all anomaly types. Implemented anomaly types in v0.3 are:
+The response shape is the same for all anomaly types. Implemented anomaly types in v0.4 are:
 
 - `price_move`
 - `spread_spike`

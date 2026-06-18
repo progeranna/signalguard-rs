@@ -6,7 +6,29 @@ use crate::domain::{AnomalyEvent, AnomalyType, Severity, Symbol};
 
 use super::StorageError;
 
-const MAX_RECENT_ANOMALY_LIMIT: u32 = 500;
+pub(crate) const MAX_RECENT_ANOMALY_LIMIT: u32 = 500;
+const RECENT_ANOMALIES_SELECT_SQL: &str = r#"
+SELECT
+    id,
+    symbol,
+    anomaly_type,
+    severity,
+    message,
+    observed_value,
+    threshold_value,
+    event_time,
+    created_at
+FROM anomalies
+"#;
+const RECENT_ANOMALIES_BY_SYMBOL_SQL_SUFFIX: &str = r#"
+WHERE symbol = $1
+ORDER BY created_at DESC
+LIMIT $2
+"#;
+const RECENT_ANOMALIES_SQL_SUFFIX: &str = r#"
+ORDER BY created_at DESC
+LIMIT $1
+"#;
 
 pub async fn insert_anomaly(pool: &PgPool, anomaly: &AnomalyEvent) -> Result<(), StorageError> {
     sqlx::query(
@@ -48,56 +70,37 @@ pub async fn get_recent_anomalies(
 ) -> Result<Vec<AnomalyEvent>, StorageError> {
     let limit = validate_recent_anomaly_limit(limit)?;
     let rows = if let Some(symbol) = symbol {
-        sqlx::query(
-            r#"
-            SELECT
-                id,
-                symbol,
-                anomaly_type,
-                severity,
-                message,
-                observed_value,
-                threshold_value,
-                event_time,
-                created_at
-            FROM anomalies
-            WHERE symbol = $1
-            ORDER BY created_at DESC
-            LIMIT $2
-            "#,
-        )
-        .bind(symbol.as_str())
-        .bind(i64::from(limit))
-        .fetch_all(pool)
-        .await
-        .map_err(|error| StorageError::database("get_recent_anomalies", error))?
+        let query = recent_anomalies_by_symbol_sql();
+        sqlx::query(&query)
+            .bind(symbol.as_str())
+            .bind(i64::from(limit))
+            .fetch_all(pool)
+            .await
+            .map_err(|error| StorageError::database("get_recent_anomalies", error))?
     } else {
-        sqlx::query(
-            r#"
-            SELECT
-                id,
-                symbol,
-                anomaly_type,
-                severity,
-                message,
-                observed_value,
-                threshold_value,
-                event_time,
-                created_at
-            FROM anomalies
-            ORDER BY created_at DESC
-            LIMIT $1
-            "#,
-        )
-        .bind(i64::from(limit))
-        .fetch_all(pool)
-        .await
-        .map_err(|error| StorageError::database("get_recent_anomalies", error))?
+        let query = recent_anomalies_sql();
+        sqlx::query(&query)
+            .bind(i64::from(limit))
+            .fetch_all(pool)
+            .await
+            .map_err(|error| StorageError::database("get_recent_anomalies", error))?
     };
 
     rows.into_iter()
         .map(|row| map_anomaly_row(&row))
         .collect::<Result<Vec<_>, _>>()
+}
+
+fn recent_anomalies_by_symbol_sql() -> String {
+    let mut query = RECENT_ANOMALIES_SELECT_SQL.to_owned();
+    query.push_str(RECENT_ANOMALIES_BY_SYMBOL_SQL_SUFFIX);
+    query
+}
+
+fn recent_anomalies_sql() -> String {
+    let mut query = RECENT_ANOMALIES_SELECT_SQL.to_owned();
+    query.push_str(RECENT_ANOMALIES_SQL_SUFFIX);
+    query
 }
 
 fn validate_recent_anomaly_limit(limit: u32) -> Result<u32, StorageError> {
