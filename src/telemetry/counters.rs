@@ -5,6 +5,8 @@ use std::sync::{
 
 use chrono::{DateTime, Utc};
 
+use crate::ingestion::{IngestionSource, NormalizedEvent};
+
 #[derive(Clone, Debug, Default)]
 pub struct InternalCounters {
     inner: Arc<CounterState>,
@@ -49,42 +51,34 @@ struct CounterState {
 
 impl InternalCounters {
     pub fn increment_parse_errors(&self) {
-        self.inner.parse_errors.fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.parse_errors);
     }
 
     pub fn increment_reconnect_attempts(&self) {
-        self.inner
-            .reconnect_attempts
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.reconnect_attempts);
     }
 
     pub fn increment_replay_parse_errors(&self) {
         self.increment_parse_errors();
-        self.inner
-            .replay_parse_errors
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.replay_parse_errors);
     }
 
     pub fn increment_binance_parse_errors(&self) {
         self.increment_parse_errors();
-        self.inner
-            .binance_parse_errors
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.binance_parse_errors);
     }
 
     pub fn increment_binance_reconnect_attempts(&self) {
         self.increment_reconnect_attempts();
-        self.inner
-            .binance_reconnect_attempts
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.binance_reconnect_attempts);
     }
 
     pub fn increment_storage_errors(&self) {
-        self.inner.storage_errors.fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.storage_errors);
     }
 
     pub fn increment_cache_errors(&self) {
-        self.inner.cache_errors.fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.cache_errors);
     }
 
     pub fn record_message_at(&self, timestamp: DateTime<Utc>) {
@@ -94,39 +88,50 @@ impl InternalCounters {
     }
 
     pub fn increment_replay_trade_events(&self) {
-        self.inner
-            .replay_trade_events
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.replay_trade_events);
     }
 
     pub fn increment_replay_quote_events(&self) {
-        self.inner
-            .replay_quote_events
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.replay_quote_events);
     }
 
     pub fn increment_replay_depth_events(&self) {
-        self.inner
-            .replay_depth_events
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.replay_depth_events);
     }
 
     pub fn increment_binance_trade_events(&self) {
-        self.inner
-            .binance_trade_events
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.binance_trade_events);
     }
 
     pub fn increment_binance_quote_events(&self) {
-        self.inner
-            .binance_quote_events
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.binance_quote_events);
     }
 
     pub fn increment_binance_depth_events(&self) {
-        self.inner
-            .binance_depth_events
-            .fetch_add(1, Ordering::Relaxed);
+        increment(&self.inner.binance_depth_events);
+    }
+
+    pub fn increment_processed_event(&self, source: IngestionSource, event: &NormalizedEvent) {
+        match (source, event) {
+            (IngestionSource::Replay, NormalizedEvent::Trade(_)) => {
+                self.increment_replay_trade_events();
+            }
+            (IngestionSource::Replay, NormalizedEvent::Quote(_)) => {
+                self.increment_replay_quote_events();
+            }
+            (IngestionSource::Replay, NormalizedEvent::Depth(_)) => {
+                self.increment_replay_depth_events();
+            }
+            (IngestionSource::Binance, NormalizedEvent::Trade(_)) => {
+                self.increment_binance_trade_events();
+            }
+            (IngestionSource::Binance, NormalizedEvent::Quote(_)) => {
+                self.increment_binance_quote_events();
+            }
+            (IngestionSource::Binance, NormalizedEvent::Depth(_)) => {
+                self.increment_binance_depth_events();
+            }
+        }
     }
 
     pub fn snapshot_at(&self, now: DateTime<Utc>) -> InternalCountersSnapshot {
@@ -162,6 +167,10 @@ impl InternalCounters {
 
         Some(unix_ms)
     }
+}
+
+fn increment(counter: &AtomicU64) {
+    counter.fetch_add(1, Ordering::Relaxed);
 }
 
 fn last_message_age_ms(last_message_unix_ms: Option<i64>, now: DateTime<Utc>) -> Option<u64> {

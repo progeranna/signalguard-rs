@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use rust_decimal::Decimal;
 use signalguard_rs::{
     domain::{
@@ -16,16 +16,7 @@ use sqlx::{PgPool, Row};
 async fn insert_trade_writes_a_trade_row() {
     let pool = test_pool().await;
     let symbol = test_symbol("TRADE");
-    let trade = TradeEvent::new(
-        symbol.clone(),
-        Exchange::Binance,
-        Some(42),
-        Decimal::new(6500010, 2),
-        Decimal::new(125, 3),
-        fixed_time(2026, 1, 1, 0, 0, 0),
-        fixed_time(2026, 1, 1, 0, 0, 1),
-    )
-    .unwrap();
+    let trade = trade_for(symbol.clone());
 
     insert_trade(&pool, &trade).await.unwrap();
 
@@ -65,20 +56,7 @@ async fn insert_trade_writes_a_trade_row() {
 async fn insert_quote_writes_a_quote_row() {
     let pool = test_pool().await;
     let symbol = test_symbol("QUOTE");
-    let quote = QuoteEvent::new(
-        symbol.clone(),
-        Exchange::Binance,
-        TopOfBookQuote::new(
-            Decimal::new(6499910, 2),
-            Decimal::new(2500, 3),
-            Decimal::new(6500020, 2),
-            Decimal::new(1750, 3),
-        )
-        .unwrap(),
-        fixed_time(2026, 1, 1, 0, 1, 0),
-        fixed_time(2026, 1, 1, 0, 1, 1),
-    )
-    .unwrap();
+    let quote = quote_for(symbol.clone());
 
     insert_quote(&pool, &quote).await.unwrap();
 
@@ -139,15 +117,12 @@ async fn insert_quote_writes_a_quote_row() {
 async fn insert_anomaly_writes_an_anomaly_row() {
     let pool = test_pool().await;
     let symbol = test_symbol("ANOM");
-    let anomaly = AnomalyEvent::new(
+    let anomaly = anomaly_for(
         symbol.clone(),
         AnomalyType::SpreadSpike,
         Severity::Warning,
         "spread widened in integration test",
-        AnomalyMeasurement {
-            observed_value: Some(1.25),
-            threshold_value: Some(0.50),
-        },
+        (1.25, 0.50),
         fixed_time(2026, 1, 1, 0, 2, 0),
         fixed_time(2026, 1, 1, 0, 2, 1),
     );
@@ -201,39 +176,30 @@ async fn get_recent_anomalies_filters_by_symbol_and_respects_limit() {
     let pool = test_pool().await;
     let symbol = test_symbol("ANOMF");
     let other_symbol = test_symbol("ANOMO");
-    let older = AnomalyEvent::new(
+    let older = anomaly_for(
         symbol.clone(),
         AnomalyType::PriceMove,
         Severity::Info,
         "older anomaly for symbol filter test",
-        AnomalyMeasurement {
-            observed_value: Some(2.0),
-            threshold_value: Some(1.0),
-        },
+        (2.0, 1.0),
         fixed_time(2026, 1, 1, 0, 3, 0),
         fixed_time(2026, 1, 1, 0, 3, 0),
     );
-    let newer = AnomalyEvent::new(
+    let newer = anomaly_for(
         symbol.clone(),
         AnomalyType::TradeBurst,
         Severity::Critical,
         "newer anomaly for symbol filter test",
-        AnomalyMeasurement {
-            observed_value: Some(10.0),
-            threshold_value: Some(3.0),
-        },
+        (10.0, 3.0),
         fixed_time(2026, 1, 1, 0, 3, 1),
         fixed_time(2026, 1, 1, 0, 3, 1),
     );
-    let other = AnomalyEvent::new(
+    let other = anomaly_for(
         other_symbol.clone(),
         AnomalyType::StaleData,
         Severity::Warning,
         "other symbol anomaly",
-        AnomalyMeasurement {
-            observed_value: Some(6_000.0),
-            threshold_value: Some(5_000.0),
-        },
+        (6_000.0, 5_000.0),
         fixed_time(2026, 1, 1, 0, 3, 2),
         fixed_time(2026, 1, 1, 0, 3, 2),
     );
@@ -265,15 +231,12 @@ async fn get_recent_anomalies_filters_by_symbol_and_respects_limit() {
 async fn get_recent_anomalies_without_symbol_returns_recent_rows() {
     let pool = test_pool().await;
     let symbol = test_symbol("ANOMA");
-    let anomaly = AnomalyEvent::new(
+    let anomaly = anomaly_for(
         symbol.clone(),
         AnomalyType::TradeBurst,
         Severity::Critical,
         "recent anomaly for unfiltered query test",
-        AnomalyMeasurement {
-            observed_value: Some(15.0),
-            threshold_value: Some(5.0),
-        },
+        (15.0, 5.0),
         fixed_time(2099, 1, 1, 0, 0, 0),
         fixed_time(2099, 1, 1, 0, 0, 1),
     );
@@ -353,6 +316,61 @@ fn test_symbol(prefix: &str) -> Symbol {
         .as_nanos();
 
     Symbol::new(format!("SG{prefix}{unique_suffix}")).unwrap()
+}
+
+fn trade_for(symbol: Symbol) -> TradeEvent {
+    TradeEvent::new(
+        symbol,
+        Exchange::Binance,
+        Some(42),
+        Decimal::new(6500010, 2),
+        Decimal::new(125, 3),
+        fixed_time(2026, 1, 1, 0, 0, 0),
+        fixed_time(2026, 1, 1, 0, 0, 1),
+    )
+    .unwrap()
+}
+
+fn quote_for(symbol: Symbol) -> QuoteEvent {
+    QuoteEvent::new(
+        symbol,
+        Exchange::Binance,
+        TopOfBookQuote::new(
+            Decimal::new(6499910, 2),
+            Decimal::new(2500, 3),
+            Decimal::new(6500020, 2),
+            Decimal::new(1750, 3),
+        )
+        .unwrap(),
+        fixed_time(2026, 1, 1, 0, 1, 0),
+        fixed_time(2026, 1, 1, 0, 1, 1),
+    )
+    .unwrap()
+}
+
+fn anomaly_for(
+    symbol: Symbol,
+    anomaly_type: AnomalyType,
+    severity: Severity,
+    message: &str,
+    measurement: (f64, f64),
+    event_time: DateTime<Utc>,
+    created_at: DateTime<Utc>,
+) -> AnomalyEvent {
+    let (observed_value, threshold_value) = measurement;
+
+    AnomalyEvent::new(
+        symbol,
+        anomaly_type,
+        severity,
+        message,
+        AnomalyMeasurement {
+            observed_value: Some(observed_value),
+            threshold_value: Some(threshold_value),
+        },
+        event_time,
+        created_at,
+    )
 }
 
 fn fixed_time(

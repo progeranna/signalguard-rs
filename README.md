@@ -1,6 +1,6 @@
 # SignalGuard RS
 
-SignalGuard RS is a Rust backend service for monitoring crypto market data quality. It combines deterministic replay, Binance public WebSocket ingestion, rule-based anomaly detection, PostgreSQL, Redis, Axum, and Tokio into a compact trading-infrastructure-style service that answers a practical question: can this market data stream be trusted right now?
+SignalGuard RS is a Rust backend service for monitoring crypto market data quality. It combines deterministic replay, Binance public WebSocket ingestion, rule-based anomaly detection, PostgreSQL, Redis, Axum, and Tokio into a compact market-data infrastructure service that answers a practical question: how fresh, consistent, and observable is this stream right now?
 
 ## What It Does
 
@@ -56,6 +56,12 @@ bash scripts/smoke.sh
 docker compose --profile app down
 ```
 
+## Configuration Profiles
+
+The default runtime profile is `local`. Local mode is still explicit about service URLs: `SIGNALGUARD_DATABASE_URL` and `SIGNALGUARD_REDIS_URL` must come from `.env`, `.env.example`, Docker Compose, or `scripts/demo-replay.sh`; the Rust code does not embed PostgreSQL or Redis URL fallbacks.
+
+Set `SIGNALGUARD_PROFILE=production` for production-style configuration boundaries. In that profile, the same storage and cache URLs must be provided explicitly and the service will not fall back to local demo credentials. This is configuration hygiene for a portfolio backend, not a production deployment guarantee.
+
 ## API Preview
 
 Endpoints:
@@ -96,6 +102,19 @@ Full endpoint examples live in [docs/api-examples.md](docs/api-examples.md).
 
 Deeper architecture notes: [docs/architecture.md](docs/architecture.md)
 
+## Tech Stack
+
+- Rust
+- Tokio
+- Axum
+- SQLx
+- PostgreSQL
+- Redis
+- Docker Compose
+- Binance public WebSocket streams
+- `serde`
+- `tracing`
+
 ## Testing And Quality Gates
 
 Core checks:
@@ -117,12 +136,12 @@ Normal `cargo test` does not require Docker, PostgreSQL, Redis, or Binance netwo
 
 ## Limitations
 
-- This is not a trading bot
-- There is no order execution logic
-- There is no private Binance API usage
-- There is no price prediction
-- There is no manipulation detection or proof
-- There is no production-grade Binance local order book correctness guarantee
+- It does not place trades or manage accounts
+- It does not submit, cancel, or route exchange orders
+- It uses public Binance market-data WebSocket streams only
+- It does not forecast future prices
+- It does not prove intent or market abuse
+- The local Binance order-book view is simplified and lacks snapshot bootstrap/resync
 - There is no REST snapshot bootstrap or full resync yet
 - There is no historical full order-book persistence
 - Replay timestamps are intentionally historical and can trigger `stale_data` and `event_lag_spike` anomalies
@@ -134,7 +153,7 @@ Normal `cargo test` does not require Docker, PostgreSQL, Redis, or Binance netwo
 - A second exchange integration
 - An optional dashboard or visual demo layer
 
-## Interview Talking Points
+## Engineering Highlights
 
 - Shared replay/live pipeline keeps demo and runtime logic aligned
 - Bounded backpressure makes ingestion behavior explicit under load
@@ -151,3 +170,7 @@ Normal `cargo test` does not require Docker, PostgreSQL, Redis, or Binance netwo
 - [docs/api-examples.md](docs/api-examples.md)
 - [docs/replay-format.md](docs/replay-format.md)
 - [docs/failure-modes.md](docs/failure-modes.md)
+
+## License
+
+MIT License. See [LICENSE](LICENSE).

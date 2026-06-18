@@ -36,6 +36,7 @@ services:
       redis:
         condition: service_healthy
     environment:
+      SIGNALGUARD_PROFILE: local
       SIGNALGUARD_HOST: 0.0.0.0
       SIGNALGUARD_PORT: "8080"
       SIGNALGUARD_DATABASE_URL: postgres://signalguard:signalguard@postgres:5432/signalguard

@@ -49,11 +49,11 @@ impl From<StorageError> for ApiError {
             StorageError::InvalidArgument { message, .. } => Self::InvalidRequest(message),
             StorageError::Database { operation, source } => {
                 warn!(%operation, %source, "storage operation failed");
-                Self::Internal(String::from("failed to query anomaly events"))
+                Self::Internal(String::from("failed to complete storage operation"))
             }
             StorageError::Mapping { operation, message } => {
-                warn!(%operation, %message, "storage returned invalid anomaly data");
-                Self::Internal(String::from("stored anomaly data is invalid"))
+                warn!(%operation, %message, "storage returned invalid data");
+                Self::Internal(String::from("stored data is invalid"))
             }
         }
     }
@@ -65,6 +65,10 @@ impl From<CacheError> for ApiError {
             CacheError::Unavailable => Self::CacheUnavailable,
             CacheError::Redis { operation, source } => {
                 warn!(%operation, %source, "Redis cache operation failed");
+                Self::CacheUnavailable
+            }
+            CacheError::InMemoryLock { operation } => {
+                warn!(%operation, "in-memory cache lock failed");
                 Self::CacheUnavailable
             }
             CacheError::Serialization { operation, source } => {

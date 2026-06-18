@@ -11,7 +11,7 @@ use crate::{
     telemetry::InternalCounters,
 };
 
-use super::{IngestedEvent, IngestionSource, NormalizedEvent};
+use super::{IngestedEvent, NormalizedEvent};
 
 #[derive(Debug, Default)]
 pub struct PipelineReport {
@@ -57,7 +57,7 @@ pub async fn run_event_pipeline(
 
 fn record_ingested_event_metrics(counters: &InternalCounters, ingested_event: &IngestedEvent) {
     counters.record_message_at(Utc::now());
-    increment_processed_event_counter(counters, ingested_event.source, &ingested_event.event);
+    counters.increment_processed_event(ingested_event.source, &ingested_event.event);
 }
 
 async fn persist_normalized_event(
@@ -127,33 +127,6 @@ async fn detect_and_persist_anomalies(
     }
 }
 
-fn increment_processed_event_counter(
-    counters: &InternalCounters,
-    source: IngestionSource,
-    event: &NormalizedEvent,
-) {
-    match (source, event) {
-        (IngestionSource::Replay, NormalizedEvent::Trade(_)) => {
-            counters.increment_replay_trade_events();
-        }
-        (IngestionSource::Replay, NormalizedEvent::Quote(_)) => {
-            counters.increment_replay_quote_events();
-        }
-        (IngestionSource::Binance, NormalizedEvent::Trade(_)) => {
-            counters.increment_binance_trade_events();
-        }
-        (IngestionSource::Binance, NormalizedEvent::Quote(_)) => {
-            counters.increment_binance_quote_events();
-        }
-        (IngestionSource::Replay, NormalizedEvent::Depth(_)) => {
-            counters.increment_replay_depth_events();
-        }
-        (IngestionSource::Binance, NormalizedEvent::Depth(_)) => {
-            counters.increment_binance_depth_events();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
@@ -161,7 +134,7 @@ mod tests {
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use tokio::sync::mpsc;
 
-    use super::{increment_processed_event_counter, run_event_pipeline};
+    use super::run_event_pipeline;
     use crate::{
         config::DetectorSettings,
         domain::{
@@ -176,8 +149,7 @@ mod tests {
     fn replay_trade_event_increments_replay_trade_counter() {
         let counters = InternalCounters::default();
 
-        increment_processed_event_counter(
-            &counters,
+        counters.increment_processed_event(
             IngestionSource::Replay,
             &NormalizedEvent::Trade(test_trade_event()),
         );
@@ -194,8 +166,7 @@ mod tests {
     fn replay_quote_event_increments_replay_quote_counter() {
         let counters = InternalCounters::default();
 
-        increment_processed_event_counter(
-            &counters,
+        counters.increment_processed_event(
             IngestionSource::Replay,
             &NormalizedEvent::Quote(test_quote_event()),
         );
@@ -212,8 +183,7 @@ mod tests {
     fn binance_trade_event_increments_binance_trade_counter() {
         let counters = InternalCounters::default();
 
-        increment_processed_event_counter(
-            &counters,
+        counters.increment_processed_event(
             IngestionSource::Binance,
             &NormalizedEvent::Trade(test_trade_event()),
         );
@@ -230,8 +200,7 @@ mod tests {
     fn binance_quote_event_increments_binance_quote_counter() {
         let counters = InternalCounters::default();
 
-        increment_processed_event_counter(
-            &counters,
+        counters.increment_processed_event(
             IngestionSource::Binance,
             &NormalizedEvent::Quote(test_quote_event()),
         );
@@ -248,13 +217,11 @@ mod tests {
     fn depth_event_increments_source_event_counters() {
         let counters = InternalCounters::default();
 
-        increment_processed_event_counter(
-            &counters,
+        counters.increment_processed_event(
             IngestionSource::Replay,
             &NormalizedEvent::Depth(test_depth_update()),
         );
-        increment_processed_event_counter(
-            &counters,
+        counters.increment_processed_event(
             IngestionSource::Binance,
             &NormalizedEvent::Depth(test_depth_update()),
         );

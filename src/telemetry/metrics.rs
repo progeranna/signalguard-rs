@@ -5,8 +5,18 @@ const PROMETHEUS_LINE_CAPACITY: usize = 512;
 pub fn render_prometheus_metrics(snapshot: &InternalCountersSnapshot) -> String {
     let mut output = String::with_capacity(PROMETHEUS_LINE_CAPACITY);
 
+    render_event_counters(&mut output, snapshot);
+    render_parse_error_counters(&mut output, snapshot);
+    render_reconnect_counters(&mut output, snapshot);
+    render_infra_error_counters(&mut output, snapshot);
+    render_runtime_metrics(&mut output, snapshot);
+
+    output
+}
+
+fn render_event_counters(output: &mut String, snapshot: &InternalCountersSnapshot) {
     render_labeled_counter_family(
-        &mut output,
+        output,
         "signalguard_events_processed_total",
         "Total number of normalized events processed by SignalGuard, partitioned by source and event type.",
         &[
@@ -36,15 +46,18 @@ pub fn render_prometheus_metrics(snapshot: &InternalCountersSnapshot) -> String 
             ),
         ],
     );
+}
+
+fn render_parse_error_counters(output: &mut String, snapshot: &InternalCountersSnapshot) {
     render_metric(
-        &mut output,
+        output,
         "signalguard_parse_errors_total",
         "Total number of normalized event parse errors observed by SignalGuard.",
         "counter",
         snapshot.parse_errors,
     );
     render_labeled_counter_family(
-        &mut output,
+        output,
         "signalguard_source_parse_errors_total",
         "Total number of normalized event parse errors observed by SignalGuard, partitioned by source.",
         &[
@@ -52,15 +65,18 @@ pub fn render_prometheus_metrics(snapshot: &InternalCountersSnapshot) -> String 
             (&[("source", "binance")], snapshot.binance_parse_errors),
         ],
     );
+}
+
+fn render_reconnect_counters(output: &mut String, snapshot: &InternalCountersSnapshot) {
     render_metric(
-        &mut output,
+        output,
         "signalguard_reconnect_attempts_total",
         "Total number of Binance live stream reconnect attempts observed by SignalGuard.",
         "counter",
         snapshot.reconnect_attempts,
     );
     render_labeled_counter_family(
-        &mut output,
+        output,
         "signalguard_source_reconnect_attempts_total",
         "Total number of reconnect attempts observed by SignalGuard, partitioned by source.",
         &[(
@@ -68,29 +84,33 @@ pub fn render_prometheus_metrics(snapshot: &InternalCountersSnapshot) -> String 
             snapshot.binance_reconnect_attempts,
         )],
     );
+}
+
+fn render_infra_error_counters(output: &mut String, snapshot: &InternalCountersSnapshot) {
     render_metric(
-        &mut output,
+        output,
         "signalguard_storage_errors_total",
         "Total number of PostgreSQL storage errors observed by SignalGuard.",
         "counter",
         snapshot.storage_errors,
     );
     render_metric(
-        &mut output,
+        output,
         "signalguard_cache_errors_total",
         "Total number of Redis cache errors observed by SignalGuard.",
         "counter",
         snapshot.cache_errors,
     );
+}
+
+fn render_runtime_metrics(output: &mut String, snapshot: &InternalCountersSnapshot) {
     render_metric(
-        &mut output,
+        output,
         "signalguard_last_message_age_ms",
         "Age in milliseconds of the last processed normalized message. Renders 0 before any message has been processed.",
         "gauge",
         snapshot.last_message_age_ms.unwrap_or(0),
     );
-
-    output
 }
 
 fn render_metric(output: &mut String, name: &str, help: &str, metric_type: &str, value: u64) {

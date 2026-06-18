@@ -11,8 +11,7 @@ use rust_decimal::Decimal;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 8080;
-const DEFAULT_DATABASE_URL: &str = "postgres://signalguard:signalguard@127.0.0.1:5432/signalguard";
-const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379";
+const DEFAULT_RUNTIME_PROFILE: RuntimeProfile = RuntimeProfile::Local;
 const DEFAULT_REPLAY_PATH: &str = "examples/replay/sample.jsonl";
 const DEFAULT_REPLAY_RESET_STORAGE: bool = true;
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 1_024;
@@ -38,8 +37,11 @@ const DEFAULT_HEALTH_RECENT_ANOMALY_WINDOW_SECS: u64 = 300;
 const DEFAULT_HEALTHY_MIN_SCORE: u8 = 80;
 const DEFAULT_DEGRADED_MIN_SCORE: u8 = 50;
 
+type EnvMap = HashMap<String, String>;
+
 #[derive(Debug)]
 pub struct Settings {
+    pub profile: RuntimeProfile,
     pub server: ServerSettings,
     pub database: DatabaseSettings,
     pub redis: RedisSettings,
@@ -47,6 +49,12 @@ pub struct Settings {
     pub binance: BinanceSettings,
     pub detectors: DetectorSettings,
     pub health: HealthScoreSettings,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeProfile {
+    Local,
+    Production,
 }
 
 #[derive(Debug)]
@@ -79,6 +87,13 @@ pub struct IngestionSettings {
     pub replay_delay_ms: u64,
     pub replay_reset_storage: bool,
     pub event_channel_capacity: usize,
+}
+
+#[derive(Debug)]
+struct ReplaySettings {
+    path: PathBuf,
+    delay_ms: u64,
+    reset_storage: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -126,166 +141,271 @@ impl Settings {
     pub fn load() -> Result<Self> {
         dotenvy::dotenv().ok();
 
-        let env_map = env::vars().collect::<HashMap<_, _>>();
+        let env_map = env::vars().collect::<EnvMap>();
         Self::load_from_map(&env_map)
     }
 
-    fn load_from_map(env_map: &HashMap<String, String>) -> Result<Self> {
-        let host =
-            env_value(env_map, "SIGNALGUARD_HOST").unwrap_or_else(|| DEFAULT_HOST.to_owned());
-        let port = env_value(env_map, "SIGNALGUARD_PORT")
-            .map(parse_port)
-            .unwrap_or(Ok(DEFAULT_PORT))?;
-        let database_url = env_value(env_map, "SIGNALGUARD_DATABASE_URL")
-            .unwrap_or_else(|| DEFAULT_DATABASE_URL.to_owned());
-        let redis_url = env_value(env_map, "SIGNALGUARD_REDIS_URL")
-            .unwrap_or_else(|| DEFAULT_REDIS_URL.to_owned());
-        let mode = env_value(env_map, "SIGNALGUARD_INGESTION_MODE")
-            .map(parse_ingestion_mode)
-            .unwrap_or(Ok(IngestionMode::Replay))?;
-        let symbols = env_value(env_map, "SIGNALGUARD_INGESTION_SYMBOLS")
-            .map(parse_symbols)
-            .unwrap_or_else(default_symbols)?;
-        let replay_path = env_value(env_map, "SIGNALGUARD_INGESTION_REPLAY_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_REPLAY_PATH));
-        let replay_delay_ms = env_u64(env_map, "SIGNALGUARD_INGESTION_REPLAY_DELAY_MS", 0)?;
-        let replay_reset_storage = env_bool(
-            env_map,
-            "SIGNALGUARD_REPLAY_RESET_STORAGE",
-            DEFAULT_REPLAY_RESET_STORAGE,
-        )?;
-        let event_channel_capacity = env_usize(
-            env_map,
-            "SIGNALGUARD_EVENT_CHANNEL_CAPACITY",
-            DEFAULT_EVENT_CHANNEL_CAPACITY,
-        )?;
-        let ingestion = IngestionSettings {
-            mode,
-            symbols,
-            replay_path,
-            replay_delay_ms,
-            replay_reset_storage,
-            event_channel_capacity,
-        };
-        ingestion.validate()?;
-        let binance = BinanceSettings {
-            websocket_base_url: env_value(env_map, "SIGNALGUARD_BINANCE_WEBSOCKET_BASE_URL")
-                .unwrap_or_else(|| DEFAULT_BINANCE_WEBSOCKET_BASE_URL.to_owned()),
-            reconnect_min_backoff_ms: env_u64(
-                env_map,
-                "SIGNALGUARD_BINANCE_RECONNECT_MIN_BACKOFF_MS",
-                DEFAULT_BINANCE_RECONNECT_MIN_BACKOFF_MS,
-            )?,
-            reconnect_max_backoff_ms: env_u64(
-                env_map,
-                "SIGNALGUARD_BINANCE_RECONNECT_MAX_BACKOFF_MS",
-                DEFAULT_BINANCE_RECONNECT_MAX_BACKOFF_MS,
-            )?,
-        };
-        binance.validate()?;
-
-        let detectors = DetectorSettings {
-            price_move_1m_pct_threshold: env_decimal(
-                env_map,
-                "SIGNALGUARD_DETECTORS_PRICE_MOVE_1M_PCT_THRESHOLD",
-                DEFAULT_PRICE_MOVE_1M_PCT_THRESHOLD,
-            )?,
-            spread_spike_pct_threshold: env_decimal(
-                env_map,
-                "SIGNALGUARD_DETECTORS_SPREAD_SPIKE_PCT_THRESHOLD",
-                DEFAULT_SPREAD_SPIKE_PCT_THRESHOLD,
-            )?,
-            stale_data_ms_threshold: env_u64(
-                env_map,
-                "SIGNALGUARD_DETECTORS_STALE_DATA_MS_THRESHOLD",
-                DEFAULT_STALE_DATA_MS_THRESHOLD,
-            )?,
-            trade_burst_multiplier: env_decimal(
-                env_map,
-                "SIGNALGUARD_DETECTORS_TRADE_BURST_MULTIPLIER",
-                DEFAULT_TRADE_BURST_MULTIPLIER,
-            )?,
-            trade_burst_min_warmup_windows: env_u32(
-                env_map,
-                "SIGNALGUARD_DETECTORS_TRADE_BURST_MIN_WARMUP_WINDOWS",
-                DEFAULT_TRADE_BURST_MIN_WARMUP_WINDOWS,
-            )?,
-            quote_stuck_ms_threshold: env_u64(
-                env_map,
-                "SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD",
-                DEFAULT_QUOTE_STUCK_MS_THRESHOLD,
-            )?,
-            event_lag_spike_ms_threshold: env_u64(
-                env_map,
-                "SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD",
-                DEFAULT_EVENT_LAG_SPIKE_MS_THRESHOLD,
-            )?,
-            depth_sequence_gap_min_increment: env_u64(
-                env_map,
-                "SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT",
-                DEFAULT_DEPTH_SEQUENCE_GAP_MIN_INCREMENT,
-            )?,
-        };
-        detectors.validate()?;
-
-        let health = HealthScoreSettings {
-            base_score: env_u8(
-                env_map,
-                "SIGNALGUARD_HEALTH_BASE_SCORE",
-                DEFAULT_HEALTH_BASE_SCORE,
-            )?,
-            severity_penalties: SeverityPenaltySettings {
-                info: env_u8(
-                    env_map,
-                    "SIGNALGUARD_HEALTH_INFO_PENALTY",
-                    DEFAULT_HEALTH_INFO_PENALTY,
-                )?,
-                warning: env_u8(
-                    env_map,
-                    "SIGNALGUARD_HEALTH_WARNING_PENALTY",
-                    DEFAULT_HEALTH_WARNING_PENALTY,
-                )?,
-                critical: env_u8(
-                    env_map,
-                    "SIGNALGUARD_HEALTH_CRITICAL_PENALTY",
-                    DEFAULT_HEALTH_CRITICAL_PENALTY,
-                )?,
-            },
-            stale_data_penalty: env_u8(
-                env_map,
-                "SIGNALGUARD_HEALTH_STALE_DATA_PENALTY",
-                DEFAULT_HEALTH_STALE_DATA_PENALTY,
-            )?,
-            recent_anomaly_window_secs: env_u64(
-                env_map,
-                "SIGNALGUARD_HEALTH_RECENT_ANOMALY_WINDOW_SECS",
-                DEFAULT_HEALTH_RECENT_ANOMALY_WINDOW_SECS,
-            )?,
-            status_thresholds: HealthStatusThresholds {
-                healthy_min_score: env_u8(
-                    env_map,
-                    "SIGNALGUARD_HEALTH_HEALTHY_MIN_SCORE",
-                    DEFAULT_HEALTHY_MIN_SCORE,
-                )?,
-                degraded_min_score: env_u8(
-                    env_map,
-                    "SIGNALGUARD_HEALTH_DEGRADED_MIN_SCORE",
-                    DEFAULT_DEGRADED_MIN_SCORE,
-                )?,
-            },
-        };
-        health.validate()?;
+    fn load_from_map(env_map: &EnvMap) -> Result<Self> {
+        let profile = load_runtime_profile(env_map)?;
+        let server = load_server_settings(env_map)?;
+        let database = load_database_settings(env_map, profile)?;
+        let redis = load_redis_settings(env_map, profile)?;
+        let ingestion = load_ingestion_settings(env_map)?;
+        let binance = load_binance_settings(env_map)?;
+        let detectors = load_detector_settings(env_map)?;
+        let health = load_health_settings(env_map)?;
 
         Ok(Self {
-            server: ServerSettings { host, port },
-            database: DatabaseSettings { url: database_url },
-            redis: RedisSettings { url: redis_url },
+            profile,
+            server,
+            database,
+            redis,
             ingestion,
             binance,
             detectors,
             health,
         })
+    }
+}
+
+fn load_runtime_profile(env_map: &EnvMap) -> Result<RuntimeProfile> {
+    env_value(env_map, "SIGNALGUARD_PROFILE")
+        .map(parse_runtime_profile)
+        .unwrap_or(Ok(DEFAULT_RUNTIME_PROFILE))
+}
+
+fn load_server_settings(env_map: &EnvMap) -> Result<ServerSettings> {
+    let host = env_value(env_map, "SIGNALGUARD_HOST").unwrap_or_else(|| DEFAULT_HOST.to_owned());
+    let port = env_value(env_map, "SIGNALGUARD_PORT")
+        .map(parse_port)
+        .unwrap_or(Ok(DEFAULT_PORT))?;
+
+    Ok(ServerSettings { host, port })
+}
+
+fn load_database_settings(env_map: &EnvMap, profile: RuntimeProfile) -> Result<DatabaseSettings> {
+    Ok(DatabaseSettings {
+        url: database_url_for_profile(env_map, profile)?,
+    })
+}
+
+fn load_redis_settings(env_map: &EnvMap, profile: RuntimeProfile) -> Result<RedisSettings> {
+    Ok(RedisSettings {
+        url: redis_url_for_profile(env_map, profile)?,
+    })
+}
+
+fn load_ingestion_settings(env_map: &EnvMap) -> Result<IngestionSettings> {
+    let mode = env_value(env_map, "SIGNALGUARD_INGESTION_MODE")
+        .map(parse_ingestion_mode)
+        .unwrap_or(Ok(IngestionMode::Replay))?;
+    let symbols = env_value(env_map, "SIGNALGUARD_INGESTION_SYMBOLS")
+        .map(parse_symbols)
+        .unwrap_or_else(default_symbols)?;
+    let replay = load_replay_settings(env_map)?;
+    let event_channel_capacity = env_usize(
+        env_map,
+        "SIGNALGUARD_EVENT_CHANNEL_CAPACITY",
+        DEFAULT_EVENT_CHANNEL_CAPACITY,
+    )?;
+
+    let ingestion = IngestionSettings {
+        mode,
+        symbols,
+        replay_path: replay.path,
+        replay_delay_ms: replay.delay_ms,
+        replay_reset_storage: replay.reset_storage,
+        event_channel_capacity,
+    };
+    ingestion.validate()?;
+
+    Ok(ingestion)
+}
+
+fn load_replay_settings(env_map: &EnvMap) -> Result<ReplaySettings> {
+    Ok(ReplaySettings {
+        path: env_value(env_map, "SIGNALGUARD_INGESTION_REPLAY_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_REPLAY_PATH)),
+        delay_ms: env_u64(env_map, "SIGNALGUARD_INGESTION_REPLAY_DELAY_MS", 0)?,
+        reset_storage: env_bool(
+            env_map,
+            "SIGNALGUARD_REPLAY_RESET_STORAGE",
+            DEFAULT_REPLAY_RESET_STORAGE,
+        )?,
+    })
+}
+
+fn load_binance_settings(env_map: &EnvMap) -> Result<BinanceSettings> {
+    let binance = BinanceSettings {
+        websocket_base_url: env_value(env_map, "SIGNALGUARD_BINANCE_WEBSOCKET_BASE_URL")
+            .unwrap_or_else(|| DEFAULT_BINANCE_WEBSOCKET_BASE_URL.to_owned()),
+        reconnect_min_backoff_ms: env_u64(
+            env_map,
+            "SIGNALGUARD_BINANCE_RECONNECT_MIN_BACKOFF_MS",
+            DEFAULT_BINANCE_RECONNECT_MIN_BACKOFF_MS,
+        )?,
+        reconnect_max_backoff_ms: env_u64(
+            env_map,
+            "SIGNALGUARD_BINANCE_RECONNECT_MAX_BACKOFF_MS",
+            DEFAULT_BINANCE_RECONNECT_MAX_BACKOFF_MS,
+        )?,
+    };
+    binance.validate()?;
+
+    Ok(binance)
+}
+
+fn load_detector_settings(env_map: &EnvMap) -> Result<DetectorSettings> {
+    let (price_move_1m_pct_threshold, spread_spike_pct_threshold) =
+        load_price_spread_detector_thresholds(env_map)?;
+    let stale_data_ms_threshold = env_u64(
+        env_map,
+        "SIGNALGUARD_DETECTORS_STALE_DATA_MS_THRESHOLD",
+        DEFAULT_STALE_DATA_MS_THRESHOLD,
+    )?;
+    let (trade_burst_multiplier, trade_burst_min_warmup_windows) =
+        load_trade_burst_detector_settings(env_map)?;
+    let (quote_stuck_ms_threshold, event_lag_spike_ms_threshold) =
+        load_quote_stuck_event_lag_thresholds(env_map)?;
+    let depth_sequence_gap_min_increment = env_u64(
+        env_map,
+        "SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT",
+        DEFAULT_DEPTH_SEQUENCE_GAP_MIN_INCREMENT,
+    )?;
+
+    let detectors = DetectorSettings {
+        price_move_1m_pct_threshold,
+        spread_spike_pct_threshold,
+        stale_data_ms_threshold,
+        trade_burst_multiplier,
+        trade_burst_min_warmup_windows,
+        quote_stuck_ms_threshold,
+        event_lag_spike_ms_threshold,
+        depth_sequence_gap_min_increment,
+    };
+    detectors.validate()?;
+
+    Ok(detectors)
+}
+
+fn load_price_spread_detector_thresholds(env_map: &EnvMap) -> Result<(Decimal, Decimal)> {
+    Ok((
+        env_decimal(
+            env_map,
+            "SIGNALGUARD_DETECTORS_PRICE_MOVE_1M_PCT_THRESHOLD",
+            DEFAULT_PRICE_MOVE_1M_PCT_THRESHOLD,
+        )?,
+        env_decimal(
+            env_map,
+            "SIGNALGUARD_DETECTORS_SPREAD_SPIKE_PCT_THRESHOLD",
+            DEFAULT_SPREAD_SPIKE_PCT_THRESHOLD,
+        )?,
+    ))
+}
+
+fn load_trade_burst_detector_settings(env_map: &EnvMap) -> Result<(Decimal, u32)> {
+    Ok((
+        env_decimal(
+            env_map,
+            "SIGNALGUARD_DETECTORS_TRADE_BURST_MULTIPLIER",
+            DEFAULT_TRADE_BURST_MULTIPLIER,
+        )?,
+        env_u32(
+            env_map,
+            "SIGNALGUARD_DETECTORS_TRADE_BURST_MIN_WARMUP_WINDOWS",
+            DEFAULT_TRADE_BURST_MIN_WARMUP_WINDOWS,
+        )?,
+    ))
+}
+
+fn load_quote_stuck_event_lag_thresholds(env_map: &EnvMap) -> Result<(u64, u64)> {
+    Ok((
+        env_u64(
+            env_map,
+            "SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD",
+            DEFAULT_QUOTE_STUCK_MS_THRESHOLD,
+        )?,
+        env_u64(
+            env_map,
+            "SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD",
+            DEFAULT_EVENT_LAG_SPIKE_MS_THRESHOLD,
+        )?,
+    ))
+}
+
+fn load_health_settings(env_map: &EnvMap) -> Result<HealthScoreSettings> {
+    let base_score = env_u8(
+        env_map,
+        "SIGNALGUARD_HEALTH_BASE_SCORE",
+        DEFAULT_HEALTH_BASE_SCORE,
+    )?;
+    let severity_penalties = load_health_penalty_settings(env_map)?;
+    let stale_data_penalty = env_u8(
+        env_map,
+        "SIGNALGUARD_HEALTH_STALE_DATA_PENALTY",
+        DEFAULT_HEALTH_STALE_DATA_PENALTY,
+    )?;
+    let recent_anomaly_window_secs = env_u64(
+        env_map,
+        "SIGNALGUARD_HEALTH_RECENT_ANOMALY_WINDOW_SECS",
+        DEFAULT_HEALTH_RECENT_ANOMALY_WINDOW_SECS,
+    )?;
+    let status_thresholds = load_health_status_thresholds(env_map)?;
+
+    let health = HealthScoreSettings {
+        base_score,
+        severity_penalties,
+        stale_data_penalty,
+        recent_anomaly_window_secs,
+        status_thresholds,
+    };
+    health.validate()?;
+
+    Ok(health)
+}
+
+fn load_health_penalty_settings(env_map: &EnvMap) -> Result<SeverityPenaltySettings> {
+    Ok(SeverityPenaltySettings {
+        info: env_u8(
+            env_map,
+            "SIGNALGUARD_HEALTH_INFO_PENALTY",
+            DEFAULT_HEALTH_INFO_PENALTY,
+        )?,
+        warning: env_u8(
+            env_map,
+            "SIGNALGUARD_HEALTH_WARNING_PENALTY",
+            DEFAULT_HEALTH_WARNING_PENALTY,
+        )?,
+        critical: env_u8(
+            env_map,
+            "SIGNALGUARD_HEALTH_CRITICAL_PENALTY",
+            DEFAULT_HEALTH_CRITICAL_PENALTY,
+        )?,
+    })
+}
+
+fn load_health_status_thresholds(env_map: &EnvMap) -> Result<HealthStatusThresholds> {
+    Ok(HealthStatusThresholds {
+        healthy_min_score: env_u8(
+            env_map,
+            "SIGNALGUARD_HEALTH_HEALTHY_MIN_SCORE",
+            DEFAULT_HEALTHY_MIN_SCORE,
+        )?,
+        degraded_min_score: env_u8(
+            env_map,
+            "SIGNALGUARD_HEALTH_DEGRADED_MIN_SCORE",
+            DEFAULT_DEGRADED_MIN_SCORE,
+        )?,
+    })
+}
+
+impl RuntimeProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Production => "production",
+        }
     }
 }
 
@@ -311,9 +431,10 @@ impl IngestionMode {
 
 impl IngestionSettings {
     fn validate(&self) -> Result<()> {
-        if self.event_channel_capacity == 0 {
-            bail!("SIGNALGUARD_EVENT_CHANNEL_CAPACITY must be greater than zero");
-        }
+        validate_non_zero(
+            "SIGNALGUARD_EVENT_CHANNEL_CAPACITY",
+            self.event_channel_capacity,
+        )?;
         if self.event_channel_capacity > MAX_EVENT_CHANNEL_CAPACITY {
             bail!(
                 "SIGNALGUARD_EVENT_CHANNEL_CAPACITY must be less than or equal to {MAX_EVENT_CHANNEL_CAPACITY}"
@@ -329,9 +450,10 @@ impl BinanceSettings {
         if self.websocket_base_url.trim().is_empty() {
             bail!("SIGNALGUARD_BINANCE_WEBSOCKET_BASE_URL must not be empty");
         }
-        if self.reconnect_min_backoff_ms == 0 {
-            bail!("SIGNALGUARD_BINANCE_RECONNECT_MIN_BACKOFF_MS must be greater than zero");
-        }
+        validate_non_zero(
+            "SIGNALGUARD_BINANCE_RECONNECT_MIN_BACKOFF_MS",
+            self.reconnect_min_backoff_ms,
+        )?;
         if self.reconnect_max_backoff_ms < self.reconnect_min_backoff_ms {
             bail!(
                 "SIGNALGUARD_BINANCE_RECONNECT_MAX_BACKOFF_MS must be greater than or equal to SIGNALGUARD_BINANCE_RECONNECT_MIN_BACKOFF_MS"
@@ -352,27 +474,30 @@ impl DetectorSettings {
             "SIGNALGUARD_DETECTORS_SPREAD_SPIKE_PCT_THRESHOLD",
             self.spread_spike_pct_threshold,
         )?;
-        if self.stale_data_ms_threshold == 0 {
-            bail!("SIGNALGUARD_DETECTORS_STALE_DATA_MS_THRESHOLD must be greater than zero");
-        }
+        validate_non_zero(
+            "SIGNALGUARD_DETECTORS_STALE_DATA_MS_THRESHOLD",
+            self.stale_data_ms_threshold,
+        )?;
         validate_positive_decimal(
             "SIGNALGUARD_DETECTORS_TRADE_BURST_MULTIPLIER",
             self.trade_burst_multiplier,
         )?;
-        if self.trade_burst_min_warmup_windows == 0 {
-            bail!("SIGNALGUARD_DETECTORS_TRADE_BURST_MIN_WARMUP_WINDOWS must be greater than zero");
-        }
-        if self.quote_stuck_ms_threshold == 0 {
-            bail!("SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD must be greater than zero");
-        }
-        if self.event_lag_spike_ms_threshold == 0 {
-            bail!("SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD must be greater than zero");
-        }
-        if self.depth_sequence_gap_min_increment == 0 {
-            bail!(
-                "SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT must be greater than zero"
-            );
-        }
+        validate_non_zero(
+            "SIGNALGUARD_DETECTORS_TRADE_BURST_MIN_WARMUP_WINDOWS",
+            self.trade_burst_min_warmup_windows,
+        )?;
+        validate_non_zero(
+            "SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD",
+            self.quote_stuck_ms_threshold,
+        )?;
+        validate_non_zero(
+            "SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD",
+            self.event_lag_spike_ms_threshold,
+        )?;
+        validate_non_zero(
+            "SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT",
+            self.depth_sequence_gap_min_increment,
+        )?;
 
         Ok(())
     }
@@ -383,14 +508,15 @@ impl HealthScoreSettings {
         self.severity_penalties.validate()?;
         self.status_thresholds.validate()?;
 
-        validate_score("SIGNALGUARD_HEALTH_BASE_SCORE", self.base_score)?;
-        validate_score(
+        validate_score_at_most_100("SIGNALGUARD_HEALTH_BASE_SCORE", self.base_score)?;
+        validate_score_at_most_100(
             "SIGNALGUARD_HEALTH_STALE_DATA_PENALTY",
             self.stale_data_penalty,
         )?;
-        if self.recent_anomaly_window_secs == 0 {
-            bail!("SIGNALGUARD_HEALTH_RECENT_ANOMALY_WINDOW_SECS must be greater than zero");
-        }
+        validate_non_zero(
+            "SIGNALGUARD_HEALTH_RECENT_ANOMALY_WINDOW_SECS",
+            self.recent_anomaly_window_secs,
+        )?;
         if self.base_score < self.status_thresholds.healthy_min_score {
             bail!(
                 "SIGNALGUARD_HEALTH_BASE_SCORE must be greater than or equal to SIGNALGUARD_HEALTH_HEALTHY_MIN_SCORE"
@@ -403,9 +529,9 @@ impl HealthScoreSettings {
 
 impl SeverityPenaltySettings {
     fn validate(&self) -> Result<()> {
-        validate_score("SIGNALGUARD_HEALTH_INFO_PENALTY", self.info)?;
-        validate_score("SIGNALGUARD_HEALTH_WARNING_PENALTY", self.warning)?;
-        validate_score("SIGNALGUARD_HEALTH_CRITICAL_PENALTY", self.critical)?;
+        validate_score_at_most_100("SIGNALGUARD_HEALTH_INFO_PENALTY", self.info)?;
+        validate_score_at_most_100("SIGNALGUARD_HEALTH_WARNING_PENALTY", self.warning)?;
+        validate_score_at_most_100("SIGNALGUARD_HEALTH_CRITICAL_PENALTY", self.critical)?;
         if self.info > self.warning || self.warning > self.critical {
             bail!("health severity penalties must be ordered info <= warning <= critical");
         }
@@ -416,11 +542,11 @@ impl SeverityPenaltySettings {
 
 impl HealthStatusThresholds {
     fn validate(&self) -> Result<()> {
-        validate_score(
+        validate_score_at_most_100(
             "SIGNALGUARD_HEALTH_HEALTHY_MIN_SCORE",
             self.healthy_min_score,
         )?;
-        validate_score(
+        validate_score_at_most_100(
             "SIGNALGUARD_HEALTH_DEGRADED_MIN_SCORE",
             self.degraded_min_score,
         )?;
@@ -444,8 +570,44 @@ impl HealthStatusThresholds {
     }
 }
 
-fn env_value(env_map: &HashMap<String, String>, key: &str) -> Option<String> {
+fn env_value(env_map: &EnvMap, key: &str) -> Option<String> {
     env_map.get(key).cloned()
+}
+
+fn parse_runtime_profile(value: String) -> Result<RuntimeProfile> {
+    match value.as_str() {
+        "local" => Ok(RuntimeProfile::Local),
+        "production" => Ok(RuntimeProfile::Production),
+        _ => bail!("SIGNALGUARD_PROFILE must be 'local' or 'production': {value}"),
+    }
+}
+
+fn database_url_for_profile(env_map: &EnvMap, profile: RuntimeProfile) -> Result<String> {
+    match (profile, env_value(env_map, "SIGNALGUARD_DATABASE_URL")) {
+        (_, Some(url)) => Ok(url),
+        (RuntimeProfile::Local, None) => {
+            bail!(
+                "SIGNALGUARD_DATABASE_URL must be set when SIGNALGUARD_PROFILE=local; use .env.example, docker compose, or scripts/demo-replay.sh for the local demo"
+            )
+        }
+        (RuntimeProfile::Production, None) => {
+            bail!("SIGNALGUARD_DATABASE_URL must be set when SIGNALGUARD_PROFILE=production")
+        }
+    }
+}
+
+fn redis_url_for_profile(env_map: &EnvMap, profile: RuntimeProfile) -> Result<String> {
+    match (profile, env_value(env_map, "SIGNALGUARD_REDIS_URL")) {
+        (_, Some(url)) => Ok(url),
+        (RuntimeProfile::Local, None) => {
+            bail!(
+                "SIGNALGUARD_REDIS_URL must be set when SIGNALGUARD_PROFILE=local; use .env.example, docker compose, or scripts/demo-replay.sh for the local demo"
+            )
+        }
+        (RuntimeProfile::Production, None) => {
+            bail!("SIGNALGUARD_REDIS_URL must be set when SIGNALGUARD_PROFILE=production")
+        }
+    }
 }
 
 fn parse_port(value: String) -> Result<u16> {
@@ -493,42 +655,44 @@ fn parse_symbols(value: String) -> Result<Vec<Symbol>> {
         .collect()
 }
 
-fn env_decimal(env_map: &HashMap<String, String>, key: &str, default: &str) -> Result<Decimal> {
-    let raw_value = env_value(env_map, key).unwrap_or_else(|| default.to_owned());
-    raw_value
-        .parse::<Decimal>()
-        .with_context(|| format!("{key} must be a valid decimal value: {raw_value}"))
-}
-
-fn env_u64(env_map: &HashMap<String, String>, key: &str, default: u64) -> Result<u64> {
+fn env_parse<T, D>(env_map: &EnvMap, key: &str, default: D, expected: &str) -> Result<T>
+where
+    T: std::str::FromStr,
+    T::Err: std::error::Error + Send + Sync + 'static,
+    D: std::fmt::Display,
+{
     let raw_value = env_value(env_map, key).unwrap_or_else(|| default.to_string());
     raw_value
-        .parse::<u64>()
-        .with_context(|| format!("{key} must be a valid integer value: {raw_value}"))
+        .parse::<T>()
+        .with_context(|| format!("{key} must be {expected}: {raw_value}"))
 }
 
-fn env_u32(env_map: &HashMap<String, String>, key: &str, default: u32) -> Result<u32> {
-    let raw_value = env_value(env_map, key).unwrap_or_else(|| default.to_string());
-    raw_value
-        .parse::<u32>()
-        .with_context(|| format!("{key} must be a valid integer value: {raw_value}"))
+fn env_decimal(env_map: &EnvMap, key: &str, default: &str) -> Result<Decimal> {
+    env_parse(env_map, key, default, "a valid decimal value")
 }
 
-fn env_u8(env_map: &HashMap<String, String>, key: &str, default: u8) -> Result<u8> {
-    let raw_value = env_value(env_map, key).unwrap_or_else(|| default.to_string());
-    raw_value.parse::<u8>().with_context(|| {
-        format!("{key} must be a valid integer value between 0 and 255: {raw_value}")
-    })
+fn env_u64(env_map: &EnvMap, key: &str, default: u64) -> Result<u64> {
+    env_parse(env_map, key, default, "a valid integer value")
 }
 
-fn env_usize(env_map: &HashMap<String, String>, key: &str, default: usize) -> Result<usize> {
-    let raw_value = env_value(env_map, key).unwrap_or_else(|| default.to_string());
-    raw_value
-        .parse::<usize>()
-        .with_context(|| format!("{key} must be a valid integer value: {raw_value}"))
+fn env_u32(env_map: &EnvMap, key: &str, default: u32) -> Result<u32> {
+    env_parse(env_map, key, default, "a valid integer value")
 }
 
-fn env_bool(env_map: &HashMap<String, String>, key: &str, default: bool) -> Result<bool> {
+fn env_u8(env_map: &EnvMap, key: &str, default: u8) -> Result<u8> {
+    env_parse(
+        env_map,
+        key,
+        default,
+        "a valid integer value between 0 and 255",
+    )
+}
+
+fn env_usize(env_map: &EnvMap, key: &str, default: usize) -> Result<usize> {
+    env_parse(env_map, key, default, "a valid integer value")
+}
+
+fn env_bool(env_map: &EnvMap, key: &str, default: bool) -> Result<bool> {
     let raw_value = env_value(env_map, key).unwrap_or_else(|| default.to_string());
     match raw_value.as_str() {
         "true" => Ok(true),
@@ -545,7 +709,18 @@ fn validate_positive_decimal(key: &str, value: Decimal) -> Result<()> {
     Ok(())
 }
 
-fn validate_score(key: &str, value: u8) -> Result<()> {
+fn validate_non_zero<T>(key: &str, value: T) -> Result<()>
+where
+    T: PartialEq + From<u8>,
+{
+    if value == T::from(0) {
+        bail!("{key} must be greater than zero");
+    }
+
+    Ok(())
+}
+
+fn validate_score_at_most_100(key: &str, value: u8) -> Result<()> {
     if value > 100 {
         bail!("{key} must be between 0 and 100");
     }
@@ -554,395 +729,4 @@ fn validate_score(key: &str, value: u8) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use crate::domain::HealthStatus;
-
-    use super::{IngestionMode, Settings};
-
-    #[test]
-    fn settings_use_day_one_defaults() {
-        let settings = Settings::load_from_map(&HashMap::new()).unwrap();
-
-        assert_eq!(settings.server.host, "127.0.0.1");
-        assert_eq!(settings.server.port, 8080);
-        assert_eq!(
-            settings.database.url,
-            "postgres://signalguard:signalguard@127.0.0.1:5432/signalguard"
-        );
-        assert_eq!(settings.redis.url, "redis://127.0.0.1:6379");
-        assert_eq!(settings.ingestion.mode, IngestionMode::Replay);
-        assert_eq!(settings.ingestion.symbols.len(), 1);
-        assert_eq!(settings.ingestion.symbols[0].as_str(), "BTCUSDT");
-        assert_eq!(
-            settings.ingestion.replay_path.as_os_str(),
-            "examples/replay/sample.jsonl"
-        );
-        assert_eq!(settings.ingestion.replay_delay_ms, 0);
-        assert!(settings.ingestion.replay_reset_storage);
-        assert_eq!(settings.ingestion.event_channel_capacity, 1_024);
-        assert_eq!(
-            settings.binance.websocket_base_url,
-            "wss://stream.binance.com:9443"
-        );
-        assert_eq!(settings.binance.reconnect_min_backoff_ms, 500);
-        assert_eq!(settings.binance.reconnect_max_backoff_ms, 5_000);
-        assert_eq!(
-            settings.detectors.price_move_1m_pct_threshold.to_string(),
-            "2.5"
-        );
-        assert_eq!(
-            settings.detectors.spread_spike_pct_threshold.to_string(),
-            "0.5"
-        );
-        assert_eq!(settings.detectors.stale_data_ms_threshold, 5_000);
-        assert_eq!(settings.detectors.trade_burst_multiplier.to_string(), "3.0");
-        assert_eq!(settings.detectors.trade_burst_min_warmup_windows, 5);
-        assert_eq!(settings.detectors.quote_stuck_ms_threshold, 10_000);
-        assert_eq!(settings.detectors.event_lag_spike_ms_threshold, 3_000);
-        assert_eq!(settings.detectors.depth_sequence_gap_min_increment, 1);
-        assert_eq!(settings.health.base_score, 100);
-        assert_eq!(settings.health.severity_penalties.info, 5);
-        assert_eq!(settings.health.severity_penalties.warning, 15);
-        assert_eq!(settings.health.severity_penalties.critical, 35);
-        assert_eq!(settings.health.stale_data_penalty, 25);
-        assert_eq!(settings.health.recent_anomaly_window_secs, 300);
-        assert_eq!(settings.health.status_thresholds.healthy_min_score, 80);
-        assert_eq!(settings.health.status_thresholds.degraded_min_score, 50);
-    }
-
-    #[test]
-    fn invalid_ingestion_mode_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_INGESTION_MODE"),
-            String::from("paper"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains("SIGNALGUARD_INGESTION_MODE must be 'replay' or 'live'"));
-    }
-
-    #[test]
-    fn ingestion_symbols_are_normalized_to_symbols() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_INGESTION_SYMBOLS"),
-            String::from("btcusdt, ethusdt"),
-        )]);
-
-        let loaded = Settings::load_from_map(&settings).unwrap();
-
-        assert_eq!(loaded.ingestion.symbols[0].as_str(), "BTCUSDT");
-        assert_eq!(loaded.ingestion.symbols[1].as_str(), "ETHUSDT");
-    }
-
-    #[test]
-    fn invalid_ingestion_symbol_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_INGESTION_SYMBOLS"),
-            String::from("BTC-USDT"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(
-            error.contains("SIGNALGUARD_INGESTION_SYMBOLS contains an invalid symbol: BTC-USDT")
-        );
-    }
-
-    #[test]
-    fn detector_threshold_override_is_loaded() {
-        let settings = HashMap::from([
-            (
-                String::from("SIGNALGUARD_DETECTORS_PRICE_MOVE_1M_PCT_THRESHOLD"),
-                String::from("1.25"),
-            ),
-            (
-                String::from("SIGNALGUARD_INGESTION_REPLAY_DELAY_MS"),
-                String::from("25"),
-            ),
-            (
-                String::from("SIGNALGUARD_BINANCE_RECONNECT_MAX_BACKOFF_MS"),
-                String::from("1000"),
-            ),
-            (
-                String::from("SIGNALGUARD_REPLAY_RESET_STORAGE"),
-                String::from("false"),
-            ),
-            (
-                String::from("SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD"),
-                String::from("15000"),
-            ),
-            (
-                String::from("SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD"),
-                String::from("4500"),
-            ),
-            (
-                String::from("SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT"),
-                String::from("2"),
-            ),
-        ]);
-
-        let loaded = Settings::load_from_map(&settings).unwrap();
-
-        assert_eq!(
-            loaded.detectors.price_move_1m_pct_threshold.to_string(),
-            "1.25"
-        );
-        assert_eq!(loaded.ingestion.replay_delay_ms, 25);
-        assert!(!loaded.ingestion.replay_reset_storage);
-        assert_eq!(loaded.binance.reconnect_max_backoff_ms, 1_000);
-        assert_eq!(loaded.detectors.quote_stuck_ms_threshold, 15_000);
-        assert_eq!(loaded.detectors.event_lag_spike_ms_threshold, 4_500);
-        assert_eq!(loaded.detectors.depth_sequence_gap_min_increment, 2);
-    }
-
-    #[test]
-    fn replay_reset_storage_defaults_to_true() {
-        let settings = Settings::load_from_map(&HashMap::new()).unwrap();
-
-        assert!(settings.ingestion.replay_reset_storage);
-    }
-
-    #[test]
-    fn replay_reset_storage_can_be_disabled() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_REPLAY_RESET_STORAGE"),
-            String::from("false"),
-        )]);
-
-        let loaded = Settings::load_from_map(&settings).unwrap();
-
-        assert!(!loaded.ingestion.replay_reset_storage);
-    }
-
-    #[test]
-    fn event_channel_capacity_override_is_loaded() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_EVENT_CHANNEL_CAPACITY"),
-            String::from("2048"),
-        )]);
-
-        let loaded = Settings::load_from_map(&settings).unwrap();
-
-        assert_eq!(loaded.ingestion.event_channel_capacity, 2_048);
-    }
-
-    #[test]
-    fn zero_event_channel_capacity_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_EVENT_CHANNEL_CAPACITY"),
-            String::from("0"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains("SIGNALGUARD_EVENT_CHANNEL_CAPACITY must be greater than zero"));
-    }
-
-    #[test]
-    fn oversized_event_channel_capacity_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_EVENT_CHANNEL_CAPACITY"),
-            String::from("1000001"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(
-            error.contains(
-                "SIGNALGUARD_EVENT_CHANNEL_CAPACITY must be less than or equal to 1000000"
-            )
-        );
-    }
-
-    #[test]
-    fn invalid_replay_reset_storage_value_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_REPLAY_RESET_STORAGE"),
-            String::from("maybe"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains("SIGNALGUARD_REPLAY_RESET_STORAGE must be 'true' or 'false'"));
-    }
-
-    #[test]
-    fn invalid_binance_backoff_range_is_rejected() {
-        let settings = HashMap::from([
-            (
-                String::from("SIGNALGUARD_BINANCE_RECONNECT_MIN_BACKOFF_MS"),
-                String::from("2000"),
-            ),
-            (
-                String::from("SIGNALGUARD_BINANCE_RECONNECT_MAX_BACKOFF_MS"),
-                String::from("1000"),
-            ),
-        ]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains(
-            "SIGNALGUARD_BINANCE_RECONNECT_MAX_BACKOFF_MS must be greater than or equal to SIGNALGUARD_BINANCE_RECONNECT_MIN_BACKOFF_MS"
-        ));
-    }
-
-    #[test]
-    fn invalid_server_address_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_HOST"),
-            String::from("invalid host name"),
-        )]);
-
-        let loaded = Settings::load_from_map(&settings).unwrap();
-        let error = loaded.server.socket_address().unwrap_err().to_string();
-
-        assert!(error.contains("invalid server address"));
-    }
-
-    #[test]
-    fn invalid_port_is_rejected() {
-        let settings =
-            HashMap::from([(String::from("SIGNALGUARD_PORT"), String::from("not-a-port"))]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains("SIGNALGUARD_PORT must be a valid port"));
-    }
-
-    #[test]
-    fn zero_trade_burst_warmup_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_DETECTORS_TRADE_BURST_MIN_WARMUP_WINDOWS"),
-            String::from("0"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains(
-            "SIGNALGUARD_DETECTORS_TRADE_BURST_MIN_WARMUP_WINDOWS must be greater than zero"
-        ));
-    }
-
-    #[test]
-    fn negative_detector_threshold_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_DETECTORS_SPREAD_SPIKE_PCT_THRESHOLD"),
-            String::from("-0.5"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains(
-            "SIGNALGUARD_DETECTORS_SPREAD_SPIKE_PCT_THRESHOLD must be greater than zero"
-        ));
-    }
-
-    #[test]
-    fn zero_quote_stuck_threshold_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD"),
-            String::from("0"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(
-            error.contains(
-                "SIGNALGUARD_DETECTORS_QUOTE_STUCK_MS_THRESHOLD must be greater than zero"
-            )
-        );
-    }
-
-    #[test]
-    fn zero_event_lag_spike_threshold_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD"),
-            String::from("0"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains(
-            "SIGNALGUARD_DETECTORS_EVENT_LAG_SPIKE_MS_THRESHOLD must be greater than zero"
-        ));
-    }
-
-    #[test]
-    fn zero_depth_sequence_gap_increment_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT"),
-            String::from("0"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains(
-            "SIGNALGUARD_DETECTORS_DEPTH_SEQUENCE_GAP_MIN_INCREMENT must be greater than zero"
-        ));
-    }
-
-    #[test]
-    fn invalid_health_threshold_order_is_rejected() {
-        let settings = HashMap::from([
-            (
-                String::from("SIGNALGUARD_HEALTH_HEALTHY_MIN_SCORE"),
-                String::from("40"),
-            ),
-            (
-                String::from("SIGNALGUARD_HEALTH_DEGRADED_MIN_SCORE"),
-                String::from("50"),
-            ),
-        ]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains(
-            "SIGNALGUARD_HEALTH_DEGRADED_MIN_SCORE must be less than SIGNALGUARD_HEALTH_HEALTHY_MIN_SCORE"
-        ));
-    }
-
-    #[test]
-    fn health_penalty_above_score_range_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_HEALTH_CRITICAL_PENALTY"),
-            String::from("101"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains("SIGNALGUARD_HEALTH_CRITICAL_PENALTY must be between 0 and 100"));
-    }
-
-    #[test]
-    fn health_base_score_above_score_range_is_rejected() {
-        let settings = HashMap::from([(
-            String::from("SIGNALGUARD_HEALTH_BASE_SCORE"),
-            String::from("101"),
-        )]);
-
-        let error = Settings::load_from_map(&settings).unwrap_err().to_string();
-
-        assert!(error.contains("SIGNALGUARD_HEALTH_BASE_SCORE must be between 0 and 100"));
-    }
-
-    #[test]
-    fn health_status_thresholds_classify_scores() {
-        let settings = Settings::load_from_map(&HashMap::new()).unwrap();
-
-        assert_eq!(
-            settings.health.status_thresholds.classify(95),
-            HealthStatus::Healthy
-        );
-        assert_eq!(
-            settings.health.status_thresholds.classify(60),
-            HealthStatus::Degraded
-        );
-        assert_eq!(
-            settings.health.status_thresholds.classify(20),
-            HealthStatus::Unhealthy
-        );
-    }
-}
+mod tests;

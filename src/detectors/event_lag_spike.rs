@@ -1,6 +1,6 @@
 use crate::{
-    detectors::engine::DetectionContext,
-    domain::{AnomalyEvent, AnomalyMeasurement, AnomalyType, Severity},
+    detectors::{anomaly_from_context, engine::DetectionContext},
+    domain::{AnomalyEvent, AnomalyType, Severity},
 };
 
 pub fn detect(context: &DetectionContext<'_>) -> Option<AnomalyEvent> {
@@ -22,39 +22,35 @@ pub fn detect(context: &DetectionContext<'_>) -> Option<AnomalyEvent> {
         Severity::Warning
     };
 
-    Some(AnomalyEvent::new(
-        context.state.symbol.clone(),
+    Some(anomaly_from_context(
+        context,
         AnomalyType::EventLagSpike,
         severity,
         format!(
             "event lag reached {} ms between event_time and ingest_time, exceeding the configured {} ms threshold",
             lag_ms, threshold
         ),
-        AnomalyMeasurement {
-            observed_value: Some(lag_ms as f64),
-            threshold_value: Some(threshold as f64),
-        },
-        context.event_time,
-        context.now,
+        Some(lag_ms as f64),
+        Some(threshold as f64),
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, TimeZone, Utc};
-    use rust_decimal::Decimal;
+    use chrono::Duration;
 
     use super::detect;
     use crate::{
         config::DetectorSettings,
         detectors::engine::DetectionContext,
-        domain::{MarketState, Symbol},
+        detectors::test_support::{btc_market_state, default_detector_settings, test_time},
+        domain::MarketState,
     };
 
     #[test]
     fn event_lag_spike_emits_above_threshold() {
         let state = state_with_times(Some(0), Some(4));
-        let settings = settings();
+        let settings = default_detector_settings();
         let anomaly = detect(&context(&state, &settings)).unwrap();
 
         assert_eq!(
@@ -70,14 +66,14 @@ mod tests {
     #[test]
     fn event_lag_spike_does_not_emit_below_threshold() {
         let state = state_with_times(Some(0), Some(2));
-        let settings = settings();
+        let settings = default_detector_settings();
 
         assert!(detect(&context(&state, &settings)).is_none());
     }
 
     #[test]
     fn event_lag_spike_does_not_emit_when_times_are_missing() {
-        let settings = settings();
+        let settings = default_detector_settings();
         let missing_event = state_with_times(None, Some(4));
         let missing_ingest = state_with_times(Some(0), None);
 
@@ -88,32 +84,17 @@ mod tests {
     #[test]
     fn event_lag_spike_ignores_negative_lag() {
         let state = state_with_event_and_ingest(5, 4);
-        let settings = settings();
+        let settings = default_detector_settings();
 
         assert!(detect(&context(&state, &settings)).is_none());
-    }
-
-    fn settings() -> DetectorSettings {
-        DetectorSettings {
-            price_move_1m_pct_threshold: Decimal::new(25, 1),
-            spread_spike_pct_threshold: Decimal::new(5, 1),
-            stale_data_ms_threshold: 5_000,
-            trade_burst_multiplier: Decimal::new(3, 0),
-            trade_burst_min_warmup_windows: 5,
-            quote_stuck_ms_threshold: 10_000,
-            event_lag_spike_ms_threshold: 3_000,
-            depth_sequence_gap_min_increment: 1,
-        }
     }
 
     fn context<'a>(state: &'a MarketState, settings: &'a DetectorSettings) -> DetectionContext<'a> {
         DetectionContext {
             state,
             settings,
-            now: Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 0).unwrap(),
-            event_time: state
-                .last_event_time
-                .unwrap_or_else(|| Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()),
+            now: test_time(60),
+            event_time: state.last_event_time.unwrap_or_else(|| test_time(0)),
         }
     }
 
@@ -121,8 +102,8 @@ mod tests {
         event_offset_seconds: Option<i64>,
         ingest_offset_seconds: Option<i64>,
     ) -> MarketState {
-        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let mut state = MarketState::new(Symbol::new("BTCUSDT").unwrap());
+        let base = test_time(0);
+        let mut state = btc_market_state();
         state.last_event_time =
             event_offset_seconds.map(|seconds| base + Duration::seconds(seconds));
         state.last_ingest_time =

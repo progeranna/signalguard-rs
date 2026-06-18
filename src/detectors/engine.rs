@@ -100,43 +100,24 @@ impl DetectorEngine {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use chrono::{DateTime, Utc};
     use rust_decimal::Decimal;
 
     use super::DetectorEngine;
     use crate::{
-        config::DetectorSettings,
-        domain::{MarketSignals, MarketState, Symbol},
+        detectors::test_support::{base_signals, default_detector_settings, symbol, test_time},
+        domain::MarketState,
     };
 
     #[test]
     fn detector_engine_tracks_symbols_independently() {
         let mut engine = DetectorEngine::default();
-        let btc_state = state_with(
-            "BTCUSDT",
-            Some(3.0),
-            None,
-            Some(1.0),
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-        );
-        let eth_state = state_with(
-            "ETHUSDT",
-            Some(3.0),
-            None,
-            Some(1.0),
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 1).unwrap(),
-        );
+        let settings = default_detector_settings();
+        let btc_state = state_with("BTCUSDT", Some(3.0), None, Some(1.0), test_time(0));
+        let eth_state = state_with("ETHUSDT", Some(3.0), None, Some(1.0), test_time(1));
 
-        let btc = engine.evaluate(
-            &btc_state,
-            &settings(),
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap(),
-        );
-        let eth = engine.evaluate(
-            &eth_state,
-            &settings(),
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap(),
-        );
+        let btc = engine.evaluate(&btc_state, &settings, test_time(10));
+        let eth = engine.evaluate(&eth_state, &settings, test_time(10));
 
         assert_eq!(btc.len(), 2);
         assert_eq!(eth.len(), 2);
@@ -145,58 +126,26 @@ mod tests {
     #[test]
     fn quote_stuck_state_is_independent_per_symbol() {
         let mut engine = DetectorEngine::default();
-        let settings = settings();
+        let settings = default_detector_settings();
 
-        let btc_first = top_of_book_state(
-            "BTCUSDT",
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-            Decimal::new(2, 0),
-        );
-        let eth_first = top_of_book_state(
-            "ETHUSDT",
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-            Decimal::new(2, 0),
-        );
-        let btc_second = top_of_book_state(
-            "BTCUSDT",
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 11).unwrap(),
-            Decimal::new(2, 0),
-        );
-        let eth_changed = top_of_book_state(
-            "ETHUSDT",
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 11).unwrap(),
-            Decimal::new(3, 0),
-        );
+        let btc_first = top_of_book_state("BTCUSDT", test_time(0), Decimal::new(2, 0));
+        let eth_first = top_of_book_state("ETHUSDT", test_time(0), Decimal::new(2, 0));
+        let btc_second = top_of_book_state("BTCUSDT", test_time(11), Decimal::new(2, 0));
+        let eth_changed = top_of_book_state("ETHUSDT", test_time(11), Decimal::new(3, 0));
 
         assert!(
             engine
-                .evaluate(
-                    &btc_first,
-                    &settings,
-                    Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-                )
+                .evaluate(&btc_first, &settings, test_time(0))
                 .is_empty()
         );
         assert!(
             engine
-                .evaluate(
-                    &eth_first,
-                    &settings,
-                    Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-                )
+                .evaluate(&eth_first, &settings, test_time(0))
                 .is_empty()
         );
 
-        let btc_anomalies = engine.evaluate(
-            &btc_second,
-            &settings,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 11).unwrap(),
-        );
-        let eth_anomalies = engine.evaluate(
-            &eth_changed,
-            &settings,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 11).unwrap(),
-        );
+        let btc_anomalies = engine.evaluate(&btc_second, &settings, test_time(11));
+        let eth_anomalies = engine.evaluate(&eth_changed, &settings, test_time(11));
 
         assert!(
             btc_anomalies
@@ -213,21 +162,13 @@ mod tests {
     #[test]
     fn depth_sequence_gap_state_is_independent_per_symbol() {
         let mut engine = DetectorEngine::default();
-        let settings = settings();
+        let settings = default_detector_settings();
 
         let btc_gap = depth_gap_state("BTCUSDT", 1);
         let eth_gap = depth_gap_state("ETHUSDT", 0);
 
-        let btc_anomalies = engine.evaluate(
-            &btc_gap,
-            &settings,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap(),
-        );
-        let eth_anomalies = engine.evaluate(
-            &eth_gap,
-            &settings,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap(),
-        );
+        let btc_anomalies = engine.evaluate(&btc_gap, &settings, test_time(10));
+        let eth_anomalies = engine.evaluate(&eth_gap, &settings, test_time(10));
 
         assert!(btc_anomalies.iter().any(|anomaly| anomaly.anomaly_type
             == crate::domain::AnomalyType::DepthSequenceGap));
@@ -239,24 +180,11 @@ mod tests {
     #[test]
     fn duplicate_suppression_uses_cooldown() {
         let mut engine = DetectorEngine::default();
-        let state = state_with(
-            "BTCUSDT",
-            Some(3.0),
-            None,
-            Some(1.0),
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-        );
+        let settings = default_detector_settings();
+        let state = state_with("BTCUSDT", Some(3.0), None, Some(1.0), test_time(0));
 
-        let first = engine.evaluate(
-            &state,
-            &settings(),
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap(),
-        );
-        let second = engine.evaluate(
-            &state,
-            &settings(),
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 11).unwrap(),
-        );
+        let first = engine.evaluate(&state, &settings, test_time(10));
+        let second = engine.evaluate(&state, &settings, test_time(11));
 
         assert_eq!(first.len(), 2);
         assert!(second.is_empty());
@@ -265,74 +193,42 @@ mod tests {
     #[test]
     fn cooldown_uses_processing_time_when_market_event_time_moves_backwards() {
         let mut engine = DetectorEngine::default();
-        let first_state = state_with(
-            "BTCUSDT",
-            Some(3.0),
-            None,
-            None,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 30).unwrap(),
-        );
-        let older_state = state_with(
-            "BTCUSDT",
-            Some(3.0),
-            None,
-            None,
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-        );
+        let settings = default_detector_settings();
+        let first_state = state_with("BTCUSDT", Some(3.0), None, None, test_time(30));
+        let older_state = state_with("BTCUSDT", Some(3.0), None, None, test_time(0));
 
-        let first = engine.evaluate(
-            &first_state,
-            &settings(),
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 30).unwrap(),
-        );
-        let second = engine.evaluate(
-            &older_state,
-            &settings(),
-            Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 1).unwrap(),
-        );
+        let first = engine.evaluate(&first_state, &settings, test_time(30));
+        let second = engine.evaluate(&older_state, &settings, test_time(61));
 
         assert_eq!(first.len(), 1);
         assert!(second.iter().any(|anomaly| anomaly.anomaly_type
             == crate::domain::AnomalyType::PriceMove
-            && anomaly.event_time == Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()));
-    }
-
-    fn settings() -> DetectorSettings {
-        DetectorSettings {
-            price_move_1m_pct_threshold: Decimal::new(25, 1),
-            spread_spike_pct_threshold: Decimal::new(5, 1),
-            stale_data_ms_threshold: 5_000,
-            trade_burst_multiplier: Decimal::new(3, 0),
-            trade_burst_min_warmup_windows: 5,
-            quote_stuck_ms_threshold: 10_000,
-            event_lag_spike_ms_threshold: 3_000,
-            depth_sequence_gap_min_increment: 1,
-        }
+            && anomaly.event_time == test_time(0)));
     }
 
     fn state_with(
-        symbol: &str,
+        raw_symbol: &str,
         price_change_1m_pct: Option<f64>,
         spread_pct: Option<f64>,
         trades_per_minute: Option<f64>,
-        last_event_time: chrono::DateTime<Utc>,
+        last_event_time: DateTime<Utc>,
     ) -> MarketState {
-        let mut state = MarketState::new(Symbol::new(symbol).unwrap());
-        state.signals = MarketSignals {
-            spread_pct,
-            price_change_1m_pct,
-            trades_per_minute,
-        };
+        let mut state = MarketState::new(symbol(raw_symbol));
+        let mut signals = base_signals();
+        signals.spread_pct = spread_pct;
+        signals.price_change_1m_pct = price_change_1m_pct;
+        signals.trades_per_minute = trades_per_minute;
+        state.signals = signals;
         state.last_event_time = Some(last_event_time);
         state
     }
 
     fn top_of_book_state(
-        symbol: &str,
-        last_event_time: chrono::DateTime<Utc>,
+        raw_symbol: &str,
+        last_event_time: DateTime<Utc>,
         top_ask_quantity: Decimal,
     ) -> MarketState {
-        let mut state = MarketState::new(Symbol::new(symbol).unwrap());
+        let mut state = MarketState::new(symbol(raw_symbol));
         state.best_bid_price = Some(Decimal::new(6500000, 2));
         state.best_bid_quantity = Some(Decimal::new(125, 2));
         state.best_ask_price = Some(Decimal::new(6500100, 2));
@@ -344,9 +240,9 @@ mod tests {
         state
     }
 
-    fn depth_gap_state(symbol: &str, depth_sequence_gap_count: u64) -> MarketState {
-        let last_event_time = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 10).unwrap();
-        let mut state = MarketState::new(Symbol::new(symbol).unwrap());
+    fn depth_gap_state(raw_symbol: &str, depth_sequence_gap_count: u64) -> MarketState {
+        let last_event_time = test_time(10);
+        let mut state = MarketState::new(symbol(raw_symbol));
         state.depth_sequence_gap_count = depth_sequence_gap_count;
         state.last_event_time = Some(last_event_time);
         state.last_ingest_time = Some(last_event_time);

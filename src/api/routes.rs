@@ -18,6 +18,7 @@ mod tests {
     use axum::{
         body::Body,
         http::{Request, StatusCode, header},
+        response::Response,
     };
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use tower::ServiceExt;
@@ -35,22 +36,14 @@ mod tests {
 
     #[tokio::test]
     async fn health_route_returns_ok() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(Request::get("/health").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+        let response = get("/health", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
     async fn metrics_route_returns_ok() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+        let response = get("/metrics", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::OK);
     }
@@ -61,17 +54,17 @@ mod tests {
         counters.increment_parse_errors();
         counters.increment_binance_quote_events();
 
-        let response = router()
-            .with_state(AppState {
+        let response = get(
+            "/metrics",
+            AppState {
                 pg_pool: unused_test_pool(),
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
                 counters,
-            })
-            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+            },
+        )
+        .await;
 
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -91,15 +84,7 @@ mod tests {
 
     #[tokio::test]
     async fn pipeline_health_route_returns_ok() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(
-                Request::get("/pipeline/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = get("/pipeline/health", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::OK);
     }
@@ -108,21 +93,17 @@ mod tests {
     async fn pipeline_health_route_returns_expected_fields() {
         let counters = InternalCounters::default();
         counters.increment_parse_errors();
-        let response = router()
-            .with_state(AppState {
+        let response = get(
+            "/pipeline/health",
+            AppState {
                 pg_pool: unused_test_pool(),
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
                 counters,
-            })
-            .oneshot(
-                Request::get("/pipeline/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+            },
+        )
+        .await;
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -138,103 +119,59 @@ mod tests {
 
     #[tokio::test]
     async fn symbols_route_reports_unavailable_cache() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(Request::get("/symbols").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+        let response = get("/symbols", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
     async fn market_state_route_reports_unavailable_cache() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(
-                Request::get("/market/BTCUSDT/state")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = get("/market/BTCUSDT/state", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
     async fn market_health_route_reports_unavailable_cache() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(
-                Request::get("/market/BTCUSDT/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = get("/market/BTCUSDT/health", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
     async fn market_health_route_rejects_invalid_symbol() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(
-                Request::get("/market/BTC-USDT/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = get("/market/BTC-USDT/health", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn anomalies_route_rejects_invalid_limit() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(
-                Request::get("/anomalies?limit=invalid")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = get("/anomalies?limit=invalid", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn anomalies_route_rejects_zero_limit() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(
-                Request::get("/anomalies?limit=0")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = get("/anomalies?limit=0", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn anomalies_route_rejects_limit_above_maximum() {
-        let response = router()
-            .with_state(unavailable_state())
-            .oneshot(
-                Request::get("/anomalies?limit=501")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = get("/anomalies?limit=501", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    async fn get(path: &str, state: AppState) -> Response {
+        router()
+            .with_state(state)
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap()
     }
 
     fn unavailable_state() -> AppState {

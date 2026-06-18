@@ -2,10 +2,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use futures_util::StreamExt;
+use futures_util::{Stream, StreamExt};
 use sqlx::PgPool;
 use tokio::{sync::watch, time::sleep};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{Error as WebSocketError, protocol::Message},
+};
 use tracing::{info, warn};
 
 use crate::{
@@ -20,6 +23,12 @@ use super::{IngestedEvent, IngestionSource, pipeline};
 #[derive(Debug, Default)]
 pub struct LiveRunReport {
     pub received_events: usize,
+}
+
+#[derive(Debug, Default)]
+struct ConnectedStreamReport {
+    received_events: usize,
+    shutdown_requested: bool,
 }
 
 pub async fn run_live_ingestion(
@@ -81,48 +90,13 @@ async fn run_live_source(
         match connect_async(&url).await {
             Ok((stream, _response)) => {
                 reconnect_attempt = 0;
-                let (_writer, mut reader) = stream.split();
+                let (_writer, reader) = stream.split();
+                let stream_report =
+                    run_connected_stream(reader, &sender, &counters, &mut shutdown).await?;
+                received_events += stream_report.received_events;
 
-                loop {
-                    tokio::select! {
-                        _ = shutdown.changed() => {
-                            if *shutdown.borrow() {
-                                return Ok(LiveRunReport { received_events });
-                            }
-                        }
-                        message = reader.next() => {
-                            match message {
-                                Some(Ok(Message::Text(payload))) => {
-                                    if handle_binance_text_message(
-                                        &payload,
-                                        &sender,
-                                        &counters,
-                                        Utc::now(),
-                                    )
-                                    .await?
-                                    {
-                                        received_events += 1;
-                                    }
-                                }
-                                Some(Ok(Message::Binary(_))) => {}
-                                Some(Ok(Message::Ping(_))) => {}
-                                Some(Ok(Message::Pong(_))) => {}
-                                Some(Ok(Message::Frame(_))) => {}
-                                Some(Ok(Message::Close(frame))) => {
-                                    warn!(?frame, "Binance websocket closed");
-                                    break;
-                                }
-                                Some(Err(error)) => {
-                                    warn!(%error, "Binance websocket read failed");
-                                    break;
-                                }
-                                None => {
-                                    warn!("Binance websocket stream ended");
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                if stream_report.shutdown_requested {
+                    return Ok(LiveRunReport { received_events });
                 }
             }
             Err(error) => {
@@ -150,6 +124,68 @@ async fn run_live_source(
     }
 
     Ok(LiveRunReport { received_events })
+}
+
+async fn run_connected_stream<Messages>(
+    mut messages: Messages,
+    sender: &tokio::sync::mpsc::Sender<IngestedEvent>,
+    counters: &InternalCounters,
+    shutdown: &mut watch::Receiver<bool>,
+) -> Result<ConnectedStreamReport>
+where
+    Messages: Stream<Item = std::result::Result<Message, WebSocketError>> + Unpin,
+{
+    let mut received_events = 0usize;
+
+    loop {
+        tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    return Ok(ConnectedStreamReport {
+                        received_events,
+                        shutdown_requested: true,
+                    });
+                }
+            }
+            message = messages.next() => {
+                match message {
+                    Some(Ok(Message::Text(payload))) => {
+                        if handle_binance_text_message(
+                            &payload,
+                            sender,
+                            counters,
+                            Utc::now(),
+                        )
+                        .await?
+                        {
+                            received_events += 1;
+                        }
+                    }
+                    Some(Ok(Message::Binary(_))) => {}
+                    Some(Ok(Message::Ping(_))) => {}
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(Message::Frame(_))) => {}
+                    Some(Ok(Message::Close(frame))) => {
+                        warn!(?frame, "Binance websocket closed");
+                        break;
+                    }
+                    Some(Err(error)) => {
+                        warn!(%error, "Binance websocket read failed");
+                        break;
+                    }
+                    None => {
+                        warn!("Binance websocket stream ended");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(ConnectedStreamReport {
+        received_events,
+        shutdown_requested: false,
+    })
 }
 
 async fn handle_binance_text_message(

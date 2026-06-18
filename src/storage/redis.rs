@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use redis::AsyncCommands;
@@ -40,6 +40,8 @@ pub enum CacheError {
         operation: &'static str,
         message: String,
     },
+    #[error("in-memory cache lock failed for `{operation}`")]
+    InMemoryLock { operation: &'static str },
 }
 
 impl RedisCache {
@@ -66,39 +68,24 @@ impl RedisCache {
     }
 
     pub async fn set_market_state(&self, state: &MarketState) -> Result<(), CacheError> {
+        let operation = "set_market_state";
         if let Some(states) = &self.in_memory_states {
-            states
-                .lock()
-                .expect("in-memory Redis test cache mutex poisoned")
-                .insert(state.symbol.clone(), state.clone());
+            lock_in_memory_states(states, operation)?.insert(state.symbol.clone(), state.clone());
             return Ok(());
         }
 
         let key = market_state_key(&state.symbol);
-        let payload = serialize("set_market_state", state)?;
-        let client = self.client()?;
-        let mut connection = client
-            .get_multiplexed_async_connection()
-            .await
-            .map_err(|error| CacheError::Redis {
-                operation: "set_market_state",
-                source: error,
-            })?;
+        let payload = serialize(operation, state)?;
+        let mut connection = self.connection_for(operation).await?;
 
         let (): () = connection
             .set(&key, payload)
             .await
-            .map_err(|error| CacheError::Redis {
-                operation: "set_market_state",
-                source: error,
-            })?;
+            .map_err(redis_error(operation))?;
         let (): () = connection
             .sadd(SYMBOL_SET_KEY, state.symbol.as_str())
             .await
-            .map_err(|error| CacheError::Redis {
-                operation: "set_market_state",
-                source: error,
-            })?;
+            .map_err(redis_error(operation))?;
 
         Ok(())
     }
@@ -107,41 +94,28 @@ impl RedisCache {
         &self,
         symbol: &Symbol,
     ) -> Result<Option<MarketState>, CacheError> {
+        let operation = "get_market_state";
         if let Some(states) = &self.in_memory_states {
-            return Ok(states
-                .lock()
-                .expect("in-memory Redis test cache mutex poisoned")
+            return Ok(lock_in_memory_states(states, operation)?
                 .get(symbol)
                 .cloned());
         }
 
-        let client = self.client()?;
-        let mut connection = client
-            .get_multiplexed_async_connection()
+        let mut connection = self.connection_for(operation).await?;
+        let payload: Option<String> = connection
+            .get(market_state_key(symbol))
             .await
-            .map_err(|error| CacheError::Redis {
-                operation: "get_market_state",
-                source: error,
-            })?;
-        let payload: Option<String> =
-            connection
-                .get(market_state_key(symbol))
-                .await
-                .map_err(|error| CacheError::Redis {
-                    operation: "get_market_state",
-                    source: error,
-                })?;
+            .map_err(redis_error(operation))?;
 
         payload
-            .map(|json| deserialize("get_market_state", &json))
+            .map(|json| deserialize(operation, &json))
             .transpose()
     }
 
     pub async fn list_symbols(&self) -> Result<Vec<Symbol>, CacheError> {
+        let operation = "list_symbols";
         if let Some(states) = &self.in_memory_states {
-            let mut symbols = states
-                .lock()
-                .expect("in-memory Redis test cache mutex poisoned")
+            let mut symbols = lock_in_memory_states(states, operation)?
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>();
@@ -149,28 +123,17 @@ impl RedisCache {
             return Ok(symbols);
         }
 
-        let client = self.client()?;
-        let mut connection = client
-            .get_multiplexed_async_connection()
+        let mut connection = self.connection_for(operation).await?;
+        let raw_symbols: Vec<String> = connection
+            .smembers(SYMBOL_SET_KEY)
             .await
-            .map_err(|error| CacheError::Redis {
-                operation: "list_symbols",
-                source: error,
-            })?;
-        let raw_symbols: Vec<String> =
-            connection
-                .smembers(SYMBOL_SET_KEY)
-                .await
-                .map_err(|error| CacheError::Redis {
-                    operation: "list_symbols",
-                    source: error,
-                })?;
+            .map_err(redis_error(operation))?;
 
         let mut symbols = raw_symbols
             .into_iter()
             .map(|raw_symbol| {
                 Symbol::new(raw_symbol).map_err(|error| CacheError::InvalidData {
-                    operation: "list_symbols",
+                    operation,
                     message: error.to_string(),
                 })
             })
@@ -181,53 +144,44 @@ impl RedisCache {
     }
 
     pub async fn clear_market_state_cache(&self) -> Result<usize, CacheError> {
+        let operation = "clear_market_state_cache";
         if let Some(states) = &self.in_memory_states {
-            let mut states = states
-                .lock()
-                .expect("in-memory Redis test cache mutex poisoned");
+            let mut states = lock_in_memory_states(states, operation)?;
             let cleared_keys = states.len();
             states.clear();
             return Ok(cleared_keys);
         }
 
-        let client = self.client()?;
-        let mut connection = client
-            .get_multiplexed_async_connection()
-            .await
-            .map_err(|error| CacheError::Redis {
-                operation: "clear_market_state_cache",
-                source: error,
-            })?;
+        let mut connection = self.connection_for(operation).await?;
         let mut cursor = 0u64;
-        let mut keys_to_clear = Vec::new();
+        let mut cleared_keys = 0usize;
         loop {
-            let (next_cursor, mut batch): (u64, Vec<String>) = redis::cmd("SCAN")
+            let (next_cursor, batch): (u64, Vec<String>) = redis::cmd("SCAN")
                 .arg(cursor)
                 .arg("MATCH")
                 .arg(market_state_pattern())
                 .query_async(&mut connection)
                 .await
-                .map_err(|error| CacheError::Redis {
-                    operation: "clear_market_state_cache",
-                    source: error,
-                })?;
-            keys_to_clear.append(&mut batch);
+                .map_err(redis_error(operation))?;
+            if !batch.is_empty() {
+                let deleted: usize = connection
+                    .del(batch)
+                    .await
+                    .map_err(redis_error(operation))?;
+                cleared_keys += deleted;
+            }
+
             cursor = next_cursor;
             if cursor == 0 {
                 break;
             }
         }
 
-        keys_to_clear.push(symbol_set_key().to_owned());
-
-        let cleared_keys =
-            connection
-                .del(keys_to_clear)
-                .await
-                .map_err(|error| CacheError::Redis {
-                    operation: "clear_market_state_cache",
-                    source: error,
-                })?;
+        let deleted_symbols: usize = connection
+            .del(symbol_set_key())
+            .await
+            .map_err(redis_error(operation))?;
+        cleared_keys += deleted_symbols;
 
         info!(cleared_keys, "cleared SignalGuard market state Redis cache");
 
@@ -247,6 +201,10 @@ fn symbol_set_key() -> &'static str {
     SYMBOL_SET_KEY
 }
 
+fn redis_error(operation: &'static str) -> impl FnOnce(redis::RedisError) -> CacheError {
+    move |source| CacheError::Redis { operation, source }
+}
+
 fn serialize<T: Serialize>(operation: &'static str, value: &T) -> Result<String, CacheError> {
     serde_json::to_string(value).map_err(|error| CacheError::Serialization {
         operation,
@@ -259,6 +217,15 @@ fn deserialize<T: DeserializeOwned>(operation: &'static str, value: &str) -> Res
         operation,
         source: error,
     })
+}
+
+fn lock_in_memory_states<'a>(
+    states: &'a Arc<Mutex<HashMap<Symbol, MarketState>>>,
+    operation: &'static str,
+) -> Result<MutexGuard<'a, HashMap<Symbol, MarketState>>, CacheError> {
+    states
+        .lock()
+        .map_err(|_| CacheError::InMemoryLock { operation })
 }
 
 impl RedisCache {
@@ -277,6 +244,16 @@ impl RedisCache {
 
     fn client(&self) -> Result<&redis::Client, CacheError> {
         self.client.as_ref().ok_or(CacheError::Unavailable)
+    }
+
+    async fn connection_for(
+        &self,
+        operation: &'static str,
+    ) -> Result<redis::aio::MultiplexedConnection, CacheError> {
+        self.client()?
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(redis_error(operation))
     }
 }
 

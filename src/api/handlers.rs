@@ -11,7 +11,10 @@ use crate::{
     domain::{MarketState, Symbol},
     health::{HealthScoringInput, evaluate_health},
     state,
-    storage::{CacheError, StorageError, get_recent_anomalies},
+    storage::{
+        CacheError, MAX_RECENT_ANOMALY_LIMIT as MAX_ANOMALY_LIMIT, StorageError,
+        get_recent_anomalies,
+    },
     telemetry::render_prometheus_metrics,
 };
 
@@ -25,7 +28,6 @@ use super::{
 };
 
 const DEFAULT_ANOMALY_LIMIT: u32 = 50;
-const MAX_ANOMALY_LIMIT: u32 = 500;
 const HEALTH_ANOMALY_LIMIT: u32 = 100;
 
 #[derive(Debug, Deserialize)]
@@ -77,8 +79,7 @@ pub async fn market_state(
     State(state): State<AppState>,
     Path(symbol): Path<String>,
 ) -> Result<Json<MarketStateResponse>, ApiError> {
-    let symbol = Symbol::new(symbol)
-        .map_err(|error| ApiError::InvalidSymbol(format!("invalid market symbol: {error}")))?;
+    let symbol = parse_market_symbol(symbol)?;
     let state_snapshot = load_market_state(&state, &symbol).await?;
 
     Ok(Json(MarketStateResponse::from_market_state(
@@ -91,8 +92,7 @@ pub async fn market_health(
     State(state): State<AppState>,
     Path(symbol): Path<String>,
 ) -> Result<Json<MarketHealthResponse>, ApiError> {
-    let symbol = Symbol::new(symbol)
-        .map_err(|error| ApiError::InvalidSymbol(format!("invalid market symbol: {error}")))?;
+    let symbol = parse_market_symbol(symbol)?;
     let now = state::snapshot_now();
     let state_snapshot = load_market_state(&state, &symbol).await?;
     let anomalies = get_recent_anomalies(&state.pg_pool, Some(&symbol), HEALTH_ANOMALY_LIMIT)
@@ -127,6 +127,11 @@ pub async fn anomalies(
             .map(AnomalyResponse::from_anomaly)
             .collect(),
     }))
+}
+
+fn parse_market_symbol(symbol: String) -> Result<Symbol, ApiError> {
+    Symbol::new(symbol)
+        .map_err(|error| ApiError::InvalidSymbol(format!("invalid market symbol: {error}")))
 }
 
 async fn load_market_state(state: &AppState, symbol: &Symbol) -> Result<MarketState, ApiError> {

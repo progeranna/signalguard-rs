@@ -1,20 +1,21 @@
-/target/
+.git
+target
 
 .env
 .env.*
 !.env.example
 
 .DS_Store
-__MACOSX/
+__MACOSX
 
-.idea/
-.vscode/
+.idea
+.vscode
 
 *.swp
 *.swo
 *.log
 
-logs/
-dumps/
-tmp/
-temp/
+logs
+dumps
+tmp
+temp
