@@ -46,21 +46,21 @@ impl DepthSequenceGapState {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
-    use rust_decimal::Decimal;
-
     use super::DepthSequenceGapState;
     use crate::{
         config::DetectorSettings,
-        detectors::engine::DetectionContext,
-        domain::{MarketState, Symbol},
+        detectors::{
+            engine::DetectionContext,
+            test_support::{btc_market_state, context_at, default_detector_settings, test_time},
+        },
+        domain::MarketState,
     };
 
     #[test]
     fn depth_sequence_gap_emits_on_first_observed_gap_count() {
         let mut detector = DepthSequenceGapState::default();
         let state = state_with_gap_count(1);
-        let settings = settings();
+        let settings = default_detector_settings();
         let anomaly = detector.evaluate(&context(&state, &settings)).unwrap();
 
         assert_eq!(
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn depth_sequence_gap_emits_when_gap_count_increases() {
         let mut detector = DepthSequenceGapState::default();
-        let settings = settings();
+        let settings = default_detector_settings();
 
         assert!(
             detector
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn depth_sequence_gap_does_not_emit_when_count_is_unchanged() {
         let mut detector = DepthSequenceGapState::default();
-        let settings = settings();
+        let settings = default_detector_settings();
 
         assert!(
             detector
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn depth_sequence_gap_does_not_emit_when_count_decreases() {
         let mut detector = DepthSequenceGapState::default();
-        let settings = settings();
+        let settings = default_detector_settings();
 
         assert!(
             detector
@@ -123,33 +123,18 @@ mod tests {
         );
     }
 
-    fn settings() -> DetectorSettings {
-        DetectorSettings {
-            price_move_1m_pct_threshold: Decimal::new(25, 1),
-            spread_spike_pct_threshold: Decimal::new(5, 1),
-            stale_data_ms_threshold: 5_000,
-            trade_burst_multiplier: Decimal::new(3, 0),
-            trade_burst_min_warmup_windows: 5,
-            quote_stuck_ms_threshold: 10_000,
-            event_lag_spike_ms_threshold: 3_000,
-            depth_sequence_gap_min_increment: 1,
-        }
-    }
-
     fn context<'a>(state: &'a MarketState, settings: &'a DetectorSettings) -> DetectionContext<'a> {
-        DetectionContext {
+        context_at(
             state,
             settings,
-            now: Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 0).unwrap(),
-            event_time: state
-                .last_event_time
-                .unwrap_or_else(|| Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()),
-        }
+            test_time(60),
+            state.last_event_time.unwrap_or_else(|| test_time(0)),
+        )
     }
 
     fn state_with_gap_count(depth_sequence_gap_count: u64) -> MarketState {
-        let mut state = MarketState::new(Symbol::new("BTCUSDT").unwrap());
-        let event_time = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 30).unwrap();
+        let mut state = btc_market_state();
+        let event_time = test_time(30);
         state.depth_sequence_gap_count = depth_sequence_gap_count;
         state.last_event_time = Some(event_time);
         state.last_depth_event_time = Some(event_time);

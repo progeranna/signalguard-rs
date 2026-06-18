@@ -2,8 +2,8 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 
 use crate::{
-    detectors::engine::DetectionContext,
-    domain::{AnomalyEvent, AnomalyMeasurement, AnomalyType, MarketState, Severity},
+    detectors::{anomaly_from_context, engine::DetectionContext},
+    domain::{AnomalyEvent, AnomalyType, MarketState, Severity},
 };
 
 #[derive(Clone, Debug, Default)]
@@ -56,20 +56,16 @@ impl QuoteStuckState {
             Severity::Warning
         };
 
-        Some(AnomalyEvent::new(
-            context.state.symbol.clone(),
+        Some(anomaly_from_context(
+            context,
             AnomalyType::QuoteStuck,
             severity,
             format!(
                 "top-of-book signature stayed unchanged for {} ms, exceeding the configured {} ms threshold",
                 stuck_ms, threshold
             ),
-            AnomalyMeasurement {
-                observed_value: Some(stuck_ms as f64),
-                threshold_value: Some(threshold as f64),
-            },
-            context.event_time,
-            context.now,
+            Some(stuck_ms as f64),
+            Some(threshold as f64),
         ))
     }
 }
@@ -89,20 +85,23 @@ impl TopOfBookSignature {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, TimeZone, Utc};
+    use chrono::Duration;
     use rust_decimal::Decimal;
 
     use super::QuoteStuckState;
     use crate::{
         config::DetectorSettings,
         detectors::engine::DetectionContext,
-        domain::{MarketState, Symbol},
+        detectors::test_support::{
+            btc_market_state, context_at, default_detector_settings, test_time,
+        },
+        domain::MarketState,
     };
 
     #[test]
     fn quote_stuck_emits_after_unchanged_signature_exceeds_threshold() {
         let mut detector = QuoteStuckState::default();
-        let settings = settings();
+        let settings = default_detector_settings();
 
         assert!(
             detector
@@ -121,7 +120,7 @@ mod tests {
     #[test]
     fn quote_stuck_does_not_emit_before_threshold() {
         let mut detector = QuoteStuckState::default();
-        let settings = settings();
+        let settings = default_detector_settings();
 
         assert!(
             detector
@@ -138,7 +137,7 @@ mod tests {
     #[test]
     fn quote_stuck_resets_when_top_of_book_changes() {
         let mut detector = QuoteStuckState::default();
-        let settings = settings();
+        let settings = default_detector_settings();
 
         assert!(
             detector
@@ -160,35 +159,20 @@ mod tests {
     #[test]
     fn quote_stuck_does_not_emit_with_missing_top_of_book_fields() {
         let mut detector = QuoteStuckState::default();
-        let settings = settings();
+        let settings = default_detector_settings();
         let mut missing = state_with_signature(0, 2, 1);
         missing.best_bid_price = None;
 
         assert!(detector.evaluate(&context(&missing, &settings)).is_none());
     }
 
-    fn settings() -> DetectorSettings {
-        DetectorSettings {
-            price_move_1m_pct_threshold: Decimal::new(25, 1),
-            spread_spike_pct_threshold: Decimal::new(5, 1),
-            stale_data_ms_threshold: 5_000,
-            trade_burst_multiplier: Decimal::new(3, 0),
-            trade_burst_min_warmup_windows: 5,
-            quote_stuck_ms_threshold: 10_000,
-            event_lag_spike_ms_threshold: 3_000,
-            depth_sequence_gap_min_increment: 1,
-        }
-    }
-
     fn context<'a>(state: &'a MarketState, settings: &'a DetectorSettings) -> DetectionContext<'a> {
-        DetectionContext {
+        context_at(
             state,
             settings,
-            now: Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 0).unwrap(),
-            event_time: state
-                .last_event_time
-                .unwrap_or_else(|| Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()),
-        }
+            test_time(60),
+            state.last_event_time.unwrap_or_else(|| test_time(0)),
+        )
     }
 
     fn state_with_signature(
@@ -196,8 +180,8 @@ mod tests {
         top_bid_quantity_units: i64,
         top_ask_quantity_units: i64,
     ) -> MarketState {
-        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let mut state = MarketState::new(Symbol::new("BTCUSDT").unwrap());
+        let base = test_time(0);
+        let mut state = btc_market_state();
         state.best_bid_price = Some(Decimal::new(6500000, 2));
         state.best_bid_quantity = Some(Decimal::new(125, 2));
         state.best_ask_price = Some(Decimal::new(6500100, 2));

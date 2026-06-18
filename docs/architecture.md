@@ -4,13 +4,13 @@
 
 SignalGuard RS is a Rust backend for market-data quality monitoring. It ingests replay fixtures and Binance public market-data streams, normalizes events, computes latest per-symbol state, emits deterministic anomalies, persists historical records, and exposes an HTTP API plus Prometheus-compatible metrics.
 
-It is not:
+Out of scope:
 
-- a trading bot
-- an order execution engine
-- a private Binance API client
-- a price prediction system
-- a manipulation-proof or market-surveillance system
+- placing trades or managing accounts
+- submitting, canceling, or routing exchange orders
+- using non-public Binance account APIs
+- forecasting future prices
+- proving intent, abuse, or broader market-surveillance conclusions
 
 ## High-Level Flow
 
@@ -41,7 +41,7 @@ The same runtime pipeline handles replay and live events after normalization. Th
 - Does not require Binance network access or API keys
 - Uses the same channel, pipeline, state, storage, cache, and detector path as live mode
 
-Replay mode is the default demo path. In the current runtime, replay ingestion completes before the HTTP server starts, which keeps the local demo deterministic.
+Replay mode is the default demo path. The service binds the HTTP listener before replay reset or ingestion, then completes replay ingestion before serving API traffic. This keeps the local demo deterministic while avoiding replay storage/cache mutations when the configured HTTP port is already unavailable.
 
 ### Live
 
@@ -123,7 +123,7 @@ Redis is a latest-state cache for:
 
 ### Not Persisted
 
-The following remain runtime-only in v0.3:
+The following remain runtime-only in v0.4:
 
 - full order-book history
 - sliding trade window state
@@ -152,7 +152,7 @@ Implementation notes:
 - duplicate emissions are rate-limited with a cooldown
 - anomalies are written to PostgreSQL after evaluation
 
-These detectors are operational heuristics. They do not prove intent, predict price direction, or guarantee market correctness.
+These detectors are operational heuristics. They do not prove intent, forecast price direction, or guarantee market correctness.
 
 ## Health Model
 
@@ -201,7 +201,7 @@ Current metrics include:
   - Binance trade / quote / depth
 - `signalguard_last_message_age_ms`
 
-Metrics are intentionally small and process-wide in v0.3. Queue depth, per-symbol metrics, and broader observability surfaces are not implemented yet.
+Metrics are intentionally small and process-wide in v0.4. Queue depth, per-symbol metrics, and broader observability surfaces are not implemented yet.
 
 ## Runtime Modes
 
@@ -215,6 +215,12 @@ Local runtime paths:
   - optional local app-container path after explicit migrations
 
 The optional compose app profile is a local helper, not a production deployment path.
+
+Configuration profiles:
+
+- `local` is the default and expects PostgreSQL and Redis URLs from `.env`, Docker Compose, or local scripts.
+- `production` also requires explicit PostgreSQL and Redis URLs and does not fall back to local demo credentials.
+- These boundaries are production-style configuration hygiene, not a production deployment guarantee.
 
 ## Failure And Limitation Boundaries
 

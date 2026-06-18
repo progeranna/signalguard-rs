@@ -29,16 +29,11 @@ impl TradeBurstState {
 
         match self.baseline {
             None => {
-                self.baseline = Some(current);
-                self.observation_count = 1;
+                self.record_observation(current);
                 None
             }
-            Some(baseline) if self.observation_count < settings.trade_burst_min_warmup_windows => {
-                let next_count = self.observation_count + 1;
-                self.baseline = Some(
-                    ((baseline * self.observation_count as f64) + current) / next_count as f64,
-                );
-                self.observation_count = next_count;
+            Some(_) if self.observation_count < settings.trade_burst_min_warmup_windows => {
+                self.record_observation(current);
                 None
             }
             Some(baseline) => {
@@ -68,34 +63,43 @@ impl TradeBurstState {
                     None
                 };
 
-                let next_count = self.observation_count + 1;
-                self.baseline = Some(
-                    ((baseline * self.observation_count as f64) + current) / next_count as f64,
-                );
-                self.observation_count = next_count;
+                self.record_observation(current);
                 anomaly
             }
         }
+    }
+
+    fn record_observation(&mut self, current: f64) {
+        let Some(baseline) = self.baseline else {
+            self.baseline = Some(current);
+            self.observation_count = 1;
+            return;
+        };
+
+        let next_count = self.observation_count + 1;
+        self.baseline =
+            Some(((baseline * self.observation_count as f64) + current) / next_count as f64);
+        self.observation_count = next_count;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
-    use rust_decimal::Decimal;
-
     use super::TradeBurstState;
     use crate::{
         config::DetectorSettings,
         detectors::engine::DetectionContext,
-        domain::{MarketSignals, MarketState, Symbol},
+        detectors::test_support::{
+            base_signals, btc_symbol, context_at, default_detector_settings, test_time,
+        },
+        domain::{MarketState, Symbol},
     };
 
     #[test]
     fn trade_burst_does_not_emit_before_warmup() {
         let mut burst_state = TradeBurstState::default();
-        let symbol = Symbol::new("BTCUSDT").unwrap();
-        let settings = settings();
+        let symbol = btc_symbol();
+        let settings = default_detector_settings();
 
         for trades_per_minute in [1.0, 2.0, 3.0, 4.0] {
             let state = state_with_trades_per_minute(&symbol, trades_per_minute);
@@ -110,8 +114,8 @@ mod tests {
     #[test]
     fn trade_burst_emits_after_warmup_when_threshold_exceeded() {
         let mut burst_state = TradeBurstState::default();
-        let symbol = Symbol::new("BTCUSDT").unwrap();
-        let settings = settings();
+        let symbol = btc_symbol();
+        let settings = default_detector_settings();
 
         for trades_per_minute in [1.0, 2.0, 3.0, 4.0, 5.0] {
             let state = state_with_trades_per_minute(&symbol, trades_per_minute);
@@ -131,8 +135,8 @@ mod tests {
     #[test]
     fn trade_burst_ignores_repeated_trade_rate() {
         let mut burst_state = TradeBurstState::default();
-        let symbol = Symbol::new("BTCUSDT").unwrap();
-        let settings = settings();
+        let symbol = btc_symbol();
+        let settings = default_detector_settings();
         let state = state_with_trades_per_minute(&symbol, 4.0);
 
         assert!(
@@ -152,35 +156,15 @@ mod tests {
         assert_eq!(burst_state.observation_count, observation_count);
     }
 
-    fn settings() -> DetectorSettings {
-        DetectorSettings {
-            price_move_1m_pct_threshold: Decimal::new(25, 1),
-            spread_spike_pct_threshold: Decimal::new(5, 1),
-            stale_data_ms_threshold: 5_000,
-            trade_burst_multiplier: Decimal::new(3, 0),
-            trade_burst_min_warmup_windows: 5,
-            quote_stuck_ms_threshold: 10_000,
-            event_lag_spike_ms_threshold: 3_000,
-            depth_sequence_gap_min_increment: 1,
-        }
-    }
-
     fn context<'a>(state: &'a MarketState, settings: &'a DetectorSettings) -> DetectionContext<'a> {
-        DetectionContext {
-            state,
-            settings,
-            now: Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 0).unwrap(),
-            event_time: Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 0).unwrap(),
-        }
+        context_at(state, settings, test_time(60), test_time(60))
     }
 
     fn state_with_trades_per_minute(symbol: &Symbol, trades_per_minute: f64) -> MarketState {
+        let mut signals = base_signals();
+        signals.trades_per_minute = Some(trades_per_minute);
         let mut state = MarketState::new(symbol.clone());
-        state.signals = MarketSignals {
-            spread_pct: None,
-            price_change_1m_pct: None,
-            trades_per_minute: Some(trades_per_minute),
-        };
+        state.signals = signals;
         state
     }
 }

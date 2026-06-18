@@ -49,11 +49,28 @@ pub struct HealthPenalty {
 
 pub fn evaluate_health(input: HealthScoringInput<'_>) -> HealthEvaluation {
     let recent_anomalies = recent_anomalies(input.anomalies, input.now, input.settings);
-    let mut penalties = Vec::new();
+    let penalties = collect_penalties(&input, &recent_anomalies);
+    let score = compute_score(input.settings.base_score, total_penalty(&penalties));
 
-    for anomaly in &recent_anomalies {
-        penalties.push(anomaly_penalty(anomaly, input.settings));
+    HealthEvaluation {
+        base_score: input.settings.base_score,
+        score,
+        status: input.settings.status_thresholds.classify(score),
+        evaluated_at: input.now,
+        recent_anomaly_count: recent_anomalies.len(),
+        signals: build_health_signals(input.state, input.now),
+        penalties,
     }
+}
+
+fn collect_penalties(
+    input: &HealthScoringInput<'_>,
+    recent_anomalies: &[&AnomalyEvent],
+) -> Vec<HealthPenalty> {
+    let mut penalties = recent_anomalies
+        .iter()
+        .map(|anomaly| anomaly_penalty(anomaly, input.settings))
+        .collect::<Vec<_>>();
 
     if is_stale(input.state, input.now, input.stale_data_ms_threshold)
         && !penalties
@@ -68,27 +85,26 @@ pub fn evaluate_health(input: HealthScoringInput<'_>) -> HealthEvaluation {
         ));
     }
 
-    let total_penalty = penalties.iter().fold(0u16, |sum, penalty| {
-        sum.saturating_add(u16::from(penalty.penalty))
-    });
-    let score = u16::from(input.settings.base_score)
-        .saturating_sub(total_penalty)
-        .min(100) as u8;
+    penalties
+}
 
-    HealthEvaluation {
-        base_score: input.settings.base_score,
-        score,
-        status: input.settings.status_thresholds.classify(score),
-        evaluated_at: input.now,
-        recent_anomaly_count: recent_anomalies.len(),
-        signals: MarketHealthSignals {
-            spread_pct: input.state.signals.spread_pct,
-            price_change_1m_pct: input.state.signals.price_change_1m_pct,
-            trades_per_minute: input.state.signals.trades_per_minute,
-            last_event_time: input.state.last_event_time,
-            last_event_age_ms: last_event_age_ms(input.state.last_event_time, input.now),
-        },
-        penalties,
+fn total_penalty(penalties: &[HealthPenalty]) -> u16 {
+    penalties.iter().fold(0u16, |sum, penalty| {
+        sum.saturating_add(u16::from(penalty.penalty))
+    })
+}
+
+fn compute_score(base_score: u8, total_penalty: u16) -> u8 {
+    u16::from(base_score).saturating_sub(total_penalty).min(100) as u8
+}
+
+fn build_health_signals(state: &MarketState, now: DateTime<Utc>) -> MarketHealthSignals {
+    MarketHealthSignals {
+        spread_pct: state.signals.spread_pct,
+        price_change_1m_pct: state.signals.price_change_1m_pct,
+        trades_per_minute: state.signals.trades_per_minute,
+        last_event_time: state.last_event_time,
+        last_event_age_ms: last_event_age_ms(state.last_event_time, now),
     }
 }
 

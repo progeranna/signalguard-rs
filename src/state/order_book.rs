@@ -35,6 +35,12 @@ pub struct OrderBook {
     depth_sequence_gap_count: u64,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum TrimExtreme {
+    LowestPrice,
+    HighestPrice,
+}
+
 impl Default for OrderBook {
     fn default() -> Self {
         Self::new(DEFAULT_RETAINED_DEPTH_LEVELS)
@@ -162,21 +168,38 @@ impl OrderBook {
     }
 
     fn trim_bids(&mut self) {
-        while self.bids.len() > self.retained_depth_levels {
-            let Some(lowest_bid_price) = self.bids.keys().next().copied() else {
-                break;
-            };
-            self.bids.remove(&lowest_bid_price);
-        }
+        trim_side(
+            &mut self.bids,
+            self.retained_depth_levels,
+            TrimExtreme::LowestPrice,
+        );
     }
 
     fn trim_asks(&mut self) {
-        while self.asks.len() > self.retained_depth_levels {
-            let Some(highest_ask_price) = self.asks.keys().next_back().copied() else {
-                break;
-            };
-            self.asks.remove(&highest_ask_price);
-        }
+        trim_side(
+            &mut self.asks,
+            self.retained_depth_levels,
+            TrimExtreme::HighestPrice,
+        );
+    }
+}
+
+fn trim_side(
+    side: &mut BTreeMap<Decimal, Decimal>,
+    retained_depth_levels: usize,
+    trim_extreme: TrimExtreme,
+) {
+    while side.len() > retained_depth_levels {
+        let price = match trim_extreme {
+            TrimExtreme::LowestPrice => side.keys().next().copied(),
+            TrimExtreme::HighestPrice => side.keys().next_back().copied(),
+        };
+
+        let Some(price) = price else {
+            break;
+        };
+
+        side.remove(&price);
     }
 }
 
