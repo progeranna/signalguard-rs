@@ -1,19 +1,11 @@
-import { createBrowserRouter, Outlet } from "react-router-dom";
+import { createBrowserRouter } from "react-router-dom";
 
-import { AppShell } from "@/app/AppShell";
+import { ConsoleLayout } from "@/app/ConsoleLayout";
 import { AnomaliesPage } from "@/pages/AnomaliesPage";
 import { ArchitecturePage } from "@/pages/ArchitecturePage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LandingPage } from "@/pages/LandingPage";
 import { SymbolDetailPage } from "@/pages/SymbolDetailPage";
-
-function ConsoleLayout() {
-  return (
-    <AppShell>
-      <Outlet />
-    </AppShell>
-  );
-}
 
 export const router = createBrowserRouter([
   {
