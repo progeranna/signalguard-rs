@@ -68,6 +68,7 @@ Endpoints:
 
 - `GET /health`
 - `GET /pipeline/health`
+- `GET /dashboard/summary`
 - `GET /metrics`
 - `GET /symbols`
 - `GET /market/{symbol}/state`
@@ -91,6 +92,8 @@ Compact `GET /market/BTCUSDT/state` example:
 
 Full endpoint examples live in [docs/api-examples.md](docs/api-examples.md).
 
+`GET /dashboard/summary` is the compact read-only dashboard bootstrap endpoint for the future public web console. It combines service metadata, pipeline health, tracked symbols, compact per-symbol state and health summaries when available, and recent anomalies into one frontend-friendly response.
+
 ## Architecture
 
 - Ingestion: replay fixtures and live Binance payloads are parsed once and normalized once
@@ -99,6 +102,7 @@ Full endpoint examples live in [docs/api-examples.md](docs/api-examples.md).
 - Storage/cache: PostgreSQL stores historical events and anomalies, while Redis stores latest-state snapshots
 - Detectors: anomaly rules are deterministic, explainable, and configuration-driven
 - API: Axum exposes service health, pipeline health, state, anomalies, and market health
+- Dashboard bootstrap: `GET /dashboard/summary` provides a compact read-only summary for the dashboard view
 
 Deeper architecture notes: [docs/architecture.md](docs/architecture.md)
 
@@ -139,6 +143,7 @@ Normal `cargo test` does not require Docker, PostgreSQL, Redis, or Binance netwo
 - It does not place trades or manage accounts
 - It does not submit, cancel, or route exchange orders
 - It uses public Binance market-data WebSocket streams only
+- It does not expose account balances, orders, or private exchange API access
 - It does not forecast future prices
 - It does not prove intent or market abuse
 - The local Binance order-book view is simplified and lacks snapshot bootstrap/resync

@@ -7,6 +7,7 @@ pub fn router() -> Router<super::AppState> {
         .route("/health", get(handlers::health))
         .route("/metrics", get(handlers::metrics))
         .route("/pipeline/health", get(handlers::pipeline_health))
+        .route("/dashboard/summary", get(handlers::dashboard_summary))
         .route("/symbols", get(handlers::symbols))
         .route("/market/{symbol}/state", get(handlers::market_state))
         .route("/market/{symbol}/health", get(handlers::market_health))
@@ -62,6 +63,7 @@ mod tests {
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
                 counters,
+                test_recent_anomalies: None,
             },
         )
         .await;
@@ -101,6 +103,7 @@ mod tests {
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
                 counters,
+                test_recent_anomalies: None,
             },
         )
         .await;
@@ -115,6 +118,23 @@ mod tests {
         assert!(body.contains("\"reconnect_attempts\""));
         assert!(body.contains("\"storage_errors\""));
         assert!(body.contains("\"cache_errors\""));
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_route_returns_ok() {
+        let response = get("/dashboard/summary", dashboard_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert!(body.get("service").is_some());
+        assert!(body.get("pipeline").is_some());
+        assert!(body["symbols"].as_array().is_some());
+        assert!(body["recent_anomalies"].as_array().is_some());
     }
 
     #[tokio::test]
@@ -181,6 +201,18 @@ mod tests {
             detector_settings: detector_settings(),
             health_settings: health_settings(),
             counters: InternalCounters::default(),
+            test_recent_anomalies: None,
+        }
+    }
+
+    fn dashboard_state() -> AppState {
+        AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::in_memory(Vec::new()),
+            detector_settings: detector_settings(),
+            health_settings: health_settings(),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: Some(Vec::new()),
         }
     }
 

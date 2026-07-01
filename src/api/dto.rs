@@ -82,6 +82,48 @@ pub struct AnomalyResponse {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DashboardSummaryResponse {
+    pub service: DashboardServiceSummary,
+    pub pipeline: PipelineHealthResponse,
+    pub symbols: Vec<DashboardSymbolSummary>,
+    pub recent_anomalies: Vec<AnomalyResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardServiceSummary {
+    pub status: &'static str,
+    pub service: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardSymbolSummary {
+    pub symbol: String,
+    pub state: Option<DashboardStateSummary>,
+    pub health: Option<DashboardHealthSummary>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardStateSummary {
+    pub last_trade_price: Option<Decimal>,
+    pub best_bid_price: Option<Decimal>,
+    pub best_ask_price: Option<Decimal>,
+    pub spread_pct: Option<f64>,
+    pub price_change_1m_pct: Option<f64>,
+    pub trades_per_minute: Option<f64>,
+    pub last_event_time: Option<DateTime<Utc>>,
+    pub last_event_age_ms: Option<u64>,
+    pub depth_sequence_gap_count: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardHealthSummary {
+    pub score: u8,
+    pub status: crate::domain::HealthStatus,
+    pub recent_anomaly_count: usize,
+    pub evaluated_at: DateTime<Utc>,
+}
+
 impl MarketStateResponse {
     pub fn from_market_state(state: MarketState, now: DateTime<Utc>) -> Self {
         Self {
@@ -106,6 +148,33 @@ impl MarketStateResponse {
             last_event_time: state.last_event_time,
             last_ingest_time: state.last_ingest_time,
             last_event_age_ms: state::last_event_age_ms(state.last_event_time, now),
+        }
+    }
+}
+
+impl DashboardStateSummary {
+    pub fn from_market_state(state: &MarketState, now: DateTime<Utc>) -> Self {
+        Self {
+            last_trade_price: state.last_trade_price,
+            best_bid_price: state.best_bid_price,
+            best_ask_price: state.best_ask_price,
+            spread_pct: state.signals.spread_pct,
+            price_change_1m_pct: state.signals.price_change_1m_pct,
+            trades_per_minute: state.signals.trades_per_minute,
+            last_event_time: state.last_event_time,
+            last_event_age_ms: state::last_event_age_ms(state.last_event_time, now),
+            depth_sequence_gap_count: state.depth_sequence_gap_count,
+        }
+    }
+}
+
+impl DashboardHealthSummary {
+    pub fn from_evaluation(evaluation: crate::health::HealthEvaluation) -> Self {
+        Self {
+            score: evaluation.score,
+            status: evaluation.status,
+            recent_anomaly_count: evaluation.recent_anomaly_count,
+            evaluated_at: evaluation.evaluated_at,
         }
     }
 }
