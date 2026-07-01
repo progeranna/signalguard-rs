@@ -17,6 +17,8 @@ const SYMBOL_SET_KEY: &str = "signalguard:symbols";
 pub struct RedisCache {
     client: Option<redis::Client>,
     in_memory_states: Option<Arc<Mutex<HashMap<Symbol, MarketState>>>>,
+    #[cfg(test)]
+    in_memory_symbols: Option<Arc<Mutex<Vec<Symbol>>>>,
 }
 
 #[derive(Debug, Error)]
@@ -53,6 +55,8 @@ impl RedisCache {
         Ok(Self {
             client: Some(client),
             in_memory_states: None,
+            #[cfg(test)]
+            in_memory_symbols: None,
         })
     }
 
@@ -60,11 +64,22 @@ impl RedisCache {
         Self {
             client: None,
             in_memory_states: None,
+            #[cfg(test)]
+            in_memory_symbols: None,
         }
     }
 
     pub fn is_available(&self) -> bool {
-        self.client.is_some() || self.in_memory_states.is_some()
+        self.client.is_some() || self.in_memory_states.is_some() || {
+            #[cfg(test)]
+            {
+                self.in_memory_symbols.is_some()
+            }
+            #[cfg(not(test))]
+            {
+                false
+            }
+        }
     }
 
     pub async fn set_market_state(&self, state: &MarketState) -> Result<(), CacheError> {
@@ -114,6 +129,13 @@ impl RedisCache {
 
     pub async fn list_symbols(&self) -> Result<Vec<Symbol>, CacheError> {
         let operation = "list_symbols";
+        #[cfg(test)]
+        if let Some(symbols) = &self.in_memory_symbols {
+            let mut symbols = lock_in_memory_symbols(symbols, operation)?.clone();
+            symbols.sort();
+            return Ok(symbols);
+        }
+
         if let Some(states) = &self.in_memory_states {
             let mut symbols = lock_in_memory_states(states, operation)?
                 .keys()
@@ -145,6 +167,11 @@ impl RedisCache {
 
     pub async fn clear_market_state_cache(&self) -> Result<usize, CacheError> {
         let operation = "clear_market_state_cache";
+        #[cfg(test)]
+        if let Some(symbols) = &self.in_memory_symbols {
+            lock_in_memory_symbols(symbols, operation)?.clear();
+        }
+
         if let Some(states) = &self.in_memory_states {
             let mut states = lock_in_memory_states(states, operation)?;
             let cleared_keys = states.len();
@@ -228,6 +255,16 @@ fn lock_in_memory_states<'a>(
         .map_err(|_| CacheError::InMemoryLock { operation })
 }
 
+#[cfg(test)]
+fn lock_in_memory_symbols<'a>(
+    symbols: &'a Arc<Mutex<Vec<Symbol>>>,
+    operation: &'static str,
+) -> Result<MutexGuard<'a, Vec<Symbol>>, CacheError> {
+    symbols
+        .lock()
+        .map_err(|_| CacheError::InMemoryLock { operation })
+}
+
 impl RedisCache {
     #[cfg(test)]
     pub fn in_memory(states: Vec<MarketState>) -> Self {
@@ -239,6 +276,21 @@ impl RedisCache {
         Self {
             client: None,
             in_memory_states: Some(Arc::new(Mutex::new(states))),
+            in_memory_symbols: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn in_memory_with_symbols(symbols: Vec<Symbol>, states: Vec<MarketState>) -> Self {
+        let states = states
+            .into_iter()
+            .map(|state| (state.symbol.clone(), state))
+            .collect::<HashMap<_, _>>();
+
+        Self {
+            client: None,
+            in_memory_states: Some(Arc::new(Mutex::new(states))),
+            in_memory_symbols: Some(Arc::new(Mutex::new(symbols))),
         }
     }
 

@@ -152,6 +152,33 @@ impl MarketStateResponse {
     }
 }
 
+impl DashboardStateSummary {
+    pub fn from_market_state(state: &MarketState, now: DateTime<Utc>) -> Self {
+        Self {
+            last_trade_price: state.last_trade_price,
+            best_bid_price: state.best_bid_price,
+            best_ask_price: state.best_ask_price,
+            spread_pct: state.signals.spread_pct,
+            price_change_1m_pct: state.signals.price_change_1m_pct,
+            trades_per_minute: state.signals.trades_per_minute,
+            last_event_time: state.last_event_time,
+            last_event_age_ms: state::last_event_age_ms(state.last_event_time, now),
+            depth_sequence_gap_count: state.depth_sequence_gap_count,
+        }
+    }
+}
+
+impl DashboardHealthSummary {
+    pub fn from_evaluation(evaluation: crate::health::HealthEvaluation) -> Self {
+        Self {
+            score: evaluation.score,
+            status: evaluation.status,
+            recent_anomaly_count: evaluation.recent_anomaly_count,
+            evaluated_at: evaluation.evaluated_at,
+        }
+    }
+}
+
 impl PipelineHealthResponse {
     pub fn from_snapshot(snapshot: &InternalCountersSnapshot) -> Self {
         Self {
