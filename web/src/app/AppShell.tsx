@@ -1,13 +1,14 @@
 import type { PropsWithChildren } from "react";
+import { Link, NavLink } from "react-router-dom";
 
 import { StatusBadge } from "@/shared/components/StatusBadge";
 
 const navigationItems = [
-  "Overview",
-  "Dashboard",
-  "Symbols",
-  "Anomalies",
-  "Architecture",
+  { label: "Overview", to: "/" },
+  { label: "Dashboard", to: "/dashboard" },
+  { label: "BTCUSDT", to: "/symbols/BTCUSDT" },
+  { label: "Anomalies", to: "/anomalies" },
+  { label: "Architecture", to: "/architecture" },
 ];
 
 export function AppShell({ children }: PropsWithChildren) {
@@ -19,17 +20,19 @@ export function AppShell({ children }: PropsWithChildren) {
         <header className="mb-8 flex flex-col gap-6 rounded-3xl border border-white/10 bg-slate-950/70 px-5 py-5 shadow-[0_24px_80px_rgba(2,6,23,0.45)] backdrop-blur md:flex-row md:items-center md:justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-400/10 text-sm font-semibold uppercase tracking-[0.24em] text-cyan-200">
-                SG
-              </div>
-              <div>
-                <p className="font-mono text-xs uppercase tracking-[0.28em] text-slate-400">
-                  SignalGuard RS
-                </p>
-                <h1 className="text-lg font-semibold tracking-tight text-white">
-                  Market-data quality console
-                </h1>
-              </div>
+              <Link to="/" className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-400/10 text-sm font-semibold uppercase tracking-[0.24em] text-cyan-200">
+                  SG
+                </div>
+                <div>
+                  <p className="font-mono text-xs uppercase tracking-[0.28em] text-slate-400">
+                    SignalGuard RS
+                  </p>
+                  <h1 className="text-lg font-semibold tracking-tight text-white">
+                    Market-data quality console
+                  </h1>
+                </div>
+              </Link>
             </div>
             <p className="max-w-2xl text-sm leading-6 text-slate-300">
               Read-only frontend foundation for service health, symbol status,
@@ -43,12 +46,20 @@ export function AppShell({ children }: PropsWithChildren) {
             </div>
             <nav className="flex flex-wrap gap-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
               {navigationItems.map((item) => (
-                <span
-                  key={item}
-                  className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-slate-300"
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    [
+                      "rounded-full border px-3 py-1.5 transition",
+                      isActive
+                        ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-100"
+                        : "border-white/8 bg-white/5 text-slate-300 hover:border-white/15 hover:bg-white/[0.08]",
+                    ].join(" ")
+                  }
                 >
-                  {item}
-                </span>
+                  {item.label}
+                </NavLink>
               ))}
             </nav>
           </div>
