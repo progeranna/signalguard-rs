@@ -4,11 +4,9 @@ import { Link, NavLink } from "react-router-dom";
 import { StatusBadge } from "@/shared/components/StatusBadge";
 
 const navigationItems = [
-  { label: "Overview", to: "/" },
-  { label: "Dashboard", to: "/dashboard" },
+  { label: "Dashboard", to: "/" },
   { label: "BTCUSDT", to: "/symbols/BTCUSDT" },
   { label: "Anomalies", to: "/anomalies" },
-  { label: "Architecture", to: "/architecture" },
 ];
 
 export function AppShell({ children }: PropsWithChildren) {
