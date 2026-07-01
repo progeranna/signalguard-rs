@@ -56,6 +56,35 @@ bash scripts/smoke.sh
 docker compose --profile app down
 ```
 
+## Web Console Local Development
+
+The web console lives under [`web/`](web/) and runs separately from the Rust service during local development.
+
+Start the backend first. The deterministic replay path is the fastest way to get demo data:
+
+```bash
+bash scripts/demo-replay.sh
+```
+
+Then start the frontend in a second terminal:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The frontend defaults `VITE_SIGNALGUARD_API_BASE_URL` to `/api`. The Vite dev server proxies `/api/*` to the local Axum service on `http://127.0.0.1:8080`, so the default local path does not require extra configuration.
+
+If you want to point the frontend at a different backend origin during local development, override the base URL explicitly:
+
+```bash
+cd web
+VITE_SIGNALGUARD_API_BASE_URL=http://127.0.0.1:8080 npm run dev
+```
+
+The frontend uses existing read-only backend endpoints only, with `GET /dashboard/summary` as the primary dashboard bootstrap contract.
+
 ## Configuration Profiles
 
 The default runtime profile is `local`. Local mode is still explicit about service URLs: `SIGNALGUARD_DATABASE_URL` and `SIGNALGUARD_REDIS_URL` must come from `.env`, `.env.example`, Docker Compose, or `scripts/demo-replay.sh`; the Rust code does not embed PostgreSQL or Redis URL fallbacks.
