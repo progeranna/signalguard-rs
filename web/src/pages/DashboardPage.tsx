@@ -323,6 +323,7 @@ function DashboardSummaryGrid({
         value={String(anomalies.length)}
         description="Current summary window"
         tone={anomalies.length > 0 ? "warning" : "healthy"}
+        valueTone="neutral"
         icon="anomalies"
       />
     </section>
@@ -357,12 +358,14 @@ function KpiCard({
   value,
   description,
   tone = "neutral",
+  valueTone,
   icon,
 }: {
   label: string;
   value: string;
   description: string;
   tone?: StatusTone;
+  valueTone?: StatusTone;
   icon: KpiIconKind;
 }) {
   return (
@@ -372,7 +375,11 @@ function KpiCard({
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
           {label}
         </p>
-        <p className={`mt-2 text-2xl font-extrabold leading-none tracking-tight ${kpiValueClass(tone)}`}>
+        <p
+          className={`mt-2 text-2xl font-extrabold leading-none tracking-tight ${kpiValueClass(
+            valueTone ?? tone,
+          )}`}
+        >
           {value}
         </p>
         <p className="mt-1 truncate text-sm leading-5 text-slate-400">{description}</p>
@@ -388,29 +395,69 @@ function KpiIcon({ tone, kind }: { tone: StatusTone; kind: KpiIconKind }) {
 
   return (
     <div
-      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${palette.icon}`}
+      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border shadow-inner ${palette.icon}`}
     >
-      {kind === "service" ? (
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 96 96"
-          className={`h-8 w-8 ${palette.pulse}`}
-          fill="none"
-        >
-          <circle cx="48" cy="48" r="32" stroke="currentColor" strokeOpacity="0.18" />
-          <path
-            d="M18 50h14l8-18 13 38 9-24h16"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="6"
-          />
-        </svg>
-      ) : (
-        <span className={`text-sm font-extrabold uppercase ${palette.pulse}`}>
-          {kind === "pipeline" ? "PH" : kind === "symbols" ? "SY" : "AN"}
-        </span>
-      )}
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 96 96"
+        className={`h-7 w-7 ${palette.pulse}`}
+        fill="none"
+      >
+        {kind === "service" ? (
+          <>
+            <circle cx="48" cy="48" r="30" stroke="currentColor" strokeOpacity="0.18" strokeWidth="6" />
+            <path
+              d="M18 50h14l8-18 13 38 9-24h16"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="6"
+            />
+          </>
+        ) : null}
+        {kind === "pipeline" ? (
+          <>
+            <path
+              d="M20 48h20m16 0h20M40 48l8-14 8 14m-16 0 8 14 8-14"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="5"
+            />
+            <circle cx="20" cy="48" r="7" fill="currentColor" />
+            <circle cx="48" cy="34" r="7" fill="currentColor" />
+            <circle cx="48" cy="62" r="7" fill="currentColor" />
+            <circle cx="76" cy="48" r="7" fill="currentColor" />
+          </>
+        ) : null}
+        {kind === "symbols" ? (
+          <>
+            <circle cx="48" cy="48" r="26" stroke="currentColor" strokeOpacity="0.22" strokeWidth="5" />
+            <circle cx="48" cy="48" r="6" fill="currentColor" />
+            <circle cx="48" cy="22" r="5" fill="currentColor" fillOpacity="0.85" />
+            <circle cx="70" cy="48" r="5" fill="currentColor" fillOpacity="0.85" />
+            <circle cx="48" cy="74" r="5" fill="currentColor" fillOpacity="0.85" />
+            <circle cx="26" cy="48" r="5" fill="currentColor" fillOpacity="0.85" />
+          </>
+        ) : null}
+        {kind === "anomalies" ? (
+          <>
+            <path
+              d="M48 20 76 72H20Z"
+              stroke="currentColor"
+              strokeLinejoin="round"
+              strokeWidth="6"
+            />
+            <path
+              d="M48 36v16"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeWidth="6"
+            />
+            <circle cx="48" cy="62" r="4" fill="currentColor" />
+          </>
+        ) : null}
+      </svg>
     </div>
   );
 }
@@ -450,8 +497,8 @@ function MarketSignalShell({
     : [];
 
   return (
-    <section className="overflow-hidden border-y border-white/10 bg-[var(--sg-panel)] px-4 py-4 shadow-[0_14px_34px_rgba(2,6,23,0.18)] sm:px-5">
-      <div className="flex flex-col gap-3 border-b border-white/10 pb-3 lg:flex-row lg:items-start lg:justify-between">
+    <section className="overflow-hidden border-y border-white/10 bg-[var(--sg-panel)] px-4 py-3 shadow-[0_14px_34px_rgba(2,6,23,0.18)] sm:px-5">
+      <div className="flex flex-col gap-2 border-b border-white/10 pb-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-sm font-semibold text-slate-400">Market Signal View</p>
           <h3 className="mt-1 text-xl font-bold tracking-tight text-white">
@@ -473,11 +520,11 @@ function MarketSignalShell({
       </div>
 
       {isLoading ? (
-        <LoadingSkeleton className="mt-4 h-48" />
+        <LoadingSkeleton className="mt-3 h-44" />
       ) : !selectedSymbol || signalSeries.length === 0 ? (
         <EmptyBlock message="No monitored symbol state available for the signal preview." />
       ) : (
-        <div className="mt-4 space-y-3">
+        <div className="mt-3">
           <div className="rounded-xl border border-white/10 bg-[#0b141d] px-3 py-3 sm:px-4">
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -508,71 +555,112 @@ function MarketSignalShell({
               )}
             </div>
 
-            <div className="relative h-52 overflow-hidden rounded-xl border border-slate-700/70 bg-slate-950/70 px-2 py-3">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={signalSeries}
-                  margin={{ top: 12, right: 18, bottom: 6, left: 0 }}
-                >
-                  <defs>
-                    <linearGradient id="qualitySignalFill" x1="0" x2="0" y1="0" y2="1">
-                      <stop offset="0%" stopColor="#7EE45B" stopOpacity={0.2} />
-                      <stop offset="100%" stopColor="#7EE45B" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    stroke="rgba(100,116,139,0.18)"
-                    strokeDasharray="3 8"
-                    vertical={false}
-                  />
-                  <XAxis
-                    axisLine={false}
-                    dataKey="label"
-                    tick={{ fill: "#64748b", fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    domain={[0, 100]}
-                    tick={{ fill: "#64748b", fontSize: 11 }}
-                    tickLine={false}
-                    width={28}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: "#0E1822",
-                      border: "1px solid rgba(148,163,184,0.18)",
-                      borderRadius: "10px",
-                      color: "#e2e8f0",
-                    }}
-                    formatter={(value) => [`${value}`, "Signal"]}
-                    labelFormatter={() => "Summary-backed preview"}
-                  />
-                  {signalSeries
-                    .filter((point) => point.severity)
-                    .map((point) => (
-                      <ReferenceLine
-                        key={`marker-${point.label}`}
-                        stroke={anomalySeverityColor(point.severity)}
-                        strokeDasharray="3 4"
-                        strokeOpacity={0.85}
-                        x={point.label}
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_248px]">
+              <div className="rounded-xl border border-slate-700/70 bg-slate-950/70">
+                <div className="relative h-40 overflow-hidden px-2 py-2 sm:h-44">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={signalSeries}
+                      margin={{ top: 12, right: 18, bottom: 6, left: 0 }}
+                    >
+                      <defs>
+                        <linearGradient id="qualitySignalFill" x1="0" x2="0" y1="0" y2="1">
+                          <stop offset="0%" stopColor="#7EE45B" stopOpacity={0.2} />
+                          <stop offset="100%" stopColor="#7EE45B" stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid
+                        stroke="rgba(100,116,139,0.18)"
+                        strokeDasharray="3 8"
+                        vertical={false}
                       />
-                    ))}
-                  <Area
-                    dataKey="signal"
-                    fill="url(#qualitySignalFill)"
-                    isAnimationActive={false}
-                    stroke="#7EE45B"
-                    strokeWidth={2.4}
-                    type="monotone"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between px-4 pb-3 text-xs font-medium text-slate-500">
-                <span>Latest state</span>
-                <span>Summary preview</span>
+                      <XAxis
+                        axisLine={false}
+                        dataKey="label"
+                        tick={{ fill: "#64748b", fontSize: 11 }}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        axisLine={false}
+                        domain={[0, 100]}
+                        tick={{ fill: "#64748b", fontSize: 11 }}
+                        tickLine={false}
+                        width={28}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          background: "#0E1822",
+                          border: "1px solid rgba(148,163,184,0.18)",
+                          borderRadius: "10px",
+                          color: "#e2e8f0",
+                        }}
+                        formatter={(value) => [`${value}`, "Signal"]}
+                        labelFormatter={() => "Summary-backed preview"}
+                      />
+                      {signalSeries
+                        .filter((point) => point.severity)
+                        .map((point) => (
+                          <ReferenceLine
+                            key={`marker-${point.label}`}
+                            stroke={anomalySeverityColor(point.severity)}
+                            strokeDasharray="3 4"
+                            strokeOpacity={0.85}
+                            x={point.label}
+                          />
+                        ))}
+                      <Area
+                        dataKey="signal"
+                        fill="url(#qualitySignalFill)"
+                        isAnimationActive={false}
+                        stroke="#7EE45B"
+                        strokeWidth={2.4}
+                        type="monotone"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between px-4 pb-3 text-xs font-medium text-slate-500">
+                    <span>Latest state</span>
+                    <span>Summary preview</span>
+                  </div>
+                </div>
               </div>
+
+              <aside className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-3">
+                <div className="border-b border-white/10 pb-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Signal Snapshot
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-slate-300">
+                    Current summary-backed state
+                  </p>
+                </div>
+                <div className="mt-2 space-y-1">
+                  <SignalSnapshotMetric label="Symbol" value={selectedSymbol.symbol} />
+                  <SignalSnapshotMetric
+                    label="Price"
+                    value={formatTickerPrice(selectedSymbol.state?.last_trade_price)}
+                  />
+                  <SignalSnapshotMetric
+                    label="Spread"
+                    value={formatTickerPercent(selectedSymbol.state?.spread_pct)}
+                  />
+                  <SignalSnapshotMetric
+                    label="Trades/min"
+                    value={formatOptionalCompact(selectedSymbol.state?.trades_per_minute)}
+                  />
+                  <SignalSnapshotMetric
+                    label="Freshness"
+                    value={formatOptionalAge(
+                      selectedSymbol.state?.last_event_age_ms ??
+                        summary?.pipeline.last_message_age_ms,
+                    )}
+                  />
+                  <SignalSnapshotMetric
+                    label="Anomalies"
+                    value={String(selectedAnomalies.length)}
+                  />
+                </div>
+              </aside>
             </div>
 
             <p className="mt-2 text-xs leading-5 text-slate-500">
@@ -580,49 +668,19 @@ function MarketSignalShell({
               not a historical price series.
             </p>
           </div>
-
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <SignalMetric
-              label="Symbol"
-              value={selectedSymbol.symbol}
-            />
-            <SignalMetric
-              label="Price"
-              value={formatTickerPrice(selectedSymbol.state?.last_trade_price)}
-            />
-            <SignalMetric
-              label="Spread"
-              value={formatTickerPercent(selectedSymbol.state?.spread_pct)}
-            />
-            <SignalMetric
-              label="Trades/min"
-              value={formatOptionalCompact(selectedSymbol.state?.trades_per_minute)}
-            />
-            <SignalMetric
-              label="Freshness"
-              value={formatOptionalAge(
-                selectedSymbol.state?.last_event_age_ms ??
-                  summary?.pipeline.last_message_age_ms,
-              )}
-            />
-            <SignalMetric
-              label="Anomalies"
-              value={String(selectedAnomalies.length)}
-            />
-          </div>
         </div>
       )}
     </section>
   );
 }
 
-function SignalMetric({ label, value }: { label: string; value: string }) {
+function SignalSnapshotMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-slate-950/35 px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
         {label}
       </p>
-      <p className="mt-1 text-base font-bold text-white">{value}</p>
+      <p className="text-sm font-bold text-white">{value}</p>
     </div>
   );
 }
