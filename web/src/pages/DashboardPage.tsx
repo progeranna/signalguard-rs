@@ -89,43 +89,99 @@ function DashboardTickerShell({
   isLoading: boolean;
 }) {
   const symbols = summary?.symbols ?? [];
+  const anomalies = summary?.recent_anomalies ?? [];
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 shadow-[0_14px_45px_rgba(2,6,23,0.22)]">
+    <section
+      aria-label="Market quality ticker"
+      className="overflow-hidden rounded-2xl border border-white/10 bg-[#07101b]/85 px-3 py-3 shadow-[0_14px_45px_rgba(2,6,23,0.22)]"
+    >
       {isLoading ? (
         <LoadingSkeleton className="h-8" />
       ) : symbols.length > 0 ? (
-        <div className="flex gap-3 overflow-x-auto pb-1">
-          {symbols.slice(0, 8).map((symbol) => (
-            <TickerItem key={symbol.symbol} symbol={symbol} />
-          ))}
+        <div className="overflow-x-auto lg:overflow-hidden">
+          <div
+            className={`flex w-max min-w-full gap-3 ${
+              symbols.length > 1 ? "sg-ticker-track" : ""
+            }`.trim()}
+          >
+            <TickerItemGroup symbols={symbols} anomalies={anomalies} />
+            {symbols.length > 1 ? (
+              <div aria-hidden="true" className="flex gap-3">
+                <TickerItemGroup symbols={symbols} anomalies={anomalies} />
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : (
         <p className="text-sm font-medium text-slate-400">
-          No symbols reporting in the current summary window.
+          No symbol health data available
         </p>
       )}
     </section>
   );
 }
 
-function TickerItem({ symbol }: { symbol: DashboardSymbolSummary }) {
-  const status = symbol.health?.status ?? "unknown";
-  const anomalyCount = symbol.health?.recent_anomaly_count ?? 0;
-
+function TickerItemGroup({
+  symbols,
+  anomalies,
+}: {
+  symbols: DashboardSymbolSummary[];
+  anomalies: DashboardAnomaly[];
+}) {
   return (
-    <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-200">
-      <span className="font-mono text-white">{symbol.symbol}</span>
-      <TickerDot status={toStatusTone(symbol.health?.status, "neutral")} />
-      <span className="uppercase text-slate-300">{status}</span>
-      <span className="text-slate-500">/</span>
-      <span>{formatDecimalString(symbol.state?.last_trade_price)}</span>
-      <span className="text-slate-500">/</span>
-      <span>spread {formatPercent(symbol.state?.spread_pct)}</span>
-      <span className="text-slate-500">/</span>
-      <span>{anomalyCount} anomalies</span>
+    <div className="flex gap-3">
+      {symbols.slice(0, 8).map((symbol) => (
+        <TickerItem
+          key={symbol.symbol}
+          symbol={symbol}
+          anomalies={anomalies.filter((anomaly) => anomaly.symbol === symbol.symbol)}
+        />
+      ))}
     </div>
   );
+}
+
+function TickerItem({
+  symbol,
+  anomalies,
+}: {
+  symbol: DashboardSymbolSummary;
+  anomalies: DashboardAnomaly[];
+}) {
+  const status = symbol.health?.status ?? null;
+  const statusTone = toStatusTone(status, "neutral");
+  const anomalyCount = anomalies.length;
+  const hasCriticalAnomaly = anomalies.some((anomaly) => anomaly.severity === "critical");
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.045] px-3.5 py-2 text-sm font-semibold text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <span className="font-mono text-[13px] font-bold text-slate-50">
+        {symbol.symbol}
+      </span>
+      <TickerSeparator />
+      <span className={`inline-flex items-center gap-2 ${tickerStatusClass(statusTone)}`}>
+        <TickerDot status={statusTone} />
+        {statusLabel(status)}
+      </span>
+      <TickerSeparator />
+      <span className="text-slate-100">
+        {formatTickerPrice(symbol.state?.last_trade_price)}
+      </span>
+      <TickerSeparator />
+      <span className={tickerSpreadClass(statusTone)}>
+        spread {formatTickerPercent(symbol.state?.spread_pct)}
+      </span>
+      <TickerSeparator />
+      <span className={tickerAnomalyClass(anomalyCount, hasCriticalAnomaly)}>
+        {anomalyCount} {anomalyCount === 1 ? "anomaly" : "anomalies"}
+      </span>
+    </div>
+  );
+}
+
+function TickerSeparator() {
+  return <span className="text-slate-600">·</span>;
 }
 
 function TickerDot({ status }: { status: StatusTone }) {
@@ -139,6 +195,62 @@ function TickerDot({ status }: { status: StatusTone }) {
           : "bg-slate-500";
 
   return <span className={`h-2 w-2 rounded-full ${className}`} />;
+}
+
+function tickerStatusClass(status: StatusTone): string {
+  switch (status) {
+    case "healthy":
+      return "text-emerald-300";
+    case "degraded":
+    case "warning":
+      return "text-amber-300";
+    case "unhealthy":
+    case "critical":
+      return "text-rose-300";
+    default:
+      return "text-slate-400";
+  }
+}
+
+function tickerSpreadClass(status: StatusTone): string {
+  switch (status) {
+    case "degraded":
+    case "warning":
+      return "text-amber-300";
+    case "unhealthy":
+    case "critical":
+      return "text-rose-300";
+    default:
+      return "text-slate-400";
+  }
+}
+
+function tickerAnomalyClass(count: number, hasCriticalAnomaly: boolean): string {
+  if (hasCriticalAnomaly || count >= 3) {
+    return "text-rose-300";
+  }
+
+  if (count > 0) {
+    return "text-amber-300";
+  }
+
+  return "text-emerald-300";
+}
+
+function formatTickerPrice(value: string | null | undefined): string {
+  if (!value) {
+    return "—";
+  }
+
+  return value;
+}
+
+function formatTickerPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return `${value.toFixed(2)}%`;
 }
 
 function DashboardSummaryGrid({
