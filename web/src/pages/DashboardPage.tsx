@@ -1,4 +1,14 @@
 import { Link } from "react-router-dom";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
 import type {
@@ -299,18 +309,21 @@ function DashboardSummaryGrid({
           summary?.pipeline.last_message_age_ms,
         )}`}
         tone={pipelineStatus ? toStatusTone(pipelineStatus) : "neutral"}
+        icon="pipeline"
       />
       <KpiCard
         label="Tracked Symbols"
         value={String(symbols.length)}
         description={symbolHealthBreakdown(symbols)}
         tone="info"
+        icon="symbols"
       />
       <KpiCard
         label="Recent Anomalies"
         value={String(anomalies.length)}
         description="Current summary window"
         tone={anomalies.length > 0 ? "warning" : "healthy"}
+        icon="anomalies"
       />
     </section>
   );
@@ -321,26 +334,8 @@ function ServiceHealthCard({ status }: { status: string | null | undefined }) {
   const palette = serviceHealthPalette(tone);
 
   return (
-    <article className="sg-panel flex min-h-28 items-center gap-4 overflow-hidden px-4 py-4">
-      <div
-        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${palette.icon}`}
-      >
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 96 96"
-          className={`h-8 w-8 ${palette.pulse}`}
-          fill="none"
-        >
-          <circle cx="48" cy="48" r="32" stroke="currentColor" strokeOpacity="0.18" />
-          <path
-            d="M18 50h14l8-18 13 38 9-24h16"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="6"
-          />
-        </svg>
-      </div>
+    <article className="sg-panel flex min-h-24 items-center gap-4 overflow-hidden px-4 py-3">
+      <KpiIcon tone={tone} kind="service" />
 
       <div className="min-w-0">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -362,26 +357,79 @@ function KpiCard({
   value,
   description,
   tone = "neutral",
+  icon,
 }: {
   label: string;
   value: string;
   description: string;
   tone?: StatusTone;
+  icon: KpiIconKind;
 }) {
   return (
-    <article className="sg-panel flex min-h-28 flex-col justify-between px-4 py-4">
-      <div className="flex items-start justify-between gap-4">
+    <article className="sg-panel flex min-h-24 items-center gap-4 overflow-hidden px-4 py-3">
+      <KpiIcon tone={tone} kind={icon} />
+      <div className="min-w-0">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
           {label}
         </p>
-        <TickerDot status={tone} />
-      </div>
-      <div>
-        <p className="text-2xl font-extrabold tracking-tight text-white">{value}</p>
-        <p className="mt-1 text-sm leading-5 text-slate-400">{description}</p>
+        <p className={`mt-2 text-2xl font-extrabold leading-none tracking-tight ${kpiValueClass(tone)}`}>
+          {value}
+        </p>
+        <p className="mt-1 truncate text-sm leading-5 text-slate-400">{description}</p>
       </div>
     </article>
   );
+}
+
+type KpiIconKind = "service" | "pipeline" | "symbols" | "anomalies";
+
+function KpiIcon({ tone, kind }: { tone: StatusTone; kind: KpiIconKind }) {
+  const palette = serviceHealthPalette(tone);
+
+  return (
+    <div
+      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${palette.icon}`}
+    >
+      {kind === "service" ? (
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 96 96"
+          className={`h-8 w-8 ${palette.pulse}`}
+          fill="none"
+        >
+          <circle cx="48" cy="48" r="32" stroke="currentColor" strokeOpacity="0.18" />
+          <path
+            d="M18 50h14l8-18 13 38 9-24h16"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="6"
+          />
+        </svg>
+      ) : (
+        <span className={`text-sm font-extrabold uppercase ${palette.pulse}`}>
+          {kind === "pipeline" ? "PH" : kind === "symbols" ? "SY" : "AN"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function kpiValueClass(tone: StatusTone): string {
+  switch (tone) {
+    case "healthy":
+      return "text-emerald-300";
+    case "degraded":
+    case "warning":
+      return "text-amber-300";
+    case "unhealthy":
+    case "critical":
+      return "text-rose-300";
+    case "info":
+      return "text-sky-200";
+    default:
+      return "text-white";
+  }
 }
 
 function MarketSignalShell({
@@ -397,12 +445,12 @@ function MarketSignalShell({
         (anomaly) => anomaly.symbol === selectedSymbol.symbol,
       )
     : [];
-  const signalPath = selectedSymbol
-    ? buildSignalPath(selectedSymbol, selectedAnomalies)
-    : null;
+  const signalSeries = selectedSymbol
+    ? buildSignalSeries(selectedSymbol, selectedAnomalies)
+    : [];
 
   return (
-    <section className="sg-panel overflow-hidden px-4 py-4 sm:px-5">
+    <section className="overflow-hidden border-y border-white/10 bg-[var(--sg-panel)] px-4 py-4 shadow-[0_14px_34px_rgba(2,6,23,0.18)] sm:px-5">
       <div className="flex flex-col gap-3 border-b border-white/10 pb-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-sm font-semibold text-slate-400">Market Signal View</p>
@@ -426,11 +474,11 @@ function MarketSignalShell({
 
       {isLoading ? (
         <LoadingSkeleton className="mt-4 h-48" />
-      ) : !selectedSymbol || !signalPath ? (
+      ) : !selectedSymbol || signalSeries.length === 0 ? (
         <EmptyBlock message="No monitored symbol state available for the signal preview." />
       ) : (
         <div className="mt-4 space-y-3">
-          <div className="rounded-xl border border-white/10 bg-[#0b141d] p-3 sm:p-4">
+          <div className="rounded-xl border border-white/10 bg-[#0b141d] px-3 py-3 sm:px-4">
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="font-mono text-sm font-bold text-white">
@@ -460,62 +508,67 @@ function MarketSignalShell({
               )}
             </div>
 
-            <div className="relative min-h-44 overflow-hidden rounded-xl border border-slate-700/70 bg-slate-950/70">
-              <svg
-                aria-label={`${selectedSymbol.symbol} summary-backed signal preview`}
-                className="h-44 w-full"
-                preserveAspectRatio="none"
-                viewBox="0 0 100 52"
-                role="img"
-              >
-                <defs>
-                  <linearGradient id="signalArea" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="rgb(120 224 93)" stopOpacity="0.22" />
-                    <stop offset="100%" stopColor="rgb(120 224 93)" stopOpacity="0.02" />
-                  </linearGradient>
-                </defs>
-                {[10, 20, 30, 40].map((y) => (
-                  <line
-                    key={`grid-y-${y}`}
-                    stroke="rgb(71 85 105)"
-                    strokeOpacity="0.22"
-                    strokeWidth="0.35"
-                    x1="0"
-                    x2="100"
-                    y1={y}
-                    y2={y}
+            <div className="relative h-52 overflow-hidden rounded-xl border border-slate-700/70 bg-slate-950/70 px-2 py-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={signalSeries}
+                  margin={{ top: 12, right: 18, bottom: 6, left: 0 }}
+                >
+                  <defs>
+                    <linearGradient id="qualitySignalFill" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stopColor="#7EE45B" stopOpacity={0.2} />
+                      <stop offset="100%" stopColor="#7EE45B" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    stroke="rgba(100,116,139,0.18)"
+                    strokeDasharray="3 8"
+                    vertical={false}
                   />
-                ))}
-                {[16, 32, 48, 64, 80].map((x) => (
-                  <line
-                    key={`grid-x-${x}`}
-                    stroke="rgb(71 85 105)"
-                    strokeOpacity="0.16"
-                    strokeWidth="0.3"
-                    x1={x}
-                    x2={x}
-                    y1="0"
-                    y2="52"
+                  <XAxis
+                    axisLine={false}
+                    dataKey="label"
+                    tick={{ fill: "#64748b", fontSize: 11 }}
+                    tickLine={false}
                   />
-                ))}
-                <path d={signalPath.area} fill="url(#signalArea)" />
-                <path
-                  d={signalPath.line}
-                  fill="none"
-                  stroke="rgb(126 228 91)"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.35"
-                />
-                {selectedAnomalies.slice(0, 5).map((anomaly, index) => (
-                  <AnomalyMarker
-                    key={anomaly.id}
-                    anomaly={anomaly}
-                    index={index}
-                    total={Math.min(selectedAnomalies.length, 5)}
+                  <YAxis
+                    axisLine={false}
+                    domain={[0, 100]}
+                    tick={{ fill: "#64748b", fontSize: 11 }}
+                    tickLine={false}
+                    width={28}
                   />
-                ))}
-              </svg>
+                  <Tooltip
+                    contentStyle={{
+                      background: "#0E1822",
+                      border: "1px solid rgba(148,163,184,0.18)",
+                      borderRadius: "10px",
+                      color: "#e2e8f0",
+                    }}
+                    formatter={(value) => [`${value}`, "Signal"]}
+                    labelFormatter={() => "Summary-backed preview"}
+                  />
+                  {signalSeries
+                    .filter((point) => point.severity)
+                    .map((point) => (
+                      <ReferenceLine
+                        key={`marker-${point.label}`}
+                        stroke={anomalySeverityColor(point.severity)}
+                        strokeDasharray="3 4"
+                        strokeOpacity={0.85}
+                        x={point.label}
+                      />
+                    ))}
+                  <Area
+                    dataKey="signal"
+                    fill="url(#qualitySignalFill)"
+                    isAnimationActive={false}
+                    stroke="#7EE45B"
+                    strokeWidth={2.4}
+                    type="monotone"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
               <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between px-4 pb-3 text-xs font-medium text-slate-500">
                 <span>Latest state</span>
                 <span>Summary preview</span>
@@ -563,46 +616,6 @@ function MarketSignalShell({
   );
 }
 
-function AnomalyMarker({
-  anomaly,
-  index,
-  total,
-}: {
-  anomaly: DashboardAnomaly;
-  index: number;
-  total: number;
-}) {
-  const x = 14 + ((index + 1) * 72) / (total + 1);
-  const tone = anomalyMarkerTone(anomaly.severity);
-
-  return (
-    <g>
-      <line
-        stroke={tone.stroke}
-        strokeDasharray="1.6 1.8"
-        strokeOpacity="0.8"
-        strokeWidth="0.75"
-        x1={x}
-        x2={x}
-        y1="7"
-        y2="46"
-      />
-      <circle
-        cx={x}
-        cy="8"
-        fill={tone.fill}
-        r="2.6"
-        stroke={tone.stroke}
-        strokeOpacity="0.9"
-        strokeWidth="0.8"
-      />
-      <title>
-        {anomaly.symbol} {anomaly.anomaly_type} {anomaly.severity}
-      </title>
-    </g>
-  );
-}
-
 function SignalMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-3">
@@ -622,7 +635,7 @@ function DashboardTablesGrid({
   isLoading: boolean;
 }) {
   return (
-    <section className="grid gap-4 xl:grid-cols-2">
+    <section className="grid gap-3 xl:grid-cols-2">
       <SymbolHealthShell summary={summary} isLoading={isLoading} />
       <RecentAnomaliesShell summary={summary} isLoading={isLoading} />
     </section>
@@ -639,13 +652,13 @@ function SymbolHealthShell({
   const symbols = summary?.symbols ?? [];
 
   return (
-    <section className="sg-panel overflow-hidden bg-[#0b121c] px-5 py-5">
+    <section className="sg-panel overflow-hidden px-4 py-4">
       <SectionTitle title="Symbol Health" />
       {isLoading ? (
-        <LoadingSkeleton className="mt-5 h-48" />
+        <LoadingSkeleton className="mt-3 h-44" />
       ) : symbols.length > 0 ? (
         <>
-          <div className="mt-5 hidden lg:block">
+          <div className="mt-3 hidden max-h-72 overflow-y-auto pr-1 lg:block">
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -683,7 +696,7 @@ function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
 
   return (
     <tr className="border-b border-white/[0.06] last:border-0">
-      <td className="py-3.5 pr-4">
+      <td className="py-2.5 pr-4">
         <Link
           to={`/symbols/${symbol.symbol}`}
           className="font-mono text-base font-bold text-slate-50 transition hover:text-cyan-200"
@@ -691,19 +704,19 @@ function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
           {symbol.symbol}
         </Link>
       </td>
-      <td className="py-3.5 pr-4">
+      <td className="py-2.5 pr-4">
         <HealthScore score={score} status={symbol.health?.status} />
       </td>
-      <td className="py-3.5 pr-4 text-sm font-semibold text-slate-100">
+      <td className="py-2.5 pr-4 text-sm font-semibold text-slate-100">
         {formatTickerPrice(symbol.state?.last_trade_price)}
       </td>
-      <td className="py-3.5 pr-4 text-sm font-semibold text-slate-300">
+      <td className="py-2.5 pr-4 text-sm font-semibold text-slate-300">
         {formatTickerPercent(symbol.state?.spread_pct)}
       </td>
-      <td className="py-3.5 pr-4 text-sm font-semibold text-slate-300">
+      <td className="py-2.5 pr-4 text-sm font-semibold text-slate-300">
         {formatOptionalCompact(symbol.state?.trades_per_minute)}
       </td>
-      <td className="py-3.5 text-right">
+      <td className="py-2.5 text-right">
         <StatusBadge
           status={statusTone}
           text={statusLabel(symbol.health?.status)}
@@ -806,13 +819,13 @@ function RecentAnomaliesShell({
   const anomalies = summary?.recent_anomalies ?? [];
 
   return (
-    <section className="sg-panel overflow-hidden bg-[#0b121c] px-5 py-5">
+    <section className="sg-panel overflow-hidden px-4 py-4">
       <SectionTitle title="Recent Anomalies" action={<Link to="/anomalies">View all</Link>} />
       {isLoading ? (
-        <LoadingSkeleton className="mt-5 h-48" />
+        <LoadingSkeleton className="mt-3 h-44" />
       ) : anomalies.length > 0 ? (
         <>
-          <div className="mt-5 hidden lg:block">
+          <div className="mt-3 hidden max-h-72 overflow-y-auto pr-1 lg:block">
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -849,10 +862,10 @@ function AnomalyTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
 
   return (
     <tr className="border-b border-white/[0.06] last:border-0">
-      <td className="py-3.5 pr-4 text-sm font-semibold text-slate-300">
+      <td className="py-2.5 pr-4 text-sm font-semibold text-slate-300">
         {formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
       </td>
-      <td className="py-3.5 pr-4">
+      <td className="py-2.5 pr-4">
         <Link
           to={`/symbols/${anomaly.symbol}`}
           className="font-mono text-sm font-bold text-slate-50 transition hover:text-cyan-200"
@@ -860,16 +873,16 @@ function AnomalyTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
           {anomaly.symbol}
         </Link>
       </td>
-      <td className="py-3.5 pr-4 text-sm font-bold text-slate-100">
+      <td className="py-2.5 pr-4 text-sm font-bold text-slate-100">
         {formatAnomalyType(anomaly.anomaly_type)}
       </td>
-      <td className="py-3.5 pr-4">
+      <td className="py-2.5 pr-4">
         <SeverityBadge severity={anomaly.severity} />
       </td>
-      <td className={`py-3.5 pr-4 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
+      <td className={`py-2.5 pr-4 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
         {formatAnomalyValue(anomaly.anomaly_type, anomaly.observed_value, "observed")}
       </td>
-      <td className="py-3.5 text-sm font-semibold text-slate-300">
+      <td className="py-2.5 text-sm font-semibold text-slate-300">
         {formatAnomalyValue(anomaly.anomaly_type, anomaly.threshold_value, "threshold")}
       </td>
     </tr>
@@ -937,7 +950,7 @@ function SectionTitle({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-4">
+    <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-3">
       <h3 className="text-xl font-bold tracking-tight text-white">{title}</h3>
       {action ? (
         <div className="text-sm font-semibold text-cyan-200 transition hover:text-cyan-100">
@@ -997,74 +1010,68 @@ function selectSignalSymbol(
   return symbols.find((symbol) => symbol.symbol === "BTCUSDT") ?? symbols[0] ?? null;
 }
 
-function buildSignalPath(
+type SignalPoint = {
+  label: string;
+  signal: number;
+  severity?: DashboardAnomaly["severity"];
+};
+
+function buildSignalSeries(
   symbol: DashboardSymbolSummary,
   anomalies: DashboardAnomaly[],
-): { line: string; area: string } {
+): SignalPoint[] {
   const score = symbol.health?.score ?? 55;
   const spread = symbol.state?.spread_pct ?? 0;
   const tradeRate = symbol.state?.trades_per_minute ?? 0;
   const agePenalty = Math.min((symbol.state?.last_event_age_ms ?? 0) / 30_000, 8);
   const anomalyPenalty = Math.min(anomalies.length * 3, 12);
-  const base = clamp(42 - score * 0.24 + spread * 16 + agePenalty + anomalyPenalty, 10, 40);
+  const base = clamp(score - spread * 20 - agePenalty - anomalyPenalty, 18, 94);
   const activity = clamp(tradeRate / 12, 0, 7);
   const statusLift =
     symbol.health?.status === "healthy"
-      ? -4
+      ? 4
       : symbol.health?.status === "degraded"
-        ? 2
+        ? -3
         : symbol.health?.status === "unhealthy"
-          ? 5
+          ? -9
           : 0;
 
-  const points = [
-    [5, clamp(base + 5 - activity, 8, 44)],
-    [18, clamp(base + statusLift, 8, 44)],
-    [32, clamp(base - 5 - activity / 2, 8, 44)],
-    [48, clamp(base - 1 + anomalyPenalty / 2, 8, 44)],
-    [64, clamp(base - 7 + activity, 8, 44)],
-    [82, clamp(base - 3 + statusLift, 8, 44)],
-    [96, clamp(base - 9 + anomalyPenalty / 3, 8, 44)],
-  ];
+  const anomalySlots = anomalies.slice(0, 5).map((anomaly, index) => ({
+    slot: Math.round(((index + 1) * 8) / (Math.min(anomalies.length, 5) + 1)),
+    severity: anomaly.severity,
+  }));
 
-  const line = points
-    .map(([x, y], index) => `${index === 0 ? "M" : "L"} ${x} ${y}`)
-    .join(" ");
-  const area = `${line} L 96 52 L 5 52 Z`;
+  return [
+    ["S1", clamp(base - 6 + statusLift, 6, 98)],
+    ["S2", clamp(base - 1 + activity, 6, 98)],
+    ["S3", clamp(base + 4 + statusLift / 2, 6, 98)],
+    ["S4", clamp(base + 1 - anomalyPenalty / 2, 6, 98)],
+    ["S5", clamp(base + 6 - agePenalty, 6, 98)],
+    ["S6", clamp(base + 2 + activity / 2, 6, 98)],
+    ["S7", clamp(base + statusLift - anomalyPenalty / 3, 6, 98)],
+    ["S8", clamp(base + 5 - spread * 8, 6, 98)],
+  ].map(([label, signal], index) => ({
+    label: String(label),
+    severity: anomalySlots.find((marker) => marker.slot === index + 1)?.severity,
+    signal: Number(signal),
+  }));
+}
 
-  return { line, area };
+function anomalySeverityColor(severity: DashboardAnomaly["severity"] | undefined): string {
+  switch (severity) {
+    case "critical":
+      return "#FF6B5F";
+    case "warning":
+      return "#F5C542";
+    case "info":
+      return "#63A7FF";
+    default:
+      return "#94A3B8";
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
-}
-
-function anomalyMarkerTone(severity: DashboardAnomaly["severity"]): {
-  fill: string;
-  stroke: string;
-} {
-  switch (severity) {
-    case "critical":
-      return {
-        fill: "rgb(255 92 77)",
-        stroke: "rgb(255 107 95)",
-      };
-    case "warning":
-      return {
-        fill: "rgb(245 181 27)",
-        stroke: "rgb(245 197 66)",
-      };
-    case "info":
-      return {
-        fill: "rgb(99 167 255)",
-        stroke: "rgb(99 167 255)",
-      };
-    default:
-      return {
-        fill: "rgb(148 163 184)",
-        stroke: "rgb(148 163 184)",
-      };
-  }
 }
 
 function anomalyMarkerBadgeClass(severity: DashboardAnomaly["severity"]): string {
