@@ -8,6 +8,7 @@ The default fast-demo path uses `examples/replay/sample.jsonl`, which contains n
 
 - `GET /health`
 - `GET /pipeline/health`
+- `GET /dashboard/summary`
 - `GET /metrics`
 - `GET /symbols`
 - `GET /market/{symbol}/state`
@@ -45,6 +46,79 @@ curl --fail --silent --show-error http://127.0.0.1:8080/pipeline/health
 ```
 
 This endpoint reports ingestion and storage/cache counter health. It is separate from `GET /market/{symbol}/health`, which evaluates one symbol's latest market state and recent anomalies.
+
+## `GET /dashboard/summary`
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8080/dashboard/summary
+```
+
+This is the compact read-only dashboard bootstrap endpoint for the future web console. It combines:
+
+- service metadata
+- pipeline counter health
+- Redis-backed tracked symbols
+- Redis-backed latest market state summaries when available
+- per-symbol market health summaries derived from latest state plus recent anomalies
+- PostgreSQL-backed recent anomalies
+
+If a symbol is present in the tracked-symbol set but no latest market state is available, the symbol remains in the response while `state` and `health` are `null`.
+
+Example replay response:
+
+```json
+{
+  "service": {
+    "status": "ok",
+    "service": "signalguard-rs"
+  },
+  "pipeline": {
+    "status": "healthy",
+    "last_message_age_ms": 1234,
+    "parse_errors": 0,
+    "reconnect_attempts": 0,
+    "storage_errors": 0,
+    "cache_errors": 0
+  },
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "state": {
+        "last_trade_price": "65054.25",
+        "best_bid_price": "65048.00",
+        "best_ask_price": "65055.00",
+        "spread_pct": 0.01076070497990054,
+        "price_change_1m_pct": 0.08346153846153846,
+        "trades_per_minute": 2.0,
+        "last_event_time": "2026-01-01T00:00:03Z",
+        "last_event_age_ms": 123456789,
+        "depth_sequence_gap_count": 0
+      },
+      "health": {
+        "score": 75,
+        "status": "degraded",
+        "recent_anomaly_count": 1,
+        "evaluated_at": "<evaluated_at>"
+      }
+    }
+  ],
+  "recent_anomalies": [
+    {
+      "id": "<uuid>",
+      "symbol": "BTCUSDT",
+      "anomaly_type": "stale_data",
+      "severity": "critical",
+      "message": "market data age is 123456789 ms, exceeding the configured 5000 ms threshold",
+      "observed_value": 123456789.0,
+      "threshold_value": 5000.0,
+      "event_time": "2026-01-01T00:00:00Z",
+      "created_at": "<created_at>"
+    }
+  ]
+}
+```
+
+This endpoint is read-only. It does not place trades, does not use private exchange APIs, and does not expose account, order, or balance data.
 
 ## `GET /symbols`
 

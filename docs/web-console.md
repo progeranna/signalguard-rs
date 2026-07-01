@@ -48,7 +48,7 @@ Recommended content:
 - recent anomaly preview
 - links to symbol detail pages
 
-The MVP should compose existing backend responses client-side. A dedicated `/dashboard/summary` backend endpoint can be considered later, but it is not part of the initial implementation.
+The MVP can use `GET /dashboard/summary` as the primary dashboard bootstrap endpoint. It is a compact read-only response intended for the future web console and reduces the need to assemble the first dashboard view from multiple separate API calls.
 
 ### `/symbols/:symbol`
 
@@ -152,16 +152,17 @@ The console should present current state, recent anomalies, health signals, metr
 | Page | Purpose | Backend endpoints |
 | --- | --- | --- |
 | `/` | Product framing, status links, public demo context | `GET /health`, `GET /pipeline/health` |
-| `/dashboard` | Cross-symbol overview | `GET /symbols`, `GET /market/{symbol}/state`, `GET /market/{symbol}/health`, `GET /anomalies` |
+| `/dashboard` | Cross-symbol overview | `GET /dashboard/summary` |
 | `/symbols/:symbol` | Symbol detail | `GET /market/{symbol}/state`, `GET /market/{symbol}/health`, `GET /anomalies?symbol={symbol}&limit={n}` |
 | `/anomalies` | Global anomaly explorer | `GET /anomalies`, `GET /symbols` |
 | `/architecture` | System explanation and observability context | `GET /health`, `GET /pipeline/health`, `GET /metrics` |
 
 Notes:
 
-- The MVP can request per-symbol state and health directly from the browser and compose the dashboard client-side.
+- `GET /dashboard/summary` is the intended primary dashboard bootstrap endpoint for the web console.
+- It is read-only and frontend-friendly, combining service metadata, pipeline health, tracked symbols, compact per-symbol state and health summaries when available, and recent anomalies.
+- If a tracked symbol has no latest market state in Redis, the symbol still appears in the response while `state` and `health` remain `null`.
 - `GET /metrics` is useful for architecture and observability context, but it is Prometheus-style text rather than a dashboard-specific JSON payload.
-- No `/dashboard/summary` endpoint is assumed in the MVP scope.
 
 ## Frontend Stack Recommendation
 
@@ -177,7 +178,7 @@ Recommended stack for the first web implementation:
 Guidance:
 
 - keep the frontend static-first and read-only
-- prefer direct use of existing backend endpoints
+- prefer `GET /dashboard/summary` for the initial dashboard load and existing symbol/anomaly endpoints for drill-down views
 - avoid introducing a frontend-specific server for the MVP
 - keep styling simple, clear, and easy to host on a VPS later
 
@@ -188,8 +189,8 @@ The first web-console milestone should target local development before deploymen
 1. Build the frontend under `web/` and run it locally against the existing Axum API.
 2. Use replay mode as the default development path so the UI has deterministic demo data.
 3. Keep API integration limited to existing read-only endpoints.
-4. Compose dashboard summaries in the client first.
-5. Add a backend summary endpoint later only if the browser-side composition becomes inefficient or awkward.
+4. Use `GET /dashboard/summary` as the first dashboard data load, then use symbol and anomaly endpoints for deeper views.
+5. Keep the dashboard summary contract read-only and stable so the web console can reuse the same response locally and later on a VPS.
 
 This keeps the MVP small and aligned with the current backend contract.
 
@@ -214,7 +215,6 @@ The web-console MVP does not include:
 - authentication, user profiles, or multi-user permissions
 - admin panels or data-editing controls
 - websocket-specific frontend architecture beyond what is needed later
-- a new `/dashboard/summary` backend endpoint
 - VPS automation, deployment manifests, or production rollout work
 - changes to detector logic or Rust backend behavior
 
