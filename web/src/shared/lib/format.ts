@@ -44,3 +44,24 @@ export function formatDecimalString(value: string | null | undefined): string {
 
   return value;
 }
+
+export function formatTimestamp(value: string | null | undefined): string {
+  if (!value) {
+    return "n/a";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
