@@ -31,7 +31,7 @@ export function DashboardPage() {
   const summary = dashboardSummaryQuery.data ?? null;
 
   return (
-    <section className="space-y-3 lg:space-y-4">
+    <section className="space-y-3">
       <DashboardTickerShell summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
       <DashboardTitleRow />
 
@@ -495,10 +495,11 @@ function MarketSignalShell({
   const signalSeries = selectedSymbol
     ? buildSignalSeries(selectedSymbol, selectedAnomalies)
     : [];
+  const signalSeverity = highestAnomalySeverity(selectedAnomalies);
 
   return (
-    <section className="overflow-hidden border-y border-white/10 bg-[var(--sg-panel)] px-4 py-3 shadow-[0_14px_34px_rgba(2,6,23,0.18)] sm:px-5">
-      <div className="flex flex-col gap-2 border-b border-white/10 pb-3 lg:flex-row lg:items-start lg:justify-between">
+    <section className="overflow-hidden border-y border-white/10 bg-[var(--sg-panel)] px-4 py-2.5 shadow-[0_14px_34px_rgba(2,6,23,0.18)] sm:px-5">
+      <div className="flex flex-col gap-2 border-b border-white/10 pb-2.5 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-sm font-semibold text-slate-400">Market Signal View</p>
           <h3 className="mt-1 text-xl font-bold tracking-tight text-white">
@@ -520,36 +521,31 @@ function MarketSignalShell({
       </div>
 
       {isLoading ? (
-        <LoadingSkeleton className="mt-3 h-44" />
+        <LoadingSkeleton className="mt-2.5 h-40" />
       ) : !selectedSymbol || signalSeries.length === 0 ? (
         <EmptyBlock message="No monitored symbol state available for the signal preview." />
       ) : (
-        <div className="mt-3">
-          <div className="rounded-xl border border-white/10 bg-[#0b141d] px-3 py-3 sm:px-4">
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-2.5">
+          <div className="rounded-xl border border-white/10 bg-[#0b141d] px-3 py-2.5 sm:px-4">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="font-mono text-sm font-bold text-white">
                   {selectedSymbol.symbol}
                 </p>
-                <p className="mt-1 text-sm text-slate-400">
+                <p className="mt-0.5 text-xs text-slate-400">
                   Latest state with recent anomaly markers
                 </p>
               </div>
-              {selectedAnomalies.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {selectedAnomalies.slice(0, 3).map((anomaly) => (
-                    <span
-                      key={anomaly.id}
-                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
-                        anomaly.severity,
-                      )}`}
-                    >
-                      {anomaly.severity}
-                    </span>
-                  ))}
-                </div>
+              {signalSeverity ? (
+                <span
+                  className={`w-fit rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
+                    signalSeverity,
+                  )}`}
+                >
+                  {statusLabel(signalSeverity)} signal
+                </span>
               ) : (
-                <p className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200">
+                <p className="w-fit rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-200">
                   No recent anomalies
                 </p>
               )}
@@ -557,7 +553,7 @@ function MarketSignalShell({
 
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_248px]">
               <div className="rounded-xl border border-slate-700/70 bg-slate-950/70">
-                <div className="relative h-40 overflow-hidden px-2 py-2 sm:h-44">
+                <div className="relative h-36 overflow-hidden px-2 py-2 sm:h-40">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
                       data={signalSeries}
@@ -625,12 +621,12 @@ function MarketSignalShell({
                 </div>
               </div>
 
-              <aside className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-3">
-                <div className="border-b border-white/10 pb-2">
+              <aside className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2.5">
+                <div className="border-b border-white/10 pb-1.5">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                     Signal Snapshot
                   </p>
-                  <p className="mt-1 text-sm font-medium text-slate-300">
+                  <p className="mt-0.5 text-xs font-medium text-slate-300">
                     Current summary-backed state
                   </p>
                 </div>
@@ -663,7 +659,7 @@ function MarketSignalShell({
               </aside>
             </div>
 
-            <p className="mt-2 text-xs leading-5 text-slate-500">
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">
               This preview is derived from the latest dashboard summary snapshot,
               not a historical price series.
             </p>
@@ -676,7 +672,7 @@ function MarketSignalShell({
 
 function SignalSnapshotMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-slate-950/35 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-slate-950/35 px-3 py-1.5">
       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
         {label}
       </p>
@@ -1130,6 +1126,24 @@ function anomalySeverityColor(severity: DashboardAnomaly["severity"] | undefined
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function highestAnomalySeverity(
+  anomalies: DashboardAnomaly[],
+): DashboardAnomaly["severity"] | null {
+  if (anomalies.some((anomaly) => anomaly.severity === "critical")) {
+    return "critical";
+  }
+
+  if (anomalies.some((anomaly) => anomaly.severity === "warning")) {
+    return "warning";
+  }
+
+  if (anomalies.some((anomaly) => anomaly.severity === "info")) {
+    return "info";
+  }
+
+  return null;
 }
 
 function anomalyMarkerBadgeClass(severity: DashboardAnomaly["severity"]): string {
