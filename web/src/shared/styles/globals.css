@@ -5,11 +5,11 @@
 @layer base {
   :root {
     color-scheme: dark;
-    --sg-bg: #020617;
-    --sg-bg-soft: #0f172a;
-    --sg-panel: rgba(15, 23, 42, 0.84);
-    --sg-panel-strong: rgba(2, 6, 23, 0.9);
-    --sg-border: rgba(148, 163, 184, 0.18);
+    --sg-bg: #061019;
+    --sg-bg-soft: #0e1822;
+    --sg-panel: #0e1822;
+    --sg-panel-strong: #0b141d;
+    --sg-border: rgba(128, 150, 170, 0.18);
     --sg-border-strong: rgba(56, 189, 248, 0.35);
     --sg-text: #e2e8f0;
     --sg-text-muted: #94a3b8;
@@ -31,9 +31,7 @@
 
   body {
     @apply m-0 min-h-screen;
-    background:
-      radial-gradient(circle at top, rgba(8, 47, 73, 0.28), transparent 36%),
-      linear-gradient(180deg, #020617 0%, #020617 100%);
+    background: var(--sg-bg);
     color: var(--sg-text);
     font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
   }
@@ -50,11 +48,11 @@
 
 @layer components {
   .sg-panel {
-    @apply rounded-3xl border border-white/10 bg-slate-950/70 shadow-[0_20px_60px_rgba(2,6,23,0.35)] backdrop-blur;
+    @apply rounded-2xl border border-white/10 bg-[var(--sg-panel)] shadow-[0_14px_34px_rgba(2,6,23,0.24)];
   }
 
   .sg-ticker-track {
-    animation: sg-ticker-scroll 42s linear infinite;
+    animation: sg-ticker-scroll 58s linear infinite;
   }
 
   .sg-ticker-track:hover {

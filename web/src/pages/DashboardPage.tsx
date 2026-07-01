@@ -21,8 +21,9 @@ export function DashboardPage() {
   const summary = dashboardSummaryQuery.data ?? null;
 
   return (
-    <section className="space-y-5 lg:space-y-6">
-      <DashboardHeader summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
+    <section className="space-y-3 lg:space-y-4">
+      <DashboardTickerShell summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
+      <DashboardTitleRow />
 
       {dashboardSummaryQuery.isError ? (
         <ErrorPanel
@@ -32,7 +33,6 @@ export function DashboardPage() {
         />
       ) : null}
 
-      <DashboardTickerShell summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
       <DashboardSummaryGrid summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
       <MarketSignalShell summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
       <DashboardTablesGrid summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
@@ -40,41 +40,22 @@ export function DashboardPage() {
   );
 }
 
-function DashboardHeader({
-  summary,
-  isLoading,
-}: {
-  summary: DashboardSummary | null;
-  isLoading: boolean;
-}) {
-  const pipelineStatus = summary?.pipeline.status;
-
+function DashboardTitleRow() {
   return (
-    <header className="sg-panel overflow-hidden px-5 py-5 sm:px-6 lg:px-7">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <div className="max-w-3xl space-y-3">
-          <p className="font-mono text-xs uppercase tracking-[0.24em] text-cyan-200/80">
-            Dashboard
-          </p>
-          <div className="space-y-2">
-            <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Market-data quality overview
-            </h2>
-            <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-              Live service health, symbol freshness, and anomaly signals for the
-              public market-data pipeline.
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge
-            status={pipelineStatus ? toStatusTone(pipelineStatus) : "neutral"}
-            text={isLoading ? "Loading" : pipelineStatus ?? "Unavailable"}
-          />
-          <StatusBadge status="ok" text="Read only" />
-        </div>
+    <div className="flex flex-col gap-3 py-1 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <h1 className="text-2xl font-extrabold tracking-tight text-white lg:text-3xl">
+          Market Data Quality Overview
+        </h1>
+        <p className="mt-1 max-w-3xl text-sm leading-5 text-slate-400">
+          Real-time monitoring of market-data quality, stream health, and anomaly
+          detection.
+        </p>
       </div>
-    </header>
+      <div className="w-fit rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">
+        Current summary
+      </div>
+    </div>
   );
 }
 
@@ -91,27 +72,37 @@ function DashboardTickerShell({
   return (
     <section
       aria-label="Market quality ticker"
-      className="overflow-hidden rounded-2xl border border-white/10 bg-[#07101b]/85 px-3 py-3 shadow-[0_14px_45px_rgba(2,6,23,0.22)]"
+      className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden border-y border-white/10 bg-[#08131d] py-2"
     >
       {isLoading ? (
-        <LoadingSkeleton className="h-8" />
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <LoadingSkeleton className="h-7" />
+        </div>
       ) : symbols.length > 0 ? (
         <div className="overflow-x-auto lg:overflow-hidden">
           <div
-            className={`flex w-max min-w-full gap-3 ${
+            className={`flex w-max min-w-full gap-2 ${
               symbols.length > 1 ? "sg-ticker-track" : ""
             }`.trim()}
           >
             <TickerItemGroup symbols={symbols} anomalies={anomalies} />
             {symbols.length > 1 ? (
-              <div aria-hidden="true" className="flex gap-3">
-                <TickerItemGroup symbols={symbols} anomalies={anomalies} />
-              </div>
+              <>
+                <div aria-hidden="true" className="flex gap-2">
+                  <TickerItemGroup symbols={symbols} anomalies={anomalies} />
+                </div>
+                <div aria-hidden="true" className="flex gap-2">
+                  <TickerItemGroup symbols={symbols} anomalies={anomalies} />
+                </div>
+                <div aria-hidden="true" className="flex gap-2">
+                  <TickerItemGroup symbols={symbols} anomalies={anomalies} />
+                </div>
+              </>
             ) : null}
           </div>
         </div>
       ) : (
-        <p className="text-sm font-medium text-slate-400">
+        <p className="mx-auto max-w-7xl px-4 text-sm font-medium text-slate-400 sm:px-6 lg:px-8">
           No symbol health data available
         </p>
       )}
@@ -127,7 +118,7 @@ function TickerItemGroup({
   anomalies: DashboardAnomaly[];
 }) {
   return (
-    <div className="flex gap-3">
+    <div className="flex gap-2">
       {symbols.slice(0, 8).map((symbol) => (
         <TickerItem
           key={symbol.symbol}
@@ -152,7 +143,7 @@ function TickerItem({
   const hasCriticalAnomaly = anomalies.some((anomaly) => anomaly.severity === "critical");
 
   return (
-    <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.045] px-3.5 py-2 text-sm font-semibold text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <div className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-sm font-semibold text-slate-200">
       <span className="font-mono text-[13px] font-bold text-slate-50">
         {symbol.symbol}
       </span>
@@ -250,6 +241,32 @@ function formatTickerPercent(value: number | null | undefined): string {
   return `${value.toFixed(2)}%`;
 }
 
+function symbolHealthBreakdown(symbols: DashboardSymbolSummary[]): string {
+  if (symbols.length === 0) {
+    return "No symbols";
+  }
+
+  const healthyCount = symbols.filter(
+    (symbol) => symbol.health?.status === "healthy",
+  ).length;
+  const attentionCount = symbols.filter(
+    (symbol) =>
+      symbol.health?.status === "degraded" ||
+      symbol.health?.status === "unhealthy",
+  ).length;
+  const unknownCount = symbols.filter((symbol) => !symbol.health?.status).length;
+
+  if (healthyCount === 0 && attentionCount === 0 && unknownCount > 0) {
+    return "Health Unknown";
+  }
+
+  if (attentionCount > 0) {
+    return `${attentionCount} need attention`;
+  }
+
+  return `${healthyCount} healthy`;
+}
+
 function DashboardSummaryGrid({
   summary,
   isLoading,
@@ -259,13 +276,11 @@ function DashboardSummaryGrid({
 }) {
   if (isLoading) {
     return (
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,_1.55fr)_minmax(320px,_0.95fr)]">
-        <LoadingSkeleton className="h-56" />
-        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-          <LoadingSkeleton className="h-28" />
-          <LoadingSkeleton className="h-28" />
-          <LoadingSkeleton className="h-28" />
-        </div>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <LoadingSkeleton className="h-28" />
+        <LoadingSkeleton className="h-28" />
+        <LoadingSkeleton className="h-28" />
+        <LoadingSkeleton className="h-28" />
       </section>
     );
   }
@@ -275,29 +290,28 @@ function DashboardSummaryGrid({
   const pipelineStatus = summary?.pipeline.status;
 
   return (
-    <section className="grid gap-4 xl:grid-cols-[minmax(0,_1.55fr)_minmax(320px,_0.95fr)]">
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <ServiceHealthCard status={pipelineStatus} />
-
-      <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-        <KpiCard
-          label="Tracked symbols"
-          value={String(symbols.length)}
-          description="Markets in view"
-          tone="info"
-        />
-        <KpiCard
-          label="Recent anomalies"
-          value={String(anomalies.length)}
-          description="Current summary window"
-          tone={anomalies.length > 0 ? "warning" : "healthy"}
-        />
-        <KpiCard
-          label="Freshness"
-          value={formatOptionalAge(summary?.pipeline.last_message_age_ms)}
-          description="Latest pipeline message"
-          tone={pipelineStatus ? toStatusTone(pipelineStatus) : "neutral"}
-        />
-      </div>
+      <KpiCard
+        label="Pipeline Health"
+        value={statusLabel(pipelineStatus)}
+        description={`Freshness ${formatOptionalAge(
+          summary?.pipeline.last_message_age_ms,
+        )}`}
+        tone={pipelineStatus ? toStatusTone(pipelineStatus) : "neutral"}
+      />
+      <KpiCard
+        label="Tracked Symbols"
+        value={String(symbols.length)}
+        description={symbolHealthBreakdown(symbols)}
+        tone="info"
+      />
+      <KpiCard
+        label="Recent Anomalies"
+        value={String(anomalies.length)}
+        description="Current summary window"
+        tone={anomalies.length > 0 ? "warning" : "healthy"}
+      />
     </section>
   );
 }
@@ -307,14 +321,14 @@ function ServiceHealthCard({ status }: { status: string | null | undefined }) {
   const palette = serviceHealthPalette(tone);
 
   return (
-    <article className="sg-panel flex min-h-56 flex-col gap-6 overflow-hidden border-slate-700/70 bg-[#0b111b] px-6 py-6 sm:flex-row sm:items-center sm:px-8 sm:py-8">
+    <article className="sg-panel flex min-h-28 items-center gap-4 overflow-hidden px-4 py-4">
       <div
-        className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-full border sm:h-28 sm:w-28 ${palette.icon}`}
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${palette.icon}`}
       >
         <svg
           aria-hidden="true"
           viewBox="0 0 96 96"
-          className={`h-16 w-16 sm:h-20 sm:w-20 ${palette.pulse}`}
+          className={`h-8 w-8 ${palette.pulse}`}
           fill="none"
         >
           <circle cx="48" cy="48" r="32" stroke="currentColor" strokeOpacity="0.18" />
@@ -329,11 +343,13 @@ function ServiceHealthCard({ status }: { status: string | null | undefined }) {
       </div>
 
       <div className="min-w-0">
-        <p className="text-lg font-semibold text-slate-400">Service Health</p>
-        <p className={`mt-3 text-5xl font-extrabold leading-none tracking-tight ${palette.text}`}>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          Service Health
+        </p>
+        <p className={`mt-2 text-2xl font-extrabold leading-none tracking-tight ${palette.text}`}>
           {statusLabel(status)}
         </p>
-        <p className="mt-4 text-lg font-semibold leading-7 text-slate-200">
+        <p className="mt-1 text-sm font-medium leading-5 text-slate-400">
           {serviceStatusMessage(status)}
         </p>
       </div>
@@ -353,7 +369,7 @@ function KpiCard({
   tone?: StatusTone;
 }) {
   return (
-    <article className="sg-panel flex min-h-28 flex-col justify-between rounded-2xl px-4 py-4">
+    <article className="sg-panel flex min-h-28 flex-col justify-between px-4 py-4">
       <div className="flex items-start justify-between gap-4">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
           {label}
@@ -386,14 +402,14 @@ function MarketSignalShell({
     : null;
 
   return (
-    <section className="sg-panel overflow-hidden bg-[#0b121c] px-5 py-5 sm:px-6 lg:px-7">
-      <div className="flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-start lg:justify-between">
+    <section className="sg-panel overflow-hidden px-4 py-4 sm:px-5">
+      <div className="flex flex-col gap-3 border-b border-white/10 pb-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-sm font-semibold text-slate-400">Market Signal View</p>
-          <h3 className="mt-2 text-2xl font-bold tracking-tight text-white">
+          <h3 className="mt-1 text-xl font-bold tracking-tight text-white">
             Summary-backed signal preview
           </h3>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+          <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-400">
             Latest summary-backed signal preview for monitored market data.
           </p>
         </div>
@@ -409,13 +425,13 @@ function MarketSignalShell({
       </div>
 
       {isLoading ? (
-        <LoadingSkeleton className="mt-5 h-64" />
+        <LoadingSkeleton className="mt-4 h-48" />
       ) : !selectedSymbol || !signalPath ? (
         <EmptyBlock message="No monitored symbol state available for the signal preview." />
       ) : (
-        <div className="mt-5 space-y-5">
-          <div className="rounded-2xl border border-white/10 bg-[linear-gradient(180deg,_rgba(13,22,34,0.95),_rgba(3,7,18,0.95))] p-4 sm:p-5">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-4 space-y-3">
+          <div className="rounded-xl border border-white/10 bg-[#0b141d] p-3 sm:p-4">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="font-mono text-sm font-bold text-white">
                   {selectedSymbol.symbol}
@@ -444,10 +460,10 @@ function MarketSignalShell({
               )}
             </div>
 
-            <div className="relative min-h-72 overflow-hidden rounded-xl border border-slate-700/70 bg-slate-950/70">
+            <div className="relative min-h-44 overflow-hidden rounded-xl border border-slate-700/70 bg-slate-950/70">
               <svg
                 aria-label={`${selectedSymbol.symbol} summary-backed signal preview`}
-                className="h-72 w-full"
+                className="h-44 w-full"
                 preserveAspectRatio="none"
                 viewBox="0 0 100 52"
                 role="img"
@@ -506,13 +522,13 @@ function MarketSignalShell({
               </div>
             </div>
 
-            <p className="mt-3 text-xs leading-5 text-slate-500">
+            <p className="mt-2 text-xs leading-5 text-slate-500">
               This preview is derived from the latest dashboard summary snapshot,
               not a historical price series.
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <SignalMetric
               label="Symbol"
               value={selectedSymbol.symbol}
@@ -589,11 +605,11 @@ function AnomalyMarker({
 
 function SignalMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4">
+    <div className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-3">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
-      <p className="mt-2 text-xl font-bold text-white">{value}</p>
+      <p className="mt-1 text-base font-bold text-white">{value}</p>
     </div>
   );
 }
