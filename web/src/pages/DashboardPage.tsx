@@ -13,7 +13,6 @@ import { isApiError, isApiValidationError } from "@/shared/api/errors";
 import {
   formatAgeMs,
   formatCompactNumber,
-  formatTimestamp,
 } from "@/shared/lib/format";
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
@@ -791,37 +790,126 @@ function RecentAnomaliesShell({
   const anomalies = summary?.recent_anomalies ?? [];
 
   return (
-    <section className="sg-panel px-5 py-5">
-      <SectionTitle title="Recent anomalies" action={<Link to="/anomalies">View all</Link>} />
+    <section className="sg-panel overflow-hidden bg-[#0b121c] px-5 py-5">
+      <SectionTitle title="Recent Anomalies" action={<Link to="/anomalies">View all</Link>} />
       {isLoading ? (
         <LoadingSkeleton className="mt-5 h-48" />
       ) : anomalies.length > 0 ? (
-        <div className="mt-5 space-y-3">
-          {anomalies.slice(0, 4).map((anomaly) => (
-            <AnomalyRow key={anomaly.id} anomaly={anomaly} />
-          ))}
-        </div>
+        <>
+          <div className="mt-5 hidden lg:block">
+            <table className="w-full border-collapse text-left">
+              <thead>
+                <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <th className="pb-3 pr-4">Time</th>
+                  <th className="pb-3 pr-4">Symbol</th>
+                  <th className="pb-3 pr-4">Type</th>
+                  <th className="pb-3 pr-4">Severity</th>
+                  <th className="pb-3 pr-4">Observed</th>
+                  <th className="pb-3">Threshold</th>
+                </tr>
+              </thead>
+              <tbody>
+                {anomalies.slice(0, 8).map((anomaly) => (
+                  <AnomalyTableRow key={anomaly.id} anomaly={anomaly} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-5 space-y-3 lg:hidden">
+            {anomalies.slice(0, 8).map((anomaly) => (
+              <AnomalyCard key={anomaly.id} anomaly={anomaly} />
+            ))}
+          </div>
+        </>
       ) : (
-        <EmptyBlock message="No recent anomalies in the current summary." />
+        <EmptyBlock message="No recent anomalies. Detector output is clean for the current summary window." />
       )}
     </section>
   );
 }
 
-function AnomalyRow({ anomaly }: { anomaly: DashboardAnomaly }) {
+function AnomalyTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
+  const severityTone = toStatusTone(anomaly.severity, "neutral");
+
   return (
-    <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 sm:grid-cols-[1fr_auto] sm:items-center">
-      <div>
-        <p className="text-base font-bold text-white">{anomaly.anomaly_type}</p>
-        <p className="mt-1 text-sm text-slate-400">
-          {anomaly.symbol} / {formatTimestamp(anomaly.event_time)}
-        </p>
+    <tr className="border-b border-white/[0.06] last:border-0">
+      <td className="py-3.5 pr-4 text-sm font-semibold text-slate-300">
+        {formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
+      </td>
+      <td className="py-3.5 pr-4">
+        <Link
+          to={`/symbols/${anomaly.symbol}`}
+          className="font-mono text-sm font-bold text-slate-50 transition hover:text-cyan-200"
+        >
+          {anomaly.symbol}
+        </Link>
+      </td>
+      <td className="py-3.5 pr-4 text-sm font-bold text-slate-100">
+        {formatAnomalyType(anomaly.anomaly_type)}
+      </td>
+      <td className="py-3.5 pr-4">
+        <SeverityBadge severity={anomaly.severity} />
+      </td>
+      <td className={`py-3.5 pr-4 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
+        {formatAnomalyValue(anomaly.anomaly_type, anomaly.observed_value, "observed")}
+      </td>
+      <td className="py-3.5 text-sm font-semibold text-slate-300">
+        {formatAnomalyValue(anomaly.anomaly_type, anomaly.threshold_value, "threshold")}
+      </td>
+    </tr>
+  );
+}
+
+function AnomalyCard({ anomaly }: { anomaly: DashboardAnomaly }) {
+  const severityTone = toStatusTone(anomaly.severity, "neutral");
+
+  return (
+    <article className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <Link
+            to={`/symbols/${anomaly.symbol}`}
+            className="font-mono text-base font-bold text-white transition hover:text-cyan-200"
+          >
+            {anomaly.symbol}
+          </Link>
+          <p className="mt-2 text-base font-bold text-slate-100">
+            {formatAnomalyType(anomaly.anomaly_type)}
+          </p>
+        </div>
+        <SeverityBadge severity={anomaly.severity} />
       </div>
-      <StatusBadge
-        status={toStatusTone(anomaly.severity, "neutral")}
-        text={anomaly.severity}
-      />
-    </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <MobileSymbolMetric
+          label="Observed"
+          value={formatAnomalyValue(
+            anomaly.anomaly_type,
+            anomaly.observed_value,
+            "observed",
+          )}
+        />
+        <MobileSymbolMetric
+          label="Threshold"
+          value={formatAnomalyValue(
+            anomaly.anomaly_type,
+            anomaly.threshold_value,
+            "threshold",
+          )}
+        />
+        <MobileSymbolMetric
+          label="Time"
+          value={formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
+        />
+        <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Severity
+          </p>
+          <p className={`mt-1 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
+            {statusLabel(anomaly.severity)}
+          </p>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -974,6 +1062,122 @@ function anomalyMarkerBadgeClass(severity: DashboardAnomaly["severity"]): string
     default:
       return "border-slate-500/40 bg-slate-700/30 text-slate-300";
   }
+}
+
+function SeverityBadge({ severity }: { severity: DashboardAnomaly["severity"] }) {
+  return (
+    <span
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold uppercase tracking-[0.12em] ${severityBadgeClass(
+        severity,
+      )}`}
+    >
+      {statusLabel(severity)}
+    </span>
+  );
+}
+
+function severityBadgeClass(severity: DashboardAnomaly["severity"]): string {
+  switch (severity) {
+    case "critical":
+      return "border-rose-400/35 bg-rose-400/10 text-rose-200";
+    case "warning":
+      return "border-amber-400/35 bg-amber-400/10 text-amber-200";
+    case "info":
+      return "border-sky-400/35 bg-sky-400/10 text-sky-200";
+    default:
+      return "border-slate-500/40 bg-slate-700/30 text-slate-300";
+  }
+}
+
+function anomalyValueClass(severity: StatusTone): string {
+  switch (severity) {
+    case "critical":
+      return "text-rose-300";
+    case "warning":
+      return "text-amber-300";
+    case "info":
+      return "text-sky-200";
+    default:
+      return "text-slate-300";
+  }
+}
+
+function formatAnomalyType(type: string | null | undefined): string {
+  if (!type) {
+    return "Unknown";
+  }
+
+  return type
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatAnomalyTime(value: string | null | undefined): string {
+  if (!value) {
+    return "Unavailable";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function formatAnomalyValue(
+  type: string,
+  value: number | null | undefined,
+  role: "observed" | "threshold",
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+
+  switch (type) {
+    case "spread_spike":
+    case "price_move":
+      return `${value.toFixed(3)}%`;
+    case "event_lag_spike":
+      return formatDurationValue(value);
+    case "stale_data":
+    case "quote_stuck":
+      return formatDurationValue(value);
+    case "trade_burst":
+      return `${formatIntegerValue(value)} /m`;
+    case "depth_sequence_gap":
+      return `${formatIntegerValue(value)} ${role === "threshold" ? "limit" : "gap"}`;
+    default:
+      return formatNumericValue(value);
+  }
+}
+
+function formatDurationValue(value: number): string {
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)} s`;
+  }
+
+  return `${formatNumericValue(value)} ms`;
+}
+
+function formatIntegerValue(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatNumericValue(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 3,
+  }).format(value);
 }
 
 function healthScoreTone(
