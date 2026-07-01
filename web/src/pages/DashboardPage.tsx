@@ -548,8 +548,8 @@ function MarketSignalShell({
             </div>
 
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_248px]">
-              <div className="rounded-xl border border-slate-700/70 bg-slate-950/70">
-                <div className="relative h-32 overflow-hidden sm:h-36">
+              <div className="flex min-h-[190px] rounded-xl border border-slate-700/70 bg-slate-950/70">
+                <div className="relative min-h-0 flex-1 overflow-hidden">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
                       data={signalSeries}
