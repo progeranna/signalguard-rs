@@ -553,7 +553,7 @@ function MarketSignalShell({
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
                       data={signalSeries}
-                      margin={{ top: 4, right: 14, bottom: 0, left: 0 }}
+                      margin={{ top: 4, right: 14, bottom: 2, left: 0 }}
                     >
                       <defs>
                         <linearGradient id="qualitySignalFill" x1="0" x2="0" y1="0" y2="1">
@@ -603,6 +603,7 @@ function MarketSignalShell({
                           />
                         ))}
                       <Area
+                        baseValue={signalDomain[0]}
                         dataKey="signal"
                         fill="url(#qualitySignalFill)"
                         isAnimationActive={false}
@@ -612,10 +613,6 @@ function MarketSignalShell({
                       />
                     </AreaChart>
                   </ResponsiveContainer>
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between px-4 pb-3 text-xs font-medium text-slate-500">
-                    <span>Latest state</span>
-                    <span>Summary preview</span>
-                  </div>
                 </div>
               </div>
 
@@ -1108,7 +1105,7 @@ function buildSignalDomain(series: SignalPoint[]): [number, number] {
   const low = Math.min(...values);
   const high = Math.max(...values);
   const range = Math.max(high - low, 1);
-  const targetRange = Math.max(range + 3, 10);
+  const targetRange = Math.max(range + 2, 8);
   const midpoint = (low + high) / 2;
 
   return [
