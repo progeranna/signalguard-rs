@@ -294,6 +294,15 @@ impl RedisCache {
         }
     }
 
+    #[cfg(test)]
+    pub fn in_memory_symbols_only(symbols: Vec<Symbol>) -> Self {
+        Self {
+            client: None,
+            in_memory_states: None,
+            in_memory_symbols: Some(Arc::new(Mutex::new(symbols))),
+        }
+    }
+
     fn client(&self) -> Result<&redis::Client, CacheError> {
         self.client.as_ref().ok_or(CacheError::Unavailable)
     }
@@ -357,6 +366,39 @@ mod tests {
             .unwrap();
 
         assert!(state.is_none());
+    }
+
+    #[tokio::test]
+    async fn in_memory_cache_can_list_symbols_without_state_entries() {
+        let cache = RedisCache::in_memory_with_symbols(
+            vec![
+                Symbol::new("ETHUSDT").unwrap(),
+                Symbol::new("BTCUSDT").unwrap(),
+            ],
+            Vec::new(),
+        );
+        let symbols = cache.list_symbols().await.unwrap();
+        let missing_state = cache
+            .get_market_state(&Symbol::new("BTCUSDT").unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(symbols[0].as_str(), "BTCUSDT");
+        assert_eq!(symbols[1].as_str(), "ETHUSDT");
+        assert!(missing_state.is_none());
+    }
+
+    #[tokio::test]
+    async fn in_memory_symbols_only_leaves_state_reads_unavailable() {
+        let cache = RedisCache::in_memory_symbols_only(vec![Symbol::new("BTCUSDT").unwrap()]);
+        let symbols = cache.list_symbols().await.unwrap();
+        let error = cache
+            .get_market_state(&Symbol::new("BTCUSDT").unwrap())
+            .await
+            .unwrap_err();
+
+        assert_eq!(symbols[0].as_str(), "BTCUSDT");
+        assert!(matches!(error, CacheError::Unavailable));
     }
 
     #[test]

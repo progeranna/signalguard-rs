@@ -670,8 +670,15 @@ mod tests {
         let anomalies = body["recent_anomalies"].as_array().unwrap();
 
         assert_eq!(anomalies.len(), 1);
+        assert!(anomalies[0]["id"].is_string());
         assert_eq!(anomalies[0]["symbol"], "BTCUSDT");
         assert_eq!(anomalies[0]["anomaly_type"], "spread_spike");
+        assert_eq!(anomalies[0]["severity"], "warning");
+        assert_eq!(anomalies[0]["message"], "spread widened beyond baseline");
+        assert_eq!(anomalies[0]["observed_value"], 0.9);
+        assert_eq!(anomalies[0]["threshold_value"], 0.5);
+        assert_eq!(anomalies[0]["event_time"], "2026-01-01T00:00:00Z");
+        assert_eq!(anomalies[0]["created_at"], "2026-01-01T00:00:00Z");
     }
 
     #[tokio::test]
@@ -679,6 +686,24 @@ mod tests {
         let error = dashboard_summary(State(unavailable_state()))
             .await
             .unwrap_err();
+
+        assert!(matches!(
+            error,
+            crate::api::error::ApiError::CacheUnavailable
+        ));
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_handler_returns_cache_errors_from_state_reads() {
+        let state = AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::in_memory_symbols_only(vec![Symbol::new("BTCUSDT").unwrap()]),
+            detector_settings: test_detector_settings(),
+            health_settings: test_health_settings(),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: Some(Vec::new()),
+        };
+        let error = dashboard_summary(State(state)).await.unwrap_err();
 
         assert!(matches!(
             error,
