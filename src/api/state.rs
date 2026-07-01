@@ -6,6 +6,9 @@ use crate::{
     telemetry::InternalCounters,
 };
 
+#[cfg(test)]
+use crate::domain::AnomalyEvent;
+
 #[derive(Clone)]
 pub struct AppState {
     pub pg_pool: PgPool,
@@ -13,4 +16,6 @@ pub struct AppState {
     pub detector_settings: DetectorSettings,
     pub health_settings: HealthScoreSettings,
     pub counters: InternalCounters,
+    #[cfg(test)]
+    pub test_recent_anomalies: Option<Vec<AnomalyEvent>>,
 }

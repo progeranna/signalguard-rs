@@ -63,6 +63,7 @@ mod tests {
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
                 counters,
+                test_recent_anomalies: None,
             },
         )
         .await;
@@ -102,6 +103,7 @@ mod tests {
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
                 counters,
+                test_recent_anomalies: None,
             },
         )
         .await;
@@ -119,8 +121,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dashboard_summary_route_returns_skeleton_response() {
-        let response = get("/dashboard/summary", unavailable_state()).await;
+    async fn dashboard_summary_route_returns_ok() {
+        let response = get("/dashboard/summary", dashboard_state()).await;
 
         assert_eq!(response.status(), StatusCode::OK);
 
@@ -199,6 +201,18 @@ mod tests {
             detector_settings: detector_settings(),
             health_settings: health_settings(),
             counters: InternalCounters::default(),
+            test_recent_anomalies: None,
+        }
+    }
+
+    fn dashboard_state() -> AppState {
+        AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::in_memory(Vec::new()),
+            detector_settings: detector_settings(),
+            health_settings: health_settings(),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: Some(Vec::new()),
         }
     }
 

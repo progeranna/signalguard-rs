@@ -8,7 +8,7 @@ use chrono::Utc;
 use serde::Deserialize;
 
 use crate::{
-    domain::{MarketState, Symbol},
+    domain::{AnomalyEvent, MarketState, Symbol},
     health::{HealthScoringInput, evaluate_health},
     state,
     storage::{
@@ -21,8 +21,8 @@ use crate::{
 use super::{
     dto::{
         AnomaliesResponse, AnomalyResponse, DashboardServiceSummary, DashboardSummaryResponse,
-        HealthResponse, MarketHealthResponse, MarketStateResponse, PipelineHealthResponse,
-        SymbolsResponse,
+        DashboardSymbolSummary, HealthResponse, MarketHealthResponse, MarketStateResponse,
+        PipelineHealthResponse, SymbolsResponse,
     },
     error::ApiError,
     state::AppState,
@@ -50,18 +50,21 @@ pub async fn pipeline_health(State(state): State<AppState>) -> Json<PipelineHeal
     ))
 }
 
-pub async fn dashboard_summary(State(state): State<AppState>) -> Json<DashboardSummaryResponse> {
-    let pipeline = PipelineHealthResponse::from_snapshot(&state.counters.snapshot_at(Utc::now()));
+pub async fn dashboard_summary(
+    State(state): State<AppState>,
+) -> Result<Json<DashboardSummaryResponse>, ApiError> {
+    let symbols = state
+        .redis_cache
+        .list_symbols()
+        .await
+        .map_err(|error| map_cache_error(&state, error))?;
+    let recent_anomalies = load_dashboard_recent_anomalies(&state).await?;
 
-    Json(DashboardSummaryResponse {
-        service: DashboardServiceSummary {
-            status: "ok",
-            service: "signalguard-rs",
-        },
-        pipeline,
-        symbols: Vec::new(),
-        recent_anomalies: Vec::new(),
-    })
+    Ok(Json(build_dashboard_summary_response(
+        &state,
+        symbols,
+        recent_anomalies,
+    )))
 }
 
 pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
@@ -176,6 +179,45 @@ fn map_storage_error(state: &AppState, error: StorageError) -> ApiError {
     ApiError::from(error)
 }
 
+async fn load_dashboard_recent_anomalies(state: &AppState) -> Result<Vec<AnomalyEvent>, ApiError> {
+    #[cfg(test)]
+    if let Some(anomalies) = &state.test_recent_anomalies {
+        return Ok(anomalies.clone());
+    }
+
+    get_recent_anomalies(&state.pg_pool, None, DEFAULT_ANOMALY_LIMIT)
+        .await
+        .map_err(|error| map_storage_error(state, error))
+}
+
+fn build_dashboard_summary_response(
+    state: &AppState,
+    symbols: Vec<Symbol>,
+    recent_anomalies: Vec<AnomalyEvent>,
+) -> DashboardSummaryResponse {
+    let pipeline = PipelineHealthResponse::from_snapshot(&state.counters.snapshot_at(Utc::now()));
+
+    DashboardSummaryResponse {
+        service: DashboardServiceSummary {
+            status: "ok",
+            service: "signalguard-rs",
+        },
+        pipeline,
+        symbols: symbols
+            .into_iter()
+            .map(|symbol| DashboardSymbolSummary {
+                symbol: symbol.as_str().to_owned(),
+                state: None,
+                health: None,
+            })
+            .collect(),
+        recent_anomalies: recent_anomalies
+            .into_iter()
+            .map(AnomalyResponse::from_anomaly)
+            .collect(),
+    }
+}
+
 fn parse_anomalies_query(query: AnomaliesQuery) -> Result<(Option<Symbol>, u32), ApiError> {
     let symbol = query
         .symbol
@@ -231,7 +273,9 @@ mod tests {
     use crate::config::{
         DetectorSettings, HealthScoreSettings, HealthStatusThresholds, SeverityPenaltySettings,
     };
-    use crate::domain::{MarketSignals, MarketState, Symbol};
+    use crate::domain::{
+        AnomalyEvent, AnomalyMeasurement, AnomalyType, MarketSignals, MarketState, Severity, Symbol,
+    };
     use crate::storage::RedisCache;
     use crate::telemetry::InternalCounters;
     use rust_decimal::Decimal;
@@ -294,6 +338,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             counters: InternalCounters::default(),
+            test_recent_anomalies: None,
         };
         let error = market_health(State(state), Path(String::from("BTCUSDT")))
             .await
@@ -310,6 +355,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             counters: InternalCounters::default(),
+            test_recent_anomalies: None,
         };
         let error = market_health(State(state), Path(String::from("BTCUSDT")))
             .await
@@ -326,6 +372,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             counters: InternalCounters::default(),
+            test_recent_anomalies: None,
         };
         let error = anomalies(
             State(state),
@@ -359,6 +406,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             counters,
+            test_recent_anomalies: None,
         }))
         .await
         .into_response();
@@ -395,6 +443,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             counters,
+            test_recent_anomalies: None,
         }))
         .await
         .into_response();
@@ -413,9 +462,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dashboard_summary_handler_returns_skeleton_response() {
-        let response = dashboard_summary(State(unavailable_state()))
+    async fn dashboard_summary_handler_returns_empty_arrays_for_empty_sources() {
+        let response = dashboard_summary(State(dashboard_state(Vec::new(), Vec::new())))
             .await
+            .unwrap()
             .into_response();
 
         assert_eq!(response.status(), axum::http::StatusCode::OK);
@@ -430,6 +480,77 @@ mod tests {
         assert!(body.get("pipeline").is_some());
         assert!(body["symbols"].as_array().is_some());
         assert!(body["recent_anomalies"].as_array().is_some());
+        assert!(body["symbols"].as_array().unwrap().is_empty());
+        assert!(body["recent_anomalies"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_handler_includes_tracked_symbols() {
+        let response = dashboard_summary(State(dashboard_state(
+            vec![test_market_state(), test_market_state_for("ETHUSDT")],
+            Vec::new(),
+        )))
+        .await
+        .unwrap()
+        .into_response();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let symbols = body["symbols"].as_array().unwrap();
+
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols[0]["symbol"], "BTCUSDT");
+        assert!(symbols[0]["state"].is_null());
+        assert!(symbols[0]["health"].is_null());
+        assert_eq!(symbols[1]["symbol"], "ETHUSDT");
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_handler_includes_recent_anomalies() {
+        let anomaly = test_anomaly("BTCUSDT");
+        let response = dashboard_summary(State(dashboard_state(Vec::new(), vec![anomaly])))
+            .await
+            .unwrap()
+            .into_response();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let anomalies = body["recent_anomalies"].as_array().unwrap();
+
+        assert_eq!(anomalies.len(), 1);
+        assert_eq!(anomalies[0]["symbol"], "BTCUSDT");
+        assert_eq!(anomalies[0]["anomaly_type"], "spread_spike");
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_handler_returns_cache_errors() {
+        let error = dashboard_summary(State(unavailable_state()))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            crate::api::error::ApiError::CacheUnavailable
+        ));
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_handler_returns_storage_errors() {
+        let state = AppState {
+            pg_pool: failing_storage_pool(),
+            redis_cache: RedisCache::in_memory(Vec::new()),
+            detector_settings: test_detector_settings(),
+            health_settings: test_health_settings(),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: None,
+        };
+        let error = dashboard_summary(State(state)).await.unwrap_err();
+
+        assert!(matches!(error, crate::api::error::ApiError::Internal(_)));
     }
 
     #[test]
@@ -507,11 +628,16 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             counters: InternalCounters::default(),
+            test_recent_anomalies: None,
         }
     }
 
     fn test_market_state() -> MarketState {
-        let mut state = MarketState::new(Symbol::new("BTCUSDT").unwrap());
+        test_market_state_for("BTCUSDT")
+    }
+
+    fn test_market_state_for(symbol: &str) -> MarketState {
+        let mut state = MarketState::new(Symbol::new(symbol).unwrap());
         state.last_event_time = Some(chrono::Utc::now());
         state.signals = MarketSignals {
             spread_pct: Some(0.1),
@@ -519,6 +645,32 @@ mod tests {
             trades_per_minute: Some(10.0),
         };
         state
+    }
+
+    fn dashboard_state(states: Vec<MarketState>, anomalies: Vec<AnomalyEvent>) -> AppState {
+        AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::in_memory(states),
+            detector_settings: test_detector_settings(),
+            health_settings: test_health_settings(),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: Some(anomalies),
+        }
+    }
+
+    fn test_anomaly(symbol: &str) -> AnomalyEvent {
+        AnomalyEvent::new(
+            Symbol::new(symbol).unwrap(),
+            AnomalyType::SpreadSpike,
+            Severity::Warning,
+            "spread widened beyond baseline",
+            AnomalyMeasurement {
+                observed_value: Some(0.9),
+                threshold_value: Some(0.5),
+            },
+            fixed_now(),
+            fixed_now(),
+        )
     }
 
     fn test_detector_settings() -> DetectorSettings {

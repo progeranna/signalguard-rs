@@ -99,8 +99,8 @@ pub struct DashboardServiceSummary {
 #[derive(Debug, Serialize)]
 pub struct DashboardSymbolSummary {
     pub symbol: String,
-    pub state: DashboardStateSummary,
-    pub health: DashboardHealthSummary,
+    pub state: Option<DashboardStateSummary>,
+    pub health: Option<DashboardHealthSummary>,
 }
 
 #[derive(Debug, Serialize)]
