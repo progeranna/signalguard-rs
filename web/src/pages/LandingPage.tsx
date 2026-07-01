@@ -23,28 +23,28 @@ const capabilityCards = [
   {
     title: "Replay and Binance public streams",
     description:
-      "Deterministic replay fixtures and Binance public WebSocket events enter the same monitoring path.",
+      "Replay fixtures and Binance public WebSocket events enter the same monitoring path.",
     tags: ["replay files", "trade", "bookTicker"],
     tone: "cyan",
   },
   {
     title: "Bounded Tokio pipeline",
     description:
-      "Normalized market events move through an explicit bounded channel instead of silently disappearing under load.",
+      "Normalized events move through an explicit bounded channel with visible backpressure.",
     tags: ["Tokio", "backpressure", "normalized events"],
     tone: "green",
   },
   {
     title: "Explainable anomaly detectors",
     description:
-      "Rule-based checks turn stream behavior into readable market-data quality signals.",
+      "Rule-based checks turn stream behavior into readable data-quality signals.",
     tags: ["spread_spike", "quote_stuck", "depth_sequence_gap"],
     tone: "amber",
   },
   {
     title: "Redis/PostgreSQL plus Axum API",
     description:
-      "Latest state lives in Redis, history lives in PostgreSQL, and read-only Axum endpoints expose the console contract.",
+      "Redis keeps latest state, PostgreSQL keeps history, and Axum exposes read-only endpoints.",
     tags: ["Redis", "PostgreSQL", "Axum"],
     tone: "blue",
   },
@@ -111,13 +111,13 @@ const landingLinks = [
     title: "Dashboard",
     to: "/dashboard",
     action: "Open dashboard",
-    description: "Cross-symbol overview backed by GET /dashboard/summary.",
+    description: "Cross-symbol summary from GET /dashboard/summary.",
   },
   {
     title: "Anomalies",
     to: "/anomalies",
     action: "Review anomalies",
-    description: "Detector output, severity labels, and symbol drill-down entry points.",
+    description: "Detector output, severity labels, and symbol drill-downs.",
   },
   {
     title: "Architecture",
@@ -129,10 +129,10 @@ const landingLinks = [
 
 export function LandingPage() {
   return (
-    <section className="space-y-6">
+    <section className="space-y-5">
       <div className="sg-panel overflow-hidden">
-        <div className="grid gap-0 lg:grid-cols-[1.02fr_0.98fr]">
-          <div className="space-y-8 px-6 py-7 sm:px-8 lg:px-10 lg:py-10">
+        <div className="grid gap-0 xl:grid-cols-[1.02fr_0.98fr]">
+          <div className="space-y-7 px-5 py-6 sm:px-8 lg:px-10 lg:py-9">
             <div className="flex flex-wrap gap-2">
               {heroBadges.map((badge) => (
                 <StatusBadge key={badge.text} status={badge.status} text={badge.text} />
@@ -143,29 +143,28 @@ export function LandingPage() {
               <p className="font-mono text-xs uppercase tracking-[0.22em] text-cyan-200/80">
                 Public demo entry
               </p>
-              <div className="space-y-3">
-                <h2 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl">
+              <div className="space-y-2">
+                <h2 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
                   SignalGuard RS
                 </h2>
-                <p className="text-xl font-semibold leading-8 text-cyan-100 sm:text-2xl">
+                <p className="text-lg font-semibold leading-7 text-cyan-100 sm:text-2xl sm:leading-8">
                   crypto market-data quality monitoring
                 </p>
               </div>
-              <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
+              <p className="max-w-2xl text-sm leading-6 text-slate-300">
                 Public market events go in; explainable health and anomaly
-                signals come out. The console presents replay/live ingestion,
-                market state, detector output, and read-only API boundaries
-                without account or order workflows.
+                signals come out. The console frames replay/live ingestion,
+                market state, detector output, and read-only API boundaries.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            <div className="grid gap-3 sm:flex sm:flex-wrap">
               {landingLinks.map((item, index) => (
                 <Link
                   key={item.to}
                   to={item.to}
                   className={[
-                    "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition",
+                    "inline-flex items-center justify-between gap-2 rounded-full border px-4 py-2 text-sm font-medium transition sm:justify-start",
                     index === 0
                       ? "border-cyan-400/35 bg-cyan-400/12 text-cyan-100 hover:bg-cyan-400/20"
                       : "border-white/10 bg-white/[0.04] text-slate-200 hover:border-white/20 hover:bg-white/[0.08]",
@@ -188,9 +187,9 @@ export function LandingPage() {
         {capabilityCards.map((card) => (
           <article
             key={card.title}
-            className="rounded-2xl border border-white/10 bg-slate-950/70 px-5 py-5 shadow-[0_18px_44px_rgba(2,6,23,0.28)]"
+            className="rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-4 shadow-[0_18px_44px_rgba(2,6,23,0.24)] sm:px-5 sm:py-5"
           >
-            <div className="space-y-4">
+            <div className="space-y-3.5">
               <div
                 className={`h-1.5 w-16 rounded-full ${capabilityToneClass(card.tone)}`}
               />
@@ -214,7 +213,7 @@ export function LandingPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-        <section className="sg-panel px-6 py-6">
+        <section className="sg-panel px-5 py-5 sm:px-6 sm:py-6">
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-2">
               <p className="font-mono text-xs uppercase tracking-[0.22em] text-slate-400">
@@ -245,7 +244,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="sg-panel px-6 py-6">
+        <section className="sg-panel px-5 py-5 sm:px-6 sm:py-6">
           <div className="space-y-4">
             <div className="space-y-2">
               <p className="font-mono text-xs uppercase tracking-[0.22em] text-slate-400">
@@ -281,7 +280,7 @@ export function LandingPage() {
           <Link
             key={item.to}
             to={item.to}
-            className="group rounded-2xl border border-white/10 bg-slate-950/70 px-5 py-5 transition hover:border-cyan-400/30 hover:bg-cyan-400/[0.06]"
+            className="group rounded-2xl border border-white/10 bg-slate-950/70 px-5 py-4 transition hover:border-cyan-400/30 hover:bg-cyan-400/[0.06]"
           >
             <p className="font-mono text-xs uppercase tracking-[0.22em] text-slate-400">
               {item.action}
@@ -305,8 +304,8 @@ export function LandingPage() {
 
 function SignalTape() {
   return (
-    <div className="border-t border-white/10 bg-slate-950/80 px-4 py-3 sm:px-6">
-      <div className="flex gap-3 overflow-x-auto whitespace-nowrap pb-1 text-xs [scrollbar-width:none]">
+    <div className="border-t border-white/10 bg-slate-950/80 px-4 py-2.5 sm:px-6">
+      <div className="flex gap-2.5 overflow-x-auto whitespace-nowrap pb-1 text-xs [scrollbar-width:none]">
         <span className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-1.5 font-mono uppercase tracking-[0.18em] text-emerald-100">
           <span className="h-2 w-2 rounded-full bg-emerald-300" />
           Signal tape
@@ -326,15 +325,15 @@ function SignalTape() {
 
 function ConsolePreview() {
   return (
-    <div className="border-t border-white/10 bg-[#07111a]/80 p-4 sm:p-6 lg:border-l lg:border-t-0">
-      <div className="h-full rounded-2xl border border-white/10 bg-slate-950/70 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:p-5">
-        <div className="mb-5 flex items-center justify-between gap-4">
+    <div className="border-t border-white/10 bg-[#07111a]/80 p-4 sm:p-5 xl:border-l xl:border-t-0">
+      <div className="h-full rounded-2xl border border-white/10 bg-slate-950/70 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.22em] text-slate-400">
               Console preview
             </p>
             <h3 className="mt-2 text-lg font-semibold text-white">
-              Monitoring contract, not a trading surface
+              Read-only monitoring contract
             </h3>
           </div>
           <StatusBadge status="healthy" text="Read only" />
@@ -344,7 +343,7 @@ function ConsolePreview() {
           {previewRows.map((row) => (
             <div
               key={row.label}
-              className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 sm:grid-cols-[8rem_1fr]"
+              className="grid gap-1.5 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 sm:grid-cols-[7rem_1fr] sm:gap-3"
             >
               <p className="font-mono text-xs uppercase tracking-[0.18em] text-slate-500">
                 {row.label}
@@ -354,7 +353,7 @@ function ConsolePreview() {
           ))}
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="mt-3 grid gap-3 xl:grid-cols-2">
           <PreviewList title="Detector labels" items={detectorLabels} tone="warning" />
           <PreviewList title="API endpoints" items={endpointLabels} tone="info" />
         </div>
@@ -378,11 +377,11 @@ function PreviewList({
       : "border-cyan-400/15 bg-cyan-400/[0.04] text-cyan-100";
 
   return (
-    <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-4">
+    <div className="rounded-xl border border-white/8 bg-white/[0.02] px-3 py-3">
       <p className="font-mono text-xs uppercase tracking-[0.18em] text-slate-400">
         {title}
       </p>
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-1.5">
         {items.map((item) => (
           <span
             key={item}
