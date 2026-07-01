@@ -553,7 +553,7 @@ function MarketSignalShell({
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
                       data={signalSeries}
-                      margin={{ top: 8, right: 18, bottom: 2, left: 0 }}
+                      margin={{ top: 4, right: 18, bottom: 0, left: 0 }}
                     >
                       <defs>
                         <linearGradient id="qualitySignalFill" x1="0" x2="0" y1="0" y2="1">
@@ -1105,8 +1105,14 @@ function buildSignalDomain(series: SignalPoint[]): [number, number] {
   const values = series.map((point) => point.signal);
   const low = Math.min(...values);
   const high = Math.max(...values);
+  const range = Math.max(high - low, 1);
+  const targetRange = Math.max(range + 5, 16);
+  const midpoint = (low + high) / 2;
 
-  return [clamp(Math.floor(low - 12), 0, 100), clamp(Math.ceil(high + 8), 0, 100)];
+  return [
+    clamp(Math.floor(midpoint - targetRange / 2), 0, 100),
+    clamp(Math.ceil(midpoint + targetRange / 2), 0, 100),
+  ];
 }
 
 function anomalySeverityColor(severity: DashboardAnomaly["severity"] | undefined): string {
