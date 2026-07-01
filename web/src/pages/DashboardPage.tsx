@@ -316,6 +316,7 @@ function DashboardSummaryGrid({
         value={String(symbols.length)}
         description={symbolHealthBreakdown(symbols)}
         tone="info"
+        valueTone="neutral"
         icon="symbols"
       />
       <KpiCard
@@ -495,6 +496,7 @@ function MarketSignalShell({
   const signalSeries = selectedSymbol
     ? buildSignalSeries(selectedSymbol, selectedAnomalies)
     : [];
+  const signalDomain = buildSignalDomain(signalSeries);
   const signalSeverity = highestAnomalySeverity(selectedAnomalies);
 
   return (
@@ -506,7 +508,7 @@ function MarketSignalShell({
             Summary-backed signal preview
           </h3>
           <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-400">
-            Latest summary-backed signal preview for monitored market data.
+            Latest summary-backed preview, not historical price data.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -529,35 +531,29 @@ function MarketSignalShell({
           <div className="rounded-xl border border-white/10 bg-[#0b141d] px-3 py-2.5 sm:px-4">
             <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="font-mono text-sm font-bold text-white">
-                  {selectedSymbol.symbol}
+                <p className="flex flex-wrap items-center gap-2 font-mono text-sm font-bold text-white">
+                  <span>{selectedSymbol.symbol}</span>
+                  {signalSeverity ? (
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
+                        signalSeverity,
+                      )}`}
+                    >
+                      {statusLabel(signalSeverity)} signal
+                    </span>
+                  ) : null}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-400">
-                  Latest state with recent anomaly markers
-                </p>
+                <p className="mt-0.5 text-xs text-slate-400">Latest state with anomaly markers</p>
               </div>
-              {signalSeverity ? (
-                <span
-                  className={`w-fit rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
-                    signalSeverity,
-                  )}`}
-                >
-                  {statusLabel(signalSeverity)} signal
-                </span>
-              ) : (
-                <p className="w-fit rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-200">
-                  No recent anomalies
-                </p>
-              )}
             </div>
 
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_248px]">
               <div className="rounded-xl border border-slate-700/70 bg-slate-950/70">
-                <div className="relative h-36 overflow-hidden px-2 py-2 sm:h-40">
+                <div className="relative h-32 overflow-hidden px-2 py-1.5 sm:h-36">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
                       data={signalSeries}
-                      margin={{ top: 12, right: 18, bottom: 6, left: 0 }}
+                      margin={{ top: 8, right: 18, bottom: 2, left: 0 }}
                     >
                       <defs>
                         <linearGradient id="qualitySignalFill" x1="0" x2="0" y1="0" y2="1">
@@ -578,7 +574,7 @@ function MarketSignalShell({
                       />
                       <YAxis
                         axisLine={false}
-                        domain={[0, 100]}
+                        domain={signalDomain}
                         tick={{ fill: "#64748b", fontSize: 11 }}
                         tickLine={false}
                         width={28}
@@ -631,7 +627,6 @@ function MarketSignalShell({
                   </p>
                 </div>
                 <div className="mt-2 space-y-1">
-                  <SignalSnapshotMetric label="Symbol" value={selectedSymbol.symbol} />
                   <SignalSnapshotMetric
                     label="Price"
                     value={formatTickerPrice(selectedSymbol.state?.last_trade_price)}
@@ -651,18 +646,9 @@ function MarketSignalShell({
                         summary?.pipeline.last_message_age_ms,
                     )}
                   />
-                  <SignalSnapshotMetric
-                    label="Anomalies"
-                    value={String(selectedAnomalies.length)}
-                  />
                 </div>
               </aside>
             </div>
-
-            <p className="mt-1.5 text-xs leading-5 text-slate-500">
-              This preview is derived from the latest dashboard summary snapshot,
-              not a historical price series.
-            </p>
           </div>
         </div>
       )}
@@ -1109,6 +1095,18 @@ function buildSignalSeries(
     severity: anomalySlots.find((marker) => marker.slot === index + 1)?.severity,
     signal: Number(signal),
   }));
+}
+
+function buildSignalDomain(series: SignalPoint[]): [number, number] {
+  if (series.length === 0) {
+    return [0, 100];
+  }
+
+  const values = series.map((point) => point.signal);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+
+  return [clamp(Math.floor(low - 12), 0, 100), clamp(Math.ceil(high + 8), 0, 100)];
 }
 
 function anomalySeverityColor(severity: DashboardAnomaly["severity"] | undefined): string {
