@@ -13,8 +13,6 @@ import { isApiError, isApiValidationError } from "@/shared/api/errors";
 import {
   formatAgeMs,
   formatCompactNumber,
-  formatDecimalString,
-  formatPercent,
   formatTimestamp,
 } from "@/shared/lib/format";
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
@@ -626,42 +624,159 @@ function SymbolHealthShell({
   const symbols = summary?.symbols ?? [];
 
   return (
-    <section className="sg-panel px-5 py-5">
-      <SectionTitle title="Symbol health" action={<Link to="/symbols/BTCUSDT">BTCUSDT</Link>} />
+    <section className="sg-panel overflow-hidden bg-[#0b121c] px-5 py-5">
+      <SectionTitle title="Symbol Health" />
       {isLoading ? (
         <LoadingSkeleton className="mt-5 h-48" />
       ) : symbols.length > 0 ? (
-        <div className="mt-5 space-y-3">
-          {symbols.slice(0, 4).map((symbol) => (
-            <SymbolHealthRow key={symbol.symbol} symbol={symbol} />
-          ))}
-        </div>
+        <>
+          <div className="mt-5 hidden lg:block">
+            <table className="w-full border-collapse text-left">
+              <thead>
+                <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <th className="pb-3 pr-4">Symbol</th>
+                  <th className="pb-3 pr-4">Health Score</th>
+                  <th className="pb-3 pr-4">Last Price</th>
+                  <th className="pb-3 pr-4">Spread</th>
+                  <th className="pb-3 pr-4">Trades/min</th>
+                  <th className="pb-3 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {symbols.slice(0, 8).map((symbol) => (
+                  <SymbolHealthTableRow key={symbol.symbol} symbol={symbol} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-5 space-y-3 lg:hidden">
+            {symbols.slice(0, 8).map((symbol) => (
+              <SymbolHealthCard key={symbol.symbol} symbol={symbol} />
+            ))}
+          </div>
+        </>
       ) : (
-        <EmptyBlock message="No symbols returned by the dashboard summary." />
+        <EmptyBlock message="No symbol health data available" />
       )}
     </section>
   );
 }
 
-function SymbolHealthRow({ symbol }: { symbol: DashboardSymbolSummary }) {
+function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
+  const score = symbol.health?.score ?? null;
+  const statusTone = toStatusTone(symbol.health?.status, "neutral");
+
   return (
-    <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 sm:grid-cols-[1fr_auto] sm:items-center">
-      <div>
-        <p className="font-mono text-base font-bold text-white">{symbol.symbol}</p>
-        <p className="mt-1 text-sm text-slate-400">
-          Price {formatDecimalString(symbol.state?.last_trade_price)} / Spread{" "}
-          {formatPercent(symbol.state?.spread_pct)}
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-3 sm:justify-end">
-        <span className="text-sm font-semibold text-slate-300">
-          Score {symbol.health?.score ?? "Unknown"}
-        </span>
+    <tr className="border-b border-white/[0.06] last:border-0">
+      <td className="py-3.5 pr-4">
+        <Link
+          to={`/symbols/${symbol.symbol}`}
+          className="font-mono text-base font-bold text-slate-50 transition hover:text-cyan-200"
+        >
+          {symbol.symbol}
+        </Link>
+      </td>
+      <td className="py-3.5 pr-4">
+        <HealthScore score={score} status={symbol.health?.status} />
+      </td>
+      <td className="py-3.5 pr-4 text-sm font-semibold text-slate-100">
+        {formatTickerPrice(symbol.state?.last_trade_price)}
+      </td>
+      <td className="py-3.5 pr-4 text-sm font-semibold text-slate-300">
+        {formatTickerPercent(symbol.state?.spread_pct)}
+      </td>
+      <td className="py-3.5 pr-4 text-sm font-semibold text-slate-300">
+        {formatOptionalCompact(symbol.state?.trades_per_minute)}
+      </td>
+      <td className="py-3.5 text-right">
         <StatusBadge
-          status={toStatusTone(symbol.health?.status, "neutral")}
-          text={symbol.health?.status ?? "Unknown"}
+          status={statusTone}
+          text={statusLabel(symbol.health?.status)}
+        />
+      </td>
+    </tr>
+  );
+}
+
+function SymbolHealthCard({ symbol }: { symbol: DashboardSymbolSummary }) {
+  const statusTone = toStatusTone(symbol.health?.status, "neutral");
+
+  return (
+    <article className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <Link
+          to={`/symbols/${symbol.symbol}`}
+          className="font-mono text-lg font-bold text-white transition hover:text-cyan-200"
+        >
+          {symbol.symbol}
+        </Link>
+        <StatusBadge
+          status={statusTone}
+          text={statusLabel(symbol.health?.status)}
         />
       </div>
+      <div className="mt-4">
+        <HealthScore
+          score={symbol.health?.score ?? null}
+          status={symbol.health?.status}
+        />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <MobileSymbolMetric
+          label="Price"
+          value={formatTickerPrice(symbol.state?.last_trade_price)}
+        />
+        <MobileSymbolMetric
+          label="Spread"
+          value={formatTickerPercent(symbol.state?.spread_pct)}
+        />
+        <MobileSymbolMetric
+          label="Trades/min"
+          value={formatOptionalCompact(symbol.state?.trades_per_minute)}
+        />
+        <MobileSymbolMetric
+          label="Age"
+          value={formatOptionalAge(symbol.state?.last_event_age_ms)}
+        />
+      </div>
+    </article>
+  );
+}
+
+function HealthScore({
+  score,
+  status,
+}: {
+  score: number | null;
+  status: string | null | undefined;
+}) {
+  const tone = healthScoreTone(score, status);
+  const width = score === null ? 18 : Math.max(score, 4);
+
+  return (
+    <div className="min-w-28">
+      <div className="flex items-center gap-3">
+        <span className={`text-lg font-extrabold ${healthScoreTextClass(tone)}`}>
+          {score ?? "Unknown"}
+        </span>
+        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/70">
+          <div
+            className={`h-full rounded-full ${healthScoreBarClass(tone)}`}
+            style={{ width: `${width}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileSymbolMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-bold text-slate-100">{value}</p>
     </div>
   );
 }
@@ -858,6 +973,53 @@ function anomalyMarkerBadgeClass(severity: DashboardAnomaly["severity"]): string
       return "border-sky-400/35 bg-sky-400/10 text-sky-200";
     default:
       return "border-slate-500/40 bg-slate-700/30 text-slate-300";
+  }
+}
+
+function healthScoreTone(
+  score: number | null,
+  status: string | null | undefined,
+): StatusTone {
+  if (status === "healthy" || (score !== null && score >= 80)) {
+    return "healthy";
+  }
+
+  if (status === "degraded" || (score !== null && score >= 50)) {
+    return "degraded";
+  }
+
+  if (status === "unhealthy" || (score !== null && score < 50)) {
+    return "unhealthy";
+  }
+
+  return "neutral";
+}
+
+function healthScoreTextClass(tone: StatusTone): string {
+  switch (tone) {
+    case "healthy":
+      return "text-emerald-300";
+    case "degraded":
+      return "text-amber-300";
+    case "unhealthy":
+    case "critical":
+      return "text-rose-300";
+    default:
+      return "text-slate-400";
+  }
+}
+
+function healthScoreBarClass(tone: StatusTone): string {
+  switch (tone) {
+    case "healthy":
+      return "bg-emerald-300";
+    case "degraded":
+      return "bg-amber-300";
+    case "unhealthy":
+    case "critical":
+      return "bg-rose-300";
+    default:
+      return "bg-slate-500";
   }
 }
 
