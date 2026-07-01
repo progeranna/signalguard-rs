@@ -7,6 +7,7 @@ pub fn router() -> Router<super::AppState> {
         .route("/health", get(handlers::health))
         .route("/metrics", get(handlers::metrics))
         .route("/pipeline/health", get(handlers::pipeline_health))
+        .route("/dashboard/summary", get(handlers::dashboard_summary))
         .route("/symbols", get(handlers::symbols))
         .route("/market/{symbol}/state", get(handlers::market_state))
         .route("/market/{symbol}/health", get(handlers::market_health))
@@ -115,6 +116,23 @@ mod tests {
         assert!(body.contains("\"reconnect_attempts\""));
         assert!(body.contains("\"storage_errors\""));
         assert!(body.contains("\"cache_errors\""));
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_route_returns_skeleton_response() {
+        let response = get("/dashboard/summary", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert!(body.get("service").is_some());
+        assert!(body.get("pipeline").is_some());
+        assert!(body["symbols"].as_array().is_some());
+        assert!(body["recent_anomalies"].as_array().is_some());
     }
 
     #[tokio::test]

@@ -82,6 +82,48 @@ pub struct AnomalyResponse {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DashboardSummaryResponse {
+    pub service: DashboardServiceSummary,
+    pub pipeline: PipelineHealthResponse,
+    pub symbols: Vec<DashboardSymbolSummary>,
+    pub recent_anomalies: Vec<AnomalyResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardServiceSummary {
+    pub status: &'static str,
+    pub service: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardSymbolSummary {
+    pub symbol: String,
+    pub state: DashboardStateSummary,
+    pub health: DashboardHealthSummary,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardStateSummary {
+    pub last_trade_price: Option<Decimal>,
+    pub best_bid_price: Option<Decimal>,
+    pub best_ask_price: Option<Decimal>,
+    pub spread_pct: Option<f64>,
+    pub price_change_1m_pct: Option<f64>,
+    pub trades_per_minute: Option<f64>,
+    pub last_event_time: Option<DateTime<Utc>>,
+    pub last_event_age_ms: Option<u64>,
+    pub depth_sequence_gap_count: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardHealthSummary {
+    pub score: u8,
+    pub status: crate::domain::HealthStatus,
+    pub recent_anomaly_count: usize,
+    pub evaluated_at: DateTime<Utc>,
+}
+
 impl MarketStateResponse {
     pub fn from_market_state(state: MarketState, now: DateTime<Utc>) -> Self {
         Self {

@@ -20,8 +20,9 @@ use crate::{
 
 use super::{
     dto::{
-        AnomaliesResponse, AnomalyResponse, HealthResponse, MarketHealthResponse,
-        MarketStateResponse, PipelineHealthResponse, SymbolsResponse,
+        AnomaliesResponse, AnomalyResponse, DashboardServiceSummary, DashboardSummaryResponse,
+        HealthResponse, MarketHealthResponse, MarketStateResponse, PipelineHealthResponse,
+        SymbolsResponse,
     },
     error::ApiError,
     state::AppState,
@@ -47,6 +48,20 @@ pub async fn pipeline_health(State(state): State<AppState>) -> Json<PipelineHeal
     Json(PipelineHealthResponse::from_snapshot(
         &state.counters.snapshot_at(Utc::now()),
     ))
+}
+
+pub async fn dashboard_summary(State(state): State<AppState>) -> Json<DashboardSummaryResponse> {
+    let pipeline = PipelineHealthResponse::from_snapshot(&state.counters.snapshot_at(Utc::now()));
+
+    Json(DashboardSummaryResponse {
+        service: DashboardServiceSummary {
+            status: "ok",
+            service: "signalguard-rs",
+        },
+        pipeline,
+        symbols: Vec::new(),
+        recent_anomalies: Vec::new(),
+    })
 }
 
 pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
@@ -209,8 +224,8 @@ mod tests {
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
     use super::{
-        AnomaliesQuery, anomalies, market_health, market_state, metrics, parse_anomalies_query,
-        pipeline_health, symbols,
+        AnomaliesQuery, anomalies, dashboard_summary, market_health, market_state, metrics,
+        parse_anomalies_query, pipeline_health, symbols,
     };
     use crate::api::AppState;
     use crate::config::{
@@ -395,6 +410,26 @@ mod tests {
         assert!(body.contains("\"reconnect_attempts\""));
         assert!(body.contains("\"storage_errors\""));
         assert!(body.contains("\"cache_errors\""));
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_handler_returns_skeleton_response() {
+        let response = dashboard_summary(State(unavailable_state()))
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["service"]["service"], "signalguard-rs");
+        assert_eq!(body["service"]["status"], "ok");
+        assert!(body.get("pipeline").is_some());
+        assert!(body["symbols"].as_array().is_some());
+        assert!(body["recent_anomalies"].as_array().is_some());
     }
 
     #[test]
