@@ -378,53 +378,215 @@ function MarketSignalShell({
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const primarySymbol = summary?.symbols[0] ?? null;
+  const selectedSymbol = selectSignalSymbol(summary?.symbols ?? []);
+  const selectedAnomalies = selectedSymbol
+    ? (summary?.recent_anomalies ?? []).filter(
+        (anomaly) => anomaly.symbol === selectedSymbol.symbol,
+      )
+    : [];
+  const signalPath = selectedSymbol
+    ? buildSignalPath(selectedSymbol, selectedAnomalies)
+    : null;
 
   return (
-    <section className="sg-panel px-5 py-5 sm:px-6 lg:px-7">
+    <section className="sg-panel overflow-hidden bg-[#0b121c] px-5 py-5 sm:px-6 lg:px-7">
       <div className="flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-sm font-semibold text-slate-400">Market signal view</p>
+          <p className="text-sm font-semibold text-slate-400">Market Signal View</p>
           <h3 className="mt-2 text-2xl font-bold tracking-tight text-white">
-            Price, activity, and anomaly context
+            Summary-backed signal preview
           </h3>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+            Latest summary-backed signal preview for monitored market data.
+          </p>
         </div>
-        <StatusBadge status="info" text="Preview" />
+        <div className="flex flex-wrap gap-2">
+          <StatusBadge status="info" text="Latest state" />
+          {selectedSymbol ? (
+            <StatusBadge
+              status={toStatusTone(selectedSymbol.health?.status, "neutral")}
+              text={selectedSymbol.health?.status ?? "Unknown"}
+            />
+          ) : null}
+        </div>
       </div>
 
       {isLoading ? (
         <LoadingSkeleton className="mt-5 h-64" />
+      ) : !selectedSymbol || !signalPath ? (
+        <EmptyBlock message="No monitored symbol state available for the signal preview." />
       ) : (
-        <div className="mt-5 grid gap-5 xl:grid-cols-[1.5fr_0.5fr]">
-          <div className="min-h-64 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,_rgba(15,23,42,0.72),_rgba(2,6,23,0.72))] p-5">
-            <div className="flex h-full min-h-52 items-center justify-center rounded-xl border border-dashed border-slate-700/80 bg-slate-950/35 px-5 text-center">
-              <p className="max-w-md text-sm leading-6 text-slate-300">
-                Signal visualization will use summary-backed market data without
-                presenting synthetic live history.
-              </p>
+        <div className="mt-5 space-y-5">
+          <div className="rounded-2xl border border-white/10 bg-[linear-gradient(180deg,_rgba(13,22,34,0.95),_rgba(3,7,18,0.95))] p-4 sm:p-5">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-mono text-sm font-bold text-white">
+                  {selectedSymbol.symbol}
+                </p>
+                <p className="mt-1 text-sm text-slate-400">
+                  Latest state with recent anomaly markers
+                </p>
+              </div>
+              {selectedAnomalies.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {selectedAnomalies.slice(0, 3).map((anomaly) => (
+                    <span
+                      key={anomaly.id}
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
+                        anomaly.severity,
+                      )}`}
+                    >
+                      {anomaly.severity}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200">
+                  No recent anomalies
+                </p>
+              )}
             </div>
+
+            <div className="relative min-h-72 overflow-hidden rounded-xl border border-slate-700/70 bg-slate-950/70">
+              <svg
+                aria-label={`${selectedSymbol.symbol} summary-backed signal preview`}
+                className="h-72 w-full"
+                preserveAspectRatio="none"
+                viewBox="0 0 100 52"
+                role="img"
+              >
+                <defs>
+                  <linearGradient id="signalArea" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="rgb(120 224 93)" stopOpacity="0.22" />
+                    <stop offset="100%" stopColor="rgb(120 224 93)" stopOpacity="0.02" />
+                  </linearGradient>
+                </defs>
+                {[10, 20, 30, 40].map((y) => (
+                  <line
+                    key={`grid-y-${y}`}
+                    stroke="rgb(71 85 105)"
+                    strokeOpacity="0.22"
+                    strokeWidth="0.35"
+                    x1="0"
+                    x2="100"
+                    y1={y}
+                    y2={y}
+                  />
+                ))}
+                {[16, 32, 48, 64, 80].map((x) => (
+                  <line
+                    key={`grid-x-${x}`}
+                    stroke="rgb(71 85 105)"
+                    strokeOpacity="0.16"
+                    strokeWidth="0.3"
+                    x1={x}
+                    x2={x}
+                    y1="0"
+                    y2="52"
+                  />
+                ))}
+                <path d={signalPath.area} fill="url(#signalArea)" />
+                <path
+                  d={signalPath.line}
+                  fill="none"
+                  stroke="rgb(126 228 91)"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.35"
+                />
+                {selectedAnomalies.slice(0, 5).map((anomaly, index) => (
+                  <AnomalyMarker
+                    key={anomaly.id}
+                    anomaly={anomaly}
+                    index={index}
+                    total={Math.min(selectedAnomalies.length, 5)}
+                  />
+                ))}
+              </svg>
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between px-4 pb-3 text-xs font-medium text-slate-500">
+                <span>Latest state</span>
+                <span>Summary preview</span>
+              </div>
+            </div>
+
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+              This preview is derived from the latest dashboard summary snapshot,
+              not a historical price series.
+            </p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <SignalMetric
               label="Symbol"
-              value={primarySymbol?.symbol ?? "Unknown"}
+              value={selectedSymbol.symbol}
             />
             <SignalMetric
-              label="Last price"
-              value={formatDecimalString(primarySymbol?.state?.last_trade_price)}
+              label="Price"
+              value={formatTickerPrice(selectedSymbol.state?.last_trade_price)}
             />
             <SignalMetric
-              label="Events / min"
-              value={formatCompactNumber(primarySymbol?.state?.trades_per_minute)}
+              label="Spread"
+              value={formatTickerPercent(selectedSymbol.state?.spread_pct)}
             />
             <SignalMetric
-              label="Parse errors"
-              value={String(summary?.pipeline.parse_errors ?? 0)}
+              label="Trades/min"
+              value={formatOptionalCompact(selectedSymbol.state?.trades_per_minute)}
+            />
+            <SignalMetric
+              label="Freshness"
+              value={formatOptionalAge(
+                selectedSymbol.state?.last_event_age_ms ??
+                  summary?.pipeline.last_message_age_ms,
+              )}
+            />
+            <SignalMetric
+              label="Anomalies"
+              value={String(selectedAnomalies.length)}
             />
           </div>
         </div>
       )}
     </section>
+  );
+}
+
+function AnomalyMarker({
+  anomaly,
+  index,
+  total,
+}: {
+  anomaly: DashboardAnomaly;
+  index: number;
+  total: number;
+}) {
+  const x = 14 + ((index + 1) * 72) / (total + 1);
+  const tone = anomalyMarkerTone(anomaly.severity);
+
+  return (
+    <g>
+      <line
+        stroke={tone.stroke}
+        strokeDasharray="1.6 1.8"
+        strokeOpacity="0.8"
+        strokeWidth="0.75"
+        x1={x}
+        x2={x}
+        y1="7"
+        y2="46"
+      />
+      <circle
+        cx={x}
+        cy="8"
+        fill={tone.fill}
+        r="2.6"
+        stroke={tone.stroke}
+        strokeOpacity="0.9"
+        strokeWidth="0.8"
+      />
+      <title>
+        {anomaly.symbol} {anomaly.anomaly_type} {anomaly.severity}
+      </title>
+    </g>
   );
 }
 
@@ -610,12 +772,109 @@ function serviceHealthPalette(status: StatusTone): {
   }
 }
 
+function selectSignalSymbol(
+  symbols: DashboardSymbolSummary[],
+): DashboardSymbolSummary | null {
+  return symbols.find((symbol) => symbol.symbol === "BTCUSDT") ?? symbols[0] ?? null;
+}
+
+function buildSignalPath(
+  symbol: DashboardSymbolSummary,
+  anomalies: DashboardAnomaly[],
+): { line: string; area: string } {
+  const score = symbol.health?.score ?? 55;
+  const spread = symbol.state?.spread_pct ?? 0;
+  const tradeRate = symbol.state?.trades_per_minute ?? 0;
+  const agePenalty = Math.min((symbol.state?.last_event_age_ms ?? 0) / 30_000, 8);
+  const anomalyPenalty = Math.min(anomalies.length * 3, 12);
+  const base = clamp(42 - score * 0.24 + spread * 16 + agePenalty + anomalyPenalty, 10, 40);
+  const activity = clamp(tradeRate / 12, 0, 7);
+  const statusLift =
+    symbol.health?.status === "healthy"
+      ? -4
+      : symbol.health?.status === "degraded"
+        ? 2
+        : symbol.health?.status === "unhealthy"
+          ? 5
+          : 0;
+
+  const points = [
+    [5, clamp(base + 5 - activity, 8, 44)],
+    [18, clamp(base + statusLift, 8, 44)],
+    [32, clamp(base - 5 - activity / 2, 8, 44)],
+    [48, clamp(base - 1 + anomalyPenalty / 2, 8, 44)],
+    [64, clamp(base - 7 + activity, 8, 44)],
+    [82, clamp(base - 3 + statusLift, 8, 44)],
+    [96, clamp(base - 9 + anomalyPenalty / 3, 8, 44)],
+  ];
+
+  const line = points
+    .map(([x, y], index) => `${index === 0 ? "M" : "L"} ${x} ${y}`)
+    .join(" ");
+  const area = `${line} L 96 52 L 5 52 Z`;
+
+  return { line, area };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function anomalyMarkerTone(severity: DashboardAnomaly["severity"]): {
+  fill: string;
+  stroke: string;
+} {
+  switch (severity) {
+    case "critical":
+      return {
+        fill: "rgb(255 92 77)",
+        stroke: "rgb(255 107 95)",
+      };
+    case "warning":
+      return {
+        fill: "rgb(245 181 27)",
+        stroke: "rgb(245 197 66)",
+      };
+    case "info":
+      return {
+        fill: "rgb(99 167 255)",
+        stroke: "rgb(99 167 255)",
+      };
+    default:
+      return {
+        fill: "rgb(148 163 184)",
+        stroke: "rgb(148 163 184)",
+      };
+  }
+}
+
+function anomalyMarkerBadgeClass(severity: DashboardAnomaly["severity"]): string {
+  switch (severity) {
+    case "critical":
+      return "border-rose-400/35 bg-rose-400/10 text-rose-200";
+    case "warning":
+      return "border-amber-400/35 bg-amber-400/10 text-amber-200";
+    case "info":
+      return "border-sky-400/35 bg-sky-400/10 text-sky-200";
+    default:
+      return "border-slate-500/40 bg-slate-700/30 text-slate-300";
+  }
+}
+
 function formatOptionalAge(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "Unavailable";
   }
 
   return formatAgeMs(value);
+}
+
+function formatOptionalCompact(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return formatCompactNumber(value);
 }
 
 function statusLabel(value: string | null | undefined): string {
