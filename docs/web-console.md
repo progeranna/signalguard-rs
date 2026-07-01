@@ -8,45 +8,39 @@ SignalGuard RS v0.5.0 introduces a public read-only web console for exploring ma
 - `/dashboard`
 - `/symbols/:symbol`
 - `/anomalies`
-- `/architecture`
 
 ## Pages
 
 ### `/`
 
-Landing page for the project and public demo.
-
-Primary goals:
-
-- explain what SignalGuard RS monitors
-- direct visitors to the dashboard and anomaly explorer
-- clarify that the product is a market-data quality monitor, not a trading system
-- link to architecture and API documentation
-
-Recommended content:
-
-- short product summary
-- current demo capabilities
-- key signals surfaced by the backend
-- clear links into the read-only console views
-
-### `/dashboard`
-
-Default console entry point for operational visibility across tracked symbols.
+Main dashboard and console entry point.
 
 Primary goals:
 
 - show overall service and market-data status at a glance
-- summarize tracked symbols from `GET /symbols`
-- surface latest per-symbol health and state using existing symbol endpoints
+- summarize tracked symbols from `GET /dashboard/summary`
 - highlight recent anomalies for fast drill-down
+- clarify that the product is a market-data quality monitor, not a trading system
 
 Recommended content:
 
 - symbol list or cards
 - latest spread, price move, trade activity, and freshness indicators
 - recent anomaly preview
-- links to symbol detail pages
+- links to symbol detail and anomaly views
+
+### `/dashboard`
+
+Alias for the main dashboard at `/`.
+
+Primary goals:
+
+- preserve a clear dashboard URL for direct links
+- render the same dashboard experience as `/`
+
+Recommended content:
+
+- same content as `/`
 
 The MVP can use `GET /dashboard/summary` as the primary dashboard bootstrap endpoint. It is a compact read-only response intended for the future web console and reduces the need to assemble the first dashboard view from multiple separate API calls.
 
@@ -84,23 +78,6 @@ Recommended content:
 - filters for symbol and result limit
 - links back to symbol detail pages
 - short explanation of implemented anomaly types
-
-### `/architecture`
-
-Public architecture overview for the demo and product story.
-
-Primary goals:
-
-- explain replay and live ingestion at a high level
-- show how normalized events flow through the bounded pipeline
-- explain storage and cache ownership
-- explain that the console is a read-only layer on top of the existing API
-
-Recommended content:
-
-- simplified architecture diagram
-- short component descriptions
-- links to deeper backend documentation in `docs/`
 
 ## Frontend Location
 
@@ -145,24 +122,23 @@ The public demo should remain intentionally narrow:
 - no trading, account management, or exchange order flow
 - no dependence on private exchange APIs
 
-The console should present current state, recent anomalies, health signals, metrics guidance, and architecture context. It should not behave like a trading terminal.
+The console should present current state, recent anomalies, health signals, and metrics guidance. Architecture and system design details live in repository documentation rather than a standalone frontend route. The console should not behave like a trading terminal.
 
 ## Backend Endpoint Usage Matrix
 
 | Page | Purpose | Backend endpoints |
 | --- | --- | --- |
-| `/` | Product framing, status links, public demo context | `GET /health`, `GET /pipeline/health` |
-| `/dashboard` | Cross-symbol overview | `GET /dashboard/summary` |
+| `/` | Cross-symbol dashboard entry | `GET /dashboard/summary` |
+| `/dashboard` | Dashboard alias | `GET /dashboard/summary` |
 | `/symbols/:symbol` | Symbol detail | `GET /market/{symbol}/state`, `GET /market/{symbol}/health`, `GET /anomalies?symbol={symbol}&limit={n}` |
 | `/anomalies` | Global anomaly explorer | `GET /anomalies`, `GET /symbols` |
-| `/architecture` | System explanation and observability context | `GET /health`, `GET /pipeline/health`, `GET /metrics` |
 
 Notes:
 
 - `GET /dashboard/summary` is the intended primary dashboard bootstrap endpoint for the web console.
 - It is read-only and frontend-friendly, combining service metadata, pipeline health, tracked symbols, compact per-symbol state and health summaries when available, and recent anomalies.
 - If a tracked symbol has no latest market state in Redis, the symbol still appears in the response while `state` and `health` remain `null`.
-- `GET /metrics` is useful for architecture and observability context, but it is Prometheus-style text rather than a dashboard-specific JSON payload.
+- `GET /metrics` is useful for observability context, but it is Prometheus-style text rather than a dashboard-specific JSON payload.
 
 ## Frontend Stack Recommendation
 

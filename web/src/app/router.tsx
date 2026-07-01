@@ -2,9 +2,7 @@ import { createBrowserRouter } from "react-router-dom";
 
 import { ConsoleLayout } from "@/app/ConsoleLayout";
 import { AnomaliesPage } from "@/pages/AnomaliesPage";
-import { ArchitecturePage } from "@/pages/ArchitecturePage";
 import { DashboardPage } from "@/pages/DashboardPage";
-import { LandingPage } from "@/pages/LandingPage";
 import { SymbolDetailPage } from "@/pages/SymbolDetailPage";
 
 export const router = createBrowserRouter([
@@ -14,7 +12,7 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <LandingPage />,
+        element: <DashboardPage />,
       },
       {
         path: "dashboard",
@@ -27,10 +25,6 @@ export const router = createBrowserRouter([
       {
         path: "anomalies",
         element: <AnomaliesPage />,
-      },
-      {
-        path: "architecture",
-        element: <ArchitecturePage />,
       },
     ],
   },
