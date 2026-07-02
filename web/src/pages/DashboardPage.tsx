@@ -12,6 +12,11 @@ import {
 } from "recharts";
 
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
+import {
+  normalizeSelectedSymbol,
+  storeSelectedSymbol,
+  useSelectedSymbol,
+} from "@/features/dashboard/selectedSymbol";
 import type {
   DashboardAnomaly,
   DashboardSummary,
@@ -30,6 +35,8 @@ import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 export function DashboardPage() {
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const summary = dashboardSummaryQuery.data ?? null;
+  const availableSymbols = summary?.symbols.map((symbol) => symbol.symbol) ?? [];
+  const { selectedSymbol, setSelectedSymbol } = useSelectedSymbol(availableSymbols);
 
   return (
     <section className="space-y-3">
@@ -42,7 +49,12 @@ export function DashboardPage() {
       ) : null}
 
       <DashboardSummaryGrid summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
-      <MarketSignalShell summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
+      <MarketSignalShell
+        onSymbolSelect={setSelectedSymbol}
+        selectedSignalSymbol={selectedSymbol}
+        summary={summary}
+        isLoading={dashboardSummaryQuery.isLoading}
+      />
       <DashboardTablesGrid summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
     </section>
   );
@@ -212,13 +224,18 @@ function summaryValueClass(tone: StatusTone): string {
 }
 
 function MarketSignalShell({
+  onSymbolSelect,
+  selectedSignalSymbol,
   summary,
   isLoading,
 }: {
+  onSymbolSelect: (symbol: string) => void;
+  selectedSignalSymbol: string;
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const selectedSymbol = selectSignalSymbol(summary?.symbols ?? []);
+  const symbols = summary?.symbols ?? [];
+  const selectedSymbol = selectSignalSymbol(symbols, selectedSignalSymbol);
   const selectedAnomalies = selectedSymbol
     ? (summary?.recent_anomalies ?? []).filter(
         (anomaly) => anomaly.symbol === selectedSymbol.symbol,
@@ -243,6 +260,13 @@ function MarketSignalShell({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {symbols.length > 0 ? (
+            <DashboardSignalSymbolSelector
+              onSymbolSelect={onSymbolSelect}
+              selectedSymbol={selectedSymbol?.symbol ?? selectedSignalSymbol}
+              symbols={symbols}
+            />
+          ) : null}
           <StatusBadge status="info" text="Latest state" />
           {selectedSymbol ? (
             <StatusBadge
@@ -386,6 +410,46 @@ function MarketSignalShell({
   );
 }
 
+function DashboardSignalSymbolSelector({
+  onSymbolSelect,
+  selectedSymbol,
+  symbols,
+}: {
+  onSymbolSelect: (symbol: string) => void;
+  selectedSymbol: string;
+  symbols: DashboardSymbolSummary[];
+}) {
+  const normalizedSelectedSymbol = normalizeSelectedSymbol(selectedSymbol);
+
+  return (
+    <div
+      aria-label="Signal symbol"
+      className="flex flex-wrap gap-1 rounded-full border border-white/10 bg-[#08131d] p-1"
+    >
+      {symbols.map((symbol) => {
+        const isSelected = normalizeSelectedSymbol(symbol.symbol) === normalizedSelectedSymbol;
+
+        return (
+          <button
+            key={symbol.symbol}
+            type="button"
+            aria-pressed={isSelected}
+            onClick={() => onSymbolSelect(symbol.symbol)}
+            className={[
+              "rounded-full px-2.5 py-1 text-xs font-semibold transition",
+              isSelected
+                ? "bg-cyan-400/10 text-cyan-100"
+                : "text-slate-400 hover:bg-white/[0.05] hover:text-slate-100",
+            ].join(" ")}
+          >
+            {symbol.symbol}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SignalSnapshotMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-slate-950/35 px-3 py-1.5">
@@ -470,6 +534,7 @@ function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
   const detailRoute = `/symbols/${symbol.symbol}`;
 
   function handleOpenSymbol() {
+    storeSelectedSymbol(symbol.symbol);
     navigate(detailRoute);
   }
 
@@ -527,6 +592,7 @@ function SymbolHealthCard({ symbol }: { symbol: DashboardSymbolSummary }) {
   return (
     <Link
       to={`/symbols/${symbol.symbol}`}
+      onClick={() => storeSelectedSymbol(symbol.symbol)}
       className="block py-4 transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
       aria-label={`Open ${symbol.symbol} detail`}
     >
@@ -675,6 +741,7 @@ function AnomalyTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
       <td className="px-2 py-3 pr-4">
         <Link
           to={`/symbols/${anomaly.symbol}`}
+          onClick={() => storeSelectedSymbol(anomaly.symbol)}
           className="font-mono text-sm font-bold text-slate-50 transition hover:text-cyan-200"
         >
           {anomaly.symbol}
@@ -705,6 +772,7 @@ function AnomalyCard({ anomaly }: { anomaly: DashboardAnomaly }) {
         <div>
           <Link
             to={`/symbols/${anomaly.symbol}`}
+            onClick={() => storeSelectedSymbol(anomaly.symbol)}
             className="font-mono text-base font-bold text-white transition hover:text-cyan-200"
           >
             {anomaly.symbol}
@@ -785,8 +853,18 @@ function EmptyBlock({ message }: { message: string }) {
 
 function selectSignalSymbol(
   symbols: DashboardSymbolSummary[],
+  preferredSymbol: string,
 ): DashboardSymbolSummary | null {
-  return symbols.find((symbol) => symbol.symbol === "BTCUSDT") ?? symbols[0] ?? null;
+  const normalizedPreferredSymbol = normalizeSelectedSymbol(preferredSymbol);
+
+  return (
+    symbols.find(
+      (symbol) => normalizeSelectedSymbol(symbol.symbol) === normalizedPreferredSymbol,
+    ) ??
+    symbols.find((symbol) => normalizeSelectedSymbol(symbol.symbol) === "BTCUSDT") ??
+    symbols[0] ??
+    null
+  );
 }
 
 type SignalPoint = {

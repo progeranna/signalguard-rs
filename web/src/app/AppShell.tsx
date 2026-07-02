@@ -2,16 +2,21 @@ import type { PropsWithChildren } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
 import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
+import { useDashboardSummaryQuery } from "@/features/dashboard/api";
+import { useSelectedSymbol } from "@/features/dashboard/selectedSymbol";
 import { StatusBadge } from "@/shared/components/StatusBadge";
-
-const navigationItems = [
-  { label: "Dashboard", to: "/" },
-  { label: "Symbol", to: "/symbols/BTCUSDT" },
-  { label: "Anomalies", to: "/anomalies" },
-];
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
+  const dashboardSummaryQuery = useDashboardSummaryQuery();
+  const availableSymbols =
+    dashboardSummaryQuery.data?.symbols.map((symbol) => symbol.symbol) ?? [];
+  const { selectedSymbol } = useSelectedSymbol(availableSymbols);
+  const navigationItems = [
+    { label: "Dashboard", to: "/" },
+    { label: "Symbol", to: `/symbols/${selectedSymbol}` },
+    { label: "Anomalies", to: "/anomalies" },
+  ];
 
   return (
     <div className="min-h-screen bg-[var(--sg-bg)] text-slate-100">

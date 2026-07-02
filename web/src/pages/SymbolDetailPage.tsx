@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
+import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
 import type {
   DashboardAnomaly,
   DashboardSymbolSummary,
@@ -39,9 +40,16 @@ export function SymbolDetailPage() {
   const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
 
   function handleSymbolChange(nextSymbol: string) {
+    storeSelectedSymbol(nextSymbol);
     setIsSymbolMenuOpen(false);
     navigate(`/symbols/${nextSymbol}`);
   }
+
+  useEffect(() => {
+    if (isKnownSymbol && selectedSummary) {
+      storeSelectedSymbol(selectedSummary.symbol);
+    }
+  }, [isKnownSymbol, selectedSummary]);
 
   useEffect(() => {
     setIsSymbolMenuOpen(false);
@@ -292,6 +300,7 @@ function SymbolNotFoundState({
             <Link
               key={entry.symbol}
               to={`/symbols/${entry.symbol}`}
+              onClick={() => storeSelectedSymbol(entry.symbol)}
               className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:border-cyan-400/25 hover:bg-cyan-400/10 hover:text-cyan-100"
             >
               {entry.symbol}
