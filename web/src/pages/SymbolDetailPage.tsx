@@ -2,7 +2,10 @@ import { useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
-import { orderMarketEntries } from "@/features/dashboard/marketOrder";
+import {
+  buildCoveredDashboardSymbols,
+  isDashboardSymbolPlaceholder,
+} from "@/features/dashboard/marketOrder";
 import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
 import type {
   DashboardAnomaly,
@@ -23,7 +26,7 @@ import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 export function SymbolDetailPage() {
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = orderMarketEntries(summary?.symbols ?? [], (symbol) => symbol.symbol);
+  const availableSymbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
   const recentAnomalies = summary?.recent_anomalies ?? [];
   const routeSymbol = useParams().symbol ?? "";
   const selectedSymbol = normalizeSymbol(routeSymbol);
@@ -34,7 +37,7 @@ export function SymbolDetailPage() {
   );
   const isKnownSymbol = selectedSummary !== null;
   const statusTone = toStatusTone(selectedSummary?.health?.status, "neutral");
-  const symbolStatusText = formatStatusLabel(selectedSummary?.health?.status);
+  const symbolStatusText = formatMarketStatusLabel(selectedSummary);
 
   useEffect(() => {
     if (isKnownSymbol && selectedSummary) {
@@ -458,6 +461,16 @@ function formatStatusLabel(value: string | null | undefined): string {
     .split("_")
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ");
+}
+
+function formatMarketStatusLabel(
+  symbol: DashboardSymbolSummary | null,
+): string {
+  if (!symbol || isDashboardSymbolPlaceholder(symbol)) {
+    return "No data yet";
+  }
+
+  return formatStatusLabel(symbol.health?.status);
 }
 
 function formatDisplayValue(value: string | null | undefined): string {

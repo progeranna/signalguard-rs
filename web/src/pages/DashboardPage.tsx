@@ -12,7 +12,11 @@ import {
 } from "recharts";
 
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
-import { orderMarketEntries, orderMarkets } from "@/features/dashboard/marketOrder";
+import {
+  buildCoveredDashboardSymbols,
+  isDashboardSymbolPlaceholder,
+  orderMarkets,
+} from "@/features/dashboard/marketOrder";
 import {
   normalizeSelectedSymbol,
   storeSelectedSymbol,
@@ -92,7 +96,7 @@ function MarketSignalShell({
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const symbols = summary?.symbols ?? [];
+  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
   const selectedSymbol = selectSignalSymbol(symbols, selectedSignalSymbol);
   const selectedAnomalies = selectedSymbol
     ? (summary?.recent_anomalies ?? []).filter(
@@ -270,7 +274,7 @@ function DashboardTablesGrid({
   isLoading: boolean;
 }) {
   const [modalState, setModalState] = useState<DashboardModalState>(null);
-  const symbols = orderMarketEntries(summary?.symbols ?? [], (symbol) => symbol.symbol);
+  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
   const anomalies = summary?.recent_anomalies ?? [];
 
   function isKnownSummarySymbol(symbol: string): boolean {
@@ -356,7 +360,7 @@ function SymbolHealthShell({
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const symbols = orderMarketEntries(summary?.symbols ?? [], (symbol) => symbol.symbol);
+  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
   const previewSymbols = symbols.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
 
   return (
@@ -429,6 +433,7 @@ function SymbolHealthTableRow({
 }) {
   const score = symbol.health?.score ?? null;
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
+  const statusText = marketStatusLabel(symbol);
 
   function handleOpenSymbol() {
     onOpenSymbolDetail(symbol.symbol);
@@ -475,7 +480,7 @@ function SymbolHealthTableRow({
       <td className="px-2 py-3 text-right">
         <StatusBadge
           status={statusTone}
-          text={statusLabel(symbol.health?.status)}
+          text={statusText}
         />
       </td>
     </tr>
@@ -490,6 +495,7 @@ function SymbolHealthCard({
   symbol: DashboardSymbolSummary;
 }) {
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
+  const statusText = marketStatusLabel(symbol);
 
   return (
     <button
@@ -512,7 +518,7 @@ function SymbolHealthCard({
           </div>
           <StatusBadge
             status={statusTone}
-            text={statusLabel(symbol.health?.status)}
+            text={statusText}
           />
         </div>
         <div className="mt-4">
@@ -552,13 +558,13 @@ function HealthScore({
   status: string | null | undefined;
 }) {
   const tone = healthScoreTone(score, status);
-  const width = score === null ? 18 : Math.max(score, 4);
+  const width = score === null ? 0 : Math.max(score, 4);
 
   return (
     <div className="min-w-28">
       <div className="flex items-center gap-3">
         <span className={`text-lg font-extrabold ${healthScoreTextClass(tone)}`}>
-          {score ?? "Unknown"}
+          {score ?? "—"}
         </span>
         <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/70">
           <div
@@ -1022,6 +1028,7 @@ function SymbolHealthModalTableRow({
 }) {
   const score = symbol.health?.score ?? null;
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
+  const statusText = marketStatusLabel(symbol);
 
   return (
     <SymbolHealthTableRowShell
@@ -1047,7 +1054,7 @@ function SymbolHealthModalTableRow({
           <td className="px-2 py-3 text-right">
             <StatusBadge
               status={statusTone}
-              text={statusLabel(symbol.health?.status)}
+              text={statusText}
             />
           </td>
         </>
@@ -1131,6 +1138,7 @@ function SymbolDetailModal({
     : [];
   const statusTone = toStatusTone(selectedSymbol?.health?.status, "neutral");
   const titleSymbol = selectedSymbol?.symbol ?? normalizedSymbol ?? "Unknown market";
+  const statusText = selectedSymbol ? marketStatusLabel(selectedSymbol) : "No data yet";
 
   return (
     <DashboardTableModal
@@ -1158,14 +1166,14 @@ function SymbolDetailModal({
             </p>
             <StatusBadge
               status={statusTone}
-              text={statusLabel(selectedSymbol.health?.status)}
+              text={statusText}
             />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <SymbolDetailMetric
               label="Health"
-              value={selectedSymbol.health?.score?.toString() ?? "Unknown"}
+              value={selectedSymbol.health?.score?.toString() ?? "—"}
             />
             <SymbolDetailMetric
               label="Price"
@@ -1404,7 +1412,11 @@ function selectSignalSymbol(
     symbols.find(
       (symbol) => normalizeSelectedSymbol(symbol.symbol) === normalizedPreferredSymbol,
     ) ??
-    symbols.find((symbol) => normalizeSelectedSymbol(symbol.symbol) === "BTCUSDT") ??
+    symbols.find(
+      (symbol) =>
+        normalizeSelectedSymbol(symbol.symbol) === "BTCUSDT" &&
+        !isDashboardSymbolPlaceholder(symbol),
+    ) ??
     symbols[0] ??
     null
   );
@@ -1420,6 +1432,10 @@ function buildSignalSeries(
   symbol: DashboardSymbolSummary,
   anomalies: DashboardAnomaly[],
 ): SignalPoint[] {
+  if (isDashboardSymbolPlaceholder(symbol)) {
+    return [];
+  }
+
   const score = symbol.health?.score ?? 55;
   const spread = symbol.state?.spread_pct ?? 0;
   const tradeRate = symbol.state?.trades_per_minute ?? 0;
@@ -1708,6 +1724,14 @@ function statusLabel(value: string | null | undefined): string {
   }
 
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function marketStatusLabel(symbol: DashboardSymbolSummary): string {
+  if (isDashboardSymbolPlaceholder(symbol)) {
+    return "No data yet";
+  }
+
+  return statusLabel(symbol.health?.status);
 }
 
 function buildErrorMessage(error: unknown): string {

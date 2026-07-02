@@ -377,14 +377,21 @@ function HeaderModeSelector({
   const isPending = switchStatus === "pending" || isRefreshingSwitch;
   const currentMode = runtimeMode?.mode ?? null;
   const currentModeLabel = currentMode ? modeOptionLabel(currentMode) : "Runtime mode";
-  const currentStatusLabel = runtimeModeStatusText(runtimeMode, runtimeModeStatus, isPending);
   const currentErrorMessage = buildRuntimeModeMessage(
     switchError ?? runtimeModeError ?? runtimeMode?.last_error ?? null,
     runtimeMode?.last_error ?? null,
   );
   const currentModeTone = runtimeModeTone(runtimeMode?.status, runtimeModeStatus, isPending);
+  const runtimeMessage = buildRuntimeModeStatusMessage({
+    isPending,
+    runtimeMode,
+    runtimeModeError,
+    runtimeModeStatus,
+    switchingSupported: runtimeMode?.switching_supported ?? false,
+    switchError,
+  });
   const modeOptions: Array<{ mode: RuntimeMode; label: string }> = [
-    { mode: "replay", label: "Replay Demo" },
+    { mode: "replay", label: "Demo Mode" },
     { mode: "live", label: "Live Mode" },
   ];
   const switchingSupported = runtimeMode?.switching_supported ?? false;
@@ -435,35 +442,31 @@ function HeaderModeSelector({
           role="menu"
           className="absolute right-0 top-full z-20 mt-2 min-w-[12rem] overflow-hidden rounded-xl border border-white/10 bg-[var(--sg-panel-strong)] shadow-[0_18px_40px_rgba(2,6,23,0.44)]"
         >
-          <div className="border-b border-white/10 px-3 py-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Runtime mode
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-300">
-              Status: <span className="font-semibold text-slate-100">{currentStatusLabel}</span>
-            </p>
-            {currentErrorMessage ? (
-              <p className="mt-2 text-xs leading-5 text-rose-300">{currentErrorMessage}</p>
-            ) : null}
-            {!switchingSupported && !runtimeModeStatus.isLoading ? (
-              <p className="mt-2 text-xs leading-5 text-slate-400">
-                Runtime switching is not available from the current backend.
+          {runtimeMessage ? (
+            <div className="border-b border-white/10 px-3 py-2">
+              <p className={`text-sm font-semibold ${runtimeMessage.toneClassName}`}>
+                {runtimeMessage.title}
               </p>
-            ) : null}
-            {runtimeModeStatus.isError && !currentErrorMessage ? (
-              <button
-                type="button"
-                onClick={onRefreshRuntimeMode}
-                className="mt-2 text-xs font-semibold text-cyan-200 transition hover:text-cyan-100"
-              >
-                Retry runtime mode request
-              </button>
-            ) : null}
-          </div>
+              {runtimeMessage.detail ? (
+                <p className="mt-1 text-xs leading-5 text-slate-300">{runtimeMessage.detail}</p>
+              ) : null}
+              {runtimeMessage.retryable ? (
+                <button
+                  type="button"
+                  onClick={onRefreshRuntimeMode}
+                  className="mt-2 text-xs font-semibold text-cyan-200 transition hover:text-cyan-100"
+                >
+                  Retry runtime mode request
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="py-1">
             {modeOptions.map((option) => {
               const isCurrent = option.mode === currentMode;
               const isDisabled = isCurrent ? disableAllOptions : disableSwitchActions;
+              const actionLabel =
+                !isCurrent && currentErrorMessage ? "Retry" : "Switch";
 
               return (
                 <button
@@ -493,7 +496,7 @@ function HeaderModeSelector({
                           : "text-slate-500",
                     ].join(" ")}
                   >
-                    {isCurrent ? "Current" : "Switch"}
+                    {isCurrent ? "Current" : actionLabel}
                   </span>
                 </button>
               );
@@ -587,40 +590,7 @@ function buildModeSwitchRequest(mode: RuntimeMode) {
 }
 
 function modeOptionLabel(mode: RuntimeMode): string {
-  return mode === "replay" ? "Replay Demo" : "Live Mode";
-}
-
-function runtimeModeStatusText(
-  runtimeMode: RuntimeModeResponse | null,
-  queryState: { isError: boolean; isLoading: boolean },
-  isPending: boolean,
-): string {
-  if (isPending || runtimeMode?.status === "switching") {
-    return "switching";
-  }
-
-  if (queryState.isLoading && !runtimeMode) {
-    return "loading";
-  }
-
-  if (queryState.isError && !runtimeMode) {
-    return "unavailable";
-  }
-
-  switch (runtimeMode?.status) {
-    case "running":
-      return "running";
-    case "completed":
-      return "completed";
-    case "failed":
-      return "failed";
-    case "stopped":
-      return "stopped";
-    case "starting":
-      return "starting";
-    default:
-      return "unknown";
-  }
+  return mode === "replay" ? "Demo Mode" : "Live Mode";
 }
 
 function runtimeModeTone(
@@ -669,6 +639,74 @@ function buildRuntimeModeMessage(
 
   if (lastError) {
     return lastError;
+  }
+
+  return null;
+}
+
+function buildRuntimeModeStatusMessage({
+  isPending,
+  runtimeMode,
+  runtimeModeError,
+  runtimeModeStatus,
+  switchingSupported,
+  switchError,
+}: {
+  isPending: boolean;
+  runtimeMode: RuntimeModeResponse | null;
+  runtimeModeError: unknown;
+  runtimeModeStatus: { isError: boolean; isLoading: boolean };
+  switchingSupported: boolean;
+  switchError: unknown;
+}): {
+  detail?: string;
+  retryable?: boolean;
+  title: string;
+  toneClassName: string;
+} | null {
+  const errorMessage = buildRuntimeModeMessage(
+    switchError ?? runtimeModeError ?? runtimeMode?.last_error ?? null,
+    runtimeMode?.last_error ?? null,
+  );
+
+  if (isPending || runtimeMode?.status === "switching") {
+    return {
+      title: "Switching mode...",
+      toneClassName: "text-amber-200",
+    };
+  }
+
+  if (runtimeModeStatus.isError && !runtimeMode) {
+    return {
+      detail: errorMessage ?? "The runtime mode request did not complete successfully.",
+      retryable: true,
+      title: "Runtime unavailable",
+      toneClassName: "text-rose-300",
+    };
+  }
+
+  if (runtimeMode?.status === "failed" || switchError || runtimeMode?.last_error) {
+    return {
+      detail: errorMessage ?? "The runtime mode switch did not complete successfully.",
+      title: "Switch failed",
+      toneClassName: "text-rose-300",
+    };
+  }
+
+  if (runtimeModeStatus.isError) {
+    return {
+      detail: errorMessage ?? "The runtime mode request did not complete successfully.",
+      retryable: true,
+      title: "Runtime unavailable",
+      toneClassName: "text-rose-300",
+    };
+  }
+
+  if (!switchingSupported && !runtimeModeStatus.isLoading) {
+    return {
+      title: "Switching unavailable",
+      toneClassName: "text-slate-300",
+    };
   }
 
   return null;
