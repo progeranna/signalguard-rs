@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    domain::{AnomalyEvent, MarketState},
+    domain::{AnomalyEvent, MarketState, TradeEvent},
     runtime::RuntimeModeSnapshot,
     state,
     telemetry::InternalCountersSnapshot,
@@ -113,6 +113,13 @@ pub struct DashboardSummaryResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct MarketTimelineResponse {
+    pub symbol: String,
+    pub points: Vec<MarketTimelinePointResponse>,
+    pub anomalies: Vec<AnomalyResponse>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DashboardServiceSummary {
     pub status: &'static str,
     pub service: &'static str,
@@ -144,6 +151,15 @@ pub struct DashboardHealthSummary {
     pub status: crate::domain::HealthStatus,
     pub recent_anomaly_count: usize,
     pub evaluated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MarketTimelinePointResponse {
+    pub timestamp: DateTime<Utc>,
+    pub price: Decimal,
+    pub spread_pct: Option<f64>,
+    pub trades_per_minute: Option<f64>,
+    pub last_event_age_ms: Option<u64>,
 }
 
 impl MarketStateResponse {
@@ -206,6 +222,18 @@ impl DashboardStateSummary {
             last_event_time: state.last_event_time,
             last_event_age_ms: state::last_event_age_ms(state.last_event_time, now),
             depth_sequence_gap_count: state.depth_sequence_gap_count,
+        }
+    }
+}
+
+impl MarketTimelinePointResponse {
+    pub fn from_trade(trade: &TradeEvent, now: DateTime<Utc>) -> Self {
+        Self {
+            timestamp: trade.event_time,
+            price: trade.price,
+            spread_pct: None,
+            trades_per_minute: None,
+            last_event_age_ms: state::last_event_age_ms(Some(trade.event_time), now),
         }
     }
 }

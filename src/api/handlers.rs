@@ -13,7 +13,7 @@ use crate::{
     state,
     storage::{
         CacheError, MAX_RECENT_ANOMALY_LIMIT as MAX_ANOMALY_LIMIT, StorageError,
-        get_recent_anomalies,
+        get_recent_anomalies, get_recent_trades_for_symbol,
     },
     telemetry::render_prometheus_metrics,
 };
@@ -22,7 +22,8 @@ use super::{
     dto::{
         AnomaliesResponse, AnomalyResponse, DashboardHealthSummary, DashboardServiceSummary,
         DashboardStateSummary, DashboardSummaryResponse, DashboardSymbolSummary, HealthResponse,
-        MarketHealthResponse, MarketStateResponse, PipelineHealthResponse, RuntimeModeResponse,
+        MarketHealthResponse, MarketStateResponse, MarketTimelinePointResponse,
+        MarketTimelineResponse, PipelineHealthResponse, RuntimeModeResponse,
         RuntimeModeSwitchRequest, SymbolsResponse,
     },
     error::ApiError,
@@ -32,6 +33,8 @@ use crate::runtime_supervisor::{RuntimeModeSwitchCommand, SwitchModeError};
 
 const DEFAULT_ANOMALY_LIMIT: u32 = 50;
 const HEALTH_ANOMALY_LIMIT: u32 = 100;
+const MARKET_TIMELINE_POINT_LIMIT: u32 = 120;
+const MARKET_TIMELINE_ANOMALY_LIMIT: u32 = 50;
 
 #[derive(Debug, Deserialize)]
 pub struct AnomaliesQuery {
@@ -158,6 +161,38 @@ pub async fn market_health(
         symbol.as_str().to_owned(),
         evaluation,
     )))
+}
+
+pub async fn market_timeline(
+    State(state): State<AppState>,
+    Path(symbol): Path<String>,
+) -> Result<Json<MarketTimelineResponse>, ApiError> {
+    let symbol = parse_market_symbol(symbol)?;
+    let now = state::snapshot_now();
+    let trades = get_recent_trades_for_symbol(&state.pg_pool, &symbol, MARKET_TIMELINE_POINT_LIMIT)
+        .await
+        .map_err(|error| map_storage_error(&state, error))?;
+    let mut anomalies =
+        get_recent_anomalies(&state.pg_pool, Some(&symbol), MARKET_TIMELINE_ANOMALY_LIMIT)
+            .await
+            .map_err(|error| map_storage_error(&state, error))?;
+    anomalies.sort_by(|left, right| {
+        left.event_time
+            .cmp(&right.event_time)
+            .then_with(|| left.created_at.cmp(&right.created_at))
+    });
+
+    Ok(Json(MarketTimelineResponse {
+        symbol: symbol.as_str().to_owned(),
+        points: trades
+            .iter()
+            .map(|trade| MarketTimelinePointResponse::from_trade(trade, now))
+            .collect(),
+        anomalies: anomalies
+            .into_iter()
+            .map(AnomalyResponse::from_anomaly)
+            .collect(),
+    }))
 }
 
 pub async fn anomalies(

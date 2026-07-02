@@ -64,6 +64,20 @@ export const dashboardSummarySchema = z.object({
   recent_anomalies: z.array(anomalySchema),
 });
 
+export const marketTimelinePointSchema = z.object({
+  timestamp: z.string().datetime(),
+  price: z.string(),
+  spread_pct: z.number().nullable(),
+  trades_per_minute: z.number().nullable(),
+  last_event_age_ms: z.number().int().nonnegative().nullable(),
+});
+
+export const marketTimelineSchema = z.object({
+  symbol: z.string(),
+  points: z.array(marketTimelinePointSchema),
+  anomalies: z.array(anomalySchema),
+});
+
 export const runtimeModeSchema = z.enum(["replay", "live"]);
 export const runtimeModeStatusSchema = z.enum([
   "starting",
@@ -93,6 +107,8 @@ export type DashboardHealthSummary = z.infer<typeof dashboardHealthSummarySchema
 export type DashboardSymbolSummary = z.infer<typeof dashboardSymbolSummarySchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
 export type DashboardAnomaly = z.infer<typeof anomalySchema>;
+export type MarketTimelinePoint = z.infer<typeof marketTimelinePointSchema>;
+export type MarketTimeline = z.infer<typeof marketTimelineSchema>;
 export type RuntimeMode = z.infer<typeof runtimeModeSchema>;
 export type RuntimeModeStatus = z.infer<typeof runtimeModeStatusSchema>;
 export type RuntimeModeSource = z.infer<typeof runtimeModeSourceSchema>;

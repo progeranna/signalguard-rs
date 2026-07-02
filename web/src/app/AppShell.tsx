@@ -7,7 +7,10 @@ import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
 import {
   dashboardSummaryQueryKey,
   fetchDashboardSummary,
+  fetchMarketTimeline,
   fetchRuntimeMode,
+  marketTimelineQueryKey,
+  marketTimelineQueryKeyRoot,
   runtimeModeQueryKey,
   useDashboardSummaryQuery,
   useRuntimeModeQuery,
@@ -52,7 +55,16 @@ export function AppShell({ children }: PropsWithChildren) {
   const runtimeModeQuery = useRuntimeModeQuery();
   const switchRuntimeModeMutation = useSwitchRuntimeModeMutation();
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = orderMarkets(summary?.symbols.map((symbol) => symbol.symbol) ?? []);
+  const runtimeMode = runtimeModeQuery.data ?? null;
+  const availableSymbols = orderMarkets(
+    Array.from(
+      new Set([
+        ...DEMO_MARKETS,
+        ...(runtimeMode?.symbols ?? []),
+        ...(summary?.symbols.map((symbol) => symbol.symbol) ?? []),
+      ]),
+    ),
+  );
   const routeSymbolCandidate = location.pathname.startsWith("/symbols/")
     ? location.pathname.slice("/symbols/".length)
     : null;
@@ -73,7 +85,7 @@ export function AppShell({ children }: PropsWithChildren) {
   const showRuntimeSwitchOverlay =
     isRuntimeSwitchRefreshing ||
     switchRuntimeModeMutation.status === "pending" ||
-    runtimeModeQuery.data?.status === "switching";
+    runtimeMode?.status === "switching";
 
   async function handleModeSelect(nextMode: RuntimeMode) {
     const request = buildModeSwitchRequest(nextMode);
@@ -88,6 +100,7 @@ export function AppShell({ children }: PropsWithChildren) {
     try {
       const runtimeMode = await switchRuntimeModeMutation.mutateAsync(request);
       queryClient.setQueryData(runtimeModeQueryKey, runtimeMode);
+      let refreshSymbol = selectedSymbol;
 
       if (
         runtimeMode.symbols.length > 0 &&
@@ -96,6 +109,7 @@ export function AppShell({ children }: PropsWithChildren) {
         )
       ) {
         const nextSymbol = runtimeMode.symbols[0];
+        refreshSymbol = nextSymbol;
         setSelectedSymbol(nextSymbol);
 
         if (location.pathname.startsWith("/symbols/")) {
@@ -107,6 +121,7 @@ export function AppShell({ children }: PropsWithChildren) {
       await refreshAfterRuntimeSwitch({
         queryClient,
         startedAt: nextSwitchState.startedAt,
+        selectedSymbol: refreshSymbol,
         targetMode: runtimeMode.mode,
       });
       setRuntimeSwitchState(null);
@@ -116,6 +131,7 @@ export function AppShell({ children }: PropsWithChildren) {
       await Promise.allSettled([
         queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey }),
         queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
+        queryClient.invalidateQueries({ queryKey: marketTimelineQueryKeyRoot }),
       ]);
     }
   }
@@ -196,7 +212,7 @@ export function AppShell({ children }: PropsWithChildren) {
                   onToggle={() =>
                     setActiveMenu((menu) => (menu === "mode" ? null : "mode"))
                   }
-                  runtimeMode={runtimeModeQuery.data ?? null}
+                  runtimeMode={runtimeMode}
                   runtimeModeError={runtimeModeQuery.error}
                   runtimeModeStatus={{
                     isError: runtimeModeQuery.isError,
@@ -221,7 +237,7 @@ export function AppShell({ children }: PropsWithChildren) {
           </main>
           {showRuntimeSwitchOverlay ? (
             <RuntimeSwitchOverlay
-              runtimeMode={runtimeModeQuery.data ?? null}
+              runtimeMode={runtimeMode}
               switchStatus={switchRuntimeModeMutation.status}
             />
           ) : null}
@@ -533,23 +549,28 @@ function RuntimeSwitchOverlay({
 async function refreshAfterRuntimeSwitch({
   queryClient,
   startedAt,
+  selectedSymbol,
   targetMode,
 }: {
   queryClient: ReturnType<typeof useQueryClient>;
   startedAt: number;
+  selectedSymbol: string | null;
   targetMode: RuntimeMode;
 }) {
   await Promise.all([
     queryClient.cancelQueries({ queryKey: runtimeModeQueryKey }),
     queryClient.cancelQueries({ queryKey: dashboardSummaryQueryKey }),
+    queryClient.cancelQueries({ queryKey: marketTimelineQueryKeyRoot }),
   ]);
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey }),
     queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
+    queryClient.invalidateQueries({ queryKey: marketTimelineQueryKeyRoot }),
   ]);
   await Promise.all([
     queryClient.refetchQueries({ queryKey: runtimeModeQueryKey, type: "all" }),
     queryClient.refetchQueries({ queryKey: dashboardSummaryQueryKey, type: "all" }),
+    queryClient.refetchQueries({ queryKey: marketTimelineQueryKeyRoot, type: "all" }),
   ]);
 
   const timeoutAt = startedAt + RUNTIME_SWITCH_TIMEOUT_MS;
@@ -567,6 +588,13 @@ async function refreshAfterRuntimeSwitch({
         staleTime: 0,
       }),
     ]);
+    if (selectedSymbol) {
+      await queryClient.fetchQuery({
+        queryKey: marketTimelineQueryKey(selectedSymbol),
+        queryFn: () => fetchMarketTimeline(selectedSymbol),
+        staleTime: 0,
+      });
+    }
 
     if (runtimeMode.status === "failed") {
       throw new Error(runtimeMode.last_error ?? "Runtime mode switch failed");
@@ -780,7 +808,7 @@ function buildHeaderDataStatus(
   if (queryState.isLoading) {
     return {
       label: "Checking data",
-      lastUpdateLabel: "Last update: unavailable",
+      lastUpdateLabel: "Last market event: unavailable",
       tone: "neutral",
     };
   }
@@ -788,7 +816,7 @@ function buildHeaderDataStatus(
   if (queryState.isError || !summary) {
     return {
       label: "Status unavailable",
-      lastUpdateLabel: "Last update: unavailable",
+      lastUpdateLabel: "Last market event: unavailable",
       tone: "neutral",
     };
   }
@@ -826,7 +854,7 @@ function buildHeaderDataStatus(
         : tone === "critical"
             ? "Data Critical"
             : "Status Unknown",
-    lastUpdateLabel: buildLastUpdateLabel(lastEventTime),
+    lastUpdateLabel: buildLastMarketEventLabel(lastEventTime),
     tone,
   };
 }
@@ -845,14 +873,14 @@ function getLatestEventTime(summary: DashboardSummary): string | null {
   });
 }
 
-function buildLastUpdateLabel(absoluteTimestamp: string | null): string {
+function buildLastMarketEventLabel(absoluteTimestamp: string | null): string {
   const absoluteLabel = absoluteTimestamp ? formatHeaderTimestamp(absoluteTimestamp) : null;
 
   if (absoluteLabel) {
-    return `Last update: ${absoluteLabel}`;
+    return `Last market event: ${absoluteLabel}`;
   }
 
-  return "Last update: unavailable";
+  return "Last market event: unavailable";
 }
 
 function formatHeaderTimestamp(value: string): string {

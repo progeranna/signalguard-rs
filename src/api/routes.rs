@@ -15,6 +15,7 @@ pub fn router() -> Router<super::AppState> {
         .route("/symbols", get(handlers::symbols))
         .route("/market/{symbol}/state", get(handlers::market_state))
         .route("/market/{symbol}/health", get(handlers::market_health))
+        .route("/market/{symbol}/timeline", get(handlers::market_timeline))
         .route("/anomalies", get(handlers::anomalies))
 }
 
@@ -214,6 +215,13 @@ mod tests {
         let response = get("/market/BTCUSDT/health", unavailable_state()).await;
 
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_route_rejects_invalid_symbol() {
+        let response = get("/market/BTC-USDT/timeline", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

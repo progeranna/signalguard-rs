@@ -16,6 +16,7 @@ const SYMBOL_SET_KEY: &str = "signalguard:symbols";
 #[derive(Clone, Debug)]
 pub struct RedisCache {
     client: Option<redis::Client>,
+    connection: Option<redis::aio::MultiplexedConnection>,
     in_memory_states: Option<Arc<Mutex<HashMap<Symbol, MarketState>>>>,
     #[cfg(test)]
     in_memory_symbols: Option<Arc<Mutex<Vec<Symbol>>>>,
@@ -54,6 +55,7 @@ impl RedisCache {
 
         Ok(Self {
             client: Some(client),
+            connection: Some(connection),
             in_memory_states: None,
             #[cfg(test)]
             in_memory_symbols: None,
@@ -63,6 +65,7 @@ impl RedisCache {
     pub fn unavailable() -> Self {
         Self {
             client: None,
+            connection: None,
             in_memory_states: None,
             #[cfg(test)]
             in_memory_symbols: None,
@@ -275,6 +278,7 @@ impl RedisCache {
 
         Self {
             client: None,
+            connection: None,
             in_memory_states: Some(Arc::new(Mutex::new(states))),
             in_memory_symbols: None,
         }
@@ -289,6 +293,7 @@ impl RedisCache {
 
         Self {
             client: None,
+            connection: None,
             in_memory_states: Some(Arc::new(Mutex::new(states))),
             in_memory_symbols: Some(Arc::new(Mutex::new(symbols))),
         }
@@ -298,6 +303,7 @@ impl RedisCache {
     pub fn in_memory_symbols_only(symbols: Vec<Symbol>) -> Self {
         Self {
             client: None,
+            connection: None,
             in_memory_states: None,
             in_memory_symbols: Some(Arc::new(Mutex::new(symbols))),
         }
@@ -311,6 +317,10 @@ impl RedisCache {
         &self,
         operation: &'static str,
     ) -> Result<redis::aio::MultiplexedConnection, CacheError> {
+        if let Some(connection) = &self.connection {
+            return Ok(connection.clone());
+        }
+
         self.client()?
             .get_multiplexed_async_connection()
             .await
