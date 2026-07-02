@@ -36,7 +36,7 @@ const DASHBOARD_TABLE_PREVIEW_LIMIT = 7;
 
 type DashboardModalState =
   | { type: "anomalies" }
-  | { type: "symbolDetail"; returnTo?: "symbols"; symbol: string }
+  | { type: "symbolDetail"; returnTo?: "anomalies" | "symbols"; symbol: string }
   | { type: "symbols" }
   | null;
 
@@ -272,8 +272,20 @@ function DashboardTablesGrid({
   const symbols = summary?.symbols ?? [];
   const anomalies = summary?.recent_anomalies ?? [];
 
-  function openSymbolDetail(symbol: string, returnTo?: "symbols") {
-    storeSelectedSymbol(symbol);
+  function isKnownSummarySymbol(symbol: string): boolean {
+    const normalizedSymbol = normalizeSelectedSymbol(symbol);
+
+    return (
+      normalizedSymbol !== null &&
+      symbols.some((entry) => normalizeSelectedSymbol(entry.symbol) === normalizedSymbol)
+    );
+  }
+
+  function openSymbolDetail(symbol: string, returnTo?: "anomalies" | "symbols") {
+    if (isKnownSummarySymbol(symbol)) {
+      storeSelectedSymbol(symbol);
+    }
+
     setModalState({ type: "symbolDetail", symbol, returnTo });
   }
 
@@ -304,12 +316,17 @@ function DashboardTablesGrid({
         <AllAnomaliesModal
           anomalies={anomalies}
           onClose={() => setModalState(null)}
-          onOpenSymbolDetail={(symbol) => openSymbolDetail(symbol)}
+          onOpenSymbolDetail={(symbol) => openSymbolDetail(symbol, "anomalies")}
         />
       ) : null}
       {modalState?.type === "symbolDetail" ? (
         <SymbolDetailModal
           anomalies={anomalies}
+          onBackToAllAnomalies={
+            modalState.returnTo === "anomalies"
+              ? () => setModalState({ type: "anomalies" })
+              : undefined
+          }
           onBackToAllSymbols={
             modalState.returnTo === "symbols"
               ? () => setModalState({ type: "symbols" })
@@ -1054,6 +1071,7 @@ function SymbolHealthTableRowShell({
 
 function SymbolDetailModal({
   anomalies,
+  onBackToAllAnomalies,
   onBackToAllSymbols,
   onClose,
   onOpenSymbolDetail,
@@ -1061,6 +1079,7 @@ function SymbolDetailModal({
   symbols,
 }: {
   anomalies: DashboardAnomaly[];
+  onBackToAllAnomalies?: () => void;
   onBackToAllSymbols?: () => void;
   onClose: () => void;
   onOpenSymbolDetail: (symbol: string) => void;
@@ -1089,13 +1108,13 @@ function SymbolDetailModal({
       dialogId="symbol-detail-title"
       onClose={onClose}
       secondaryAction={
-        onBackToAllSymbols ? (
+        onBackToAllSymbols || onBackToAllAnomalies ? (
           <button
             type="button"
-            onClick={onBackToAllSymbols}
+            onClick={onBackToAllSymbols ?? onBackToAllAnomalies}
             className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
           >
-            Back to all symbols
+            {onBackToAllSymbols ? "Back to all symbols" : "Back to all anomalies"}
           </button>
         ) : null
       }
