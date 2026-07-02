@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     domain::{AnomalyEvent, MarketState},
+    runtime::RuntimeModeSnapshot,
     state,
     telemetry::InternalCountersSnapshot,
 };
@@ -19,6 +20,19 @@ pub struct HealthResponse {
 #[derive(Debug, Serialize)]
 pub struct SymbolsResponse {
     pub symbols: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RuntimeModeResponse {
+    pub mode: &'static str,
+    pub mode_label: &'static str,
+    pub status: &'static str,
+    pub symbols: Vec<String>,
+    pub switching_supported: bool,
+    pub source: &'static str,
+    pub last_started_at: DateTime<Utc>,
+    pub last_switched_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -148,6 +162,26 @@ impl MarketStateResponse {
             last_event_time: state.last_event_time,
             last_ingest_time: state.last_ingest_time,
             last_event_age_ms: state::last_event_age_ms(state.last_event_time, now),
+        }
+    }
+}
+
+impl RuntimeModeResponse {
+    pub fn from_snapshot(snapshot: &RuntimeModeSnapshot) -> Self {
+        Self {
+            mode: snapshot.mode.as_str(),
+            mode_label: snapshot.mode.label(),
+            status: snapshot.status.as_str(),
+            symbols: snapshot
+                .symbols
+                .iter()
+                .map(|symbol| symbol.as_str().to_owned())
+                .collect(),
+            switching_supported: snapshot.switching_supported,
+            source: snapshot.source.as_str(),
+            last_started_at: snapshot.last_started_at,
+            last_switched_at: snapshot.last_switched_at,
+            last_error: snapshot.last_error.clone(),
         }
     }
 }

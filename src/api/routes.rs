@@ -5,6 +5,7 @@ use super::handlers;
 pub fn router() -> Router<super::AppState> {
     Router::new()
         .route("/health", get(handlers::health))
+        .route("/runtime/mode", get(handlers::runtime_mode))
         .route("/metrics", get(handlers::metrics))
         .route("/pipeline/health", get(handlers::pipeline_health))
         .route("/dashboard/summary", get(handlers::dashboard_summary))
@@ -28,11 +29,14 @@ mod tests {
     use crate::{
         api::AppState,
         config::{
-            DetectorSettings, HealthScoreSettings, HealthStatusThresholds, SeverityPenaltySettings,
+            DetectorSettings, HealthScoreSettings, HealthStatusThresholds, IngestionMode,
+            SeverityPenaltySettings,
         },
+        runtime::RuntimeModeSnapshot,
         storage::RedisCache,
         telemetry::InternalCounters,
     };
+    use chrono::TimeZone;
     use rust_decimal::Decimal;
 
     #[tokio::test]
@@ -50,6 +54,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_mode_route_returns_ok() {
+        let response = get("/runtime/mode", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn runtime_mode_route_returns_expected_fields() {
+        let response = get("/runtime/mode", unavailable_state()).await;
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["mode"], "replay");
+        assert_eq!(body["mode_label"], "Replay Demo");
+        assert_eq!(body["status"], "running");
+        assert_eq!(body["symbols"], serde_json::json!(["BTCUSDT"]));
+        assert_eq!(body["switching_supported"], false);
+        assert_eq!(body["source"], "config");
+        assert!(body["last_started_at"].is_string());
+        assert!(body["last_switched_at"].is_null());
+        assert!(body["last_error"].is_null());
+    }
+
+    #[tokio::test]
     async fn metrics_route_returns_prometheus_metrics() {
         let counters = InternalCounters::default();
         counters.increment_parse_errors();
@@ -62,6 +93,7 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
+                runtime_mode: runtime_mode_snapshot(),
                 counters,
                 test_recent_anomalies: None,
             },
@@ -102,6 +134,7 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
+                runtime_mode: runtime_mode_snapshot(),
                 counters,
                 test_recent_anomalies: None,
             },
@@ -200,6 +233,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
+            runtime_mode: runtime_mode_snapshot(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         }
@@ -211,9 +245,18 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
+            runtime_mode: runtime_mode_snapshot(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
         }
+    }
+
+    fn runtime_mode_snapshot() -> RuntimeModeSnapshot {
+        RuntimeModeSnapshot::from_startup_config(
+            IngestionMode::Replay,
+            &[crate::domain::Symbol::new("BTCUSDT").unwrap()],
+            chrono::Utc.with_ymd_and_hms(2026, 7, 2, 12, 0, 0).unwrap(),
+        )
     }
 
     fn unused_test_pool() -> sqlx::PgPool {

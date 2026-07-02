@@ -2,6 +2,7 @@ use sqlx::PgPool;
 
 use crate::{
     config::{DetectorSettings, HealthScoreSettings},
+    runtime::RuntimeModeSnapshot,
     storage::RedisCache,
     telemetry::InternalCounters,
 };
@@ -15,6 +16,7 @@ pub struct AppState {
     pub redis_cache: RedisCache,
     pub detector_settings: DetectorSettings,
     pub health_settings: HealthScoreSettings,
+    pub runtime_mode: RuntimeModeSnapshot,
     pub counters: InternalCounters,
     #[cfg(test)]
     pub test_recent_anomalies: Option<Vec<AnomalyEvent>>,

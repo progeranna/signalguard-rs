@@ -6,6 +6,7 @@ pub mod domain;
 mod exchange;
 pub mod health;
 pub mod ingestion;
+pub mod runtime;
 mod state;
 pub mod storage;
 pub mod telemetry;

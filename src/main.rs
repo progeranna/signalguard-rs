@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
+use chrono::Utc;
 use signalguard_rs::{
     api::{self, AppState},
     config::{IngestionMode, Settings},
     ingestion,
+    runtime::RuntimeModeSnapshot,
     storage::{self, RedisCache},
     telemetry::{self, InternalCounters},
 };
@@ -99,11 +101,18 @@ fn build_app_state(
     settings: &Settings,
     counters: &InternalCounters,
 ) -> AppState {
+    let started_at = Utc::now();
+
     AppState {
         pg_pool: postgres_pool.clone(),
         redis_cache: redis_cache.clone(),
         detector_settings: settings.detectors.clone(),
         health_settings: settings.health.clone(),
+        runtime_mode: RuntimeModeSnapshot::from_startup_config(
+            settings.ingestion.mode,
+            &settings.ingestion.symbols,
+            started_at,
+        ),
         counters: counters.clone(),
     }
 }
