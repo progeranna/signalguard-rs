@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import type { KeyboardEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Area,
   AreaChart,
@@ -730,18 +731,40 @@ function SymbolHealthShell({
 }
 
 function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
+  const navigate = useNavigate();
   const score = symbol.health?.score ?? null;
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
+  const detailRoute = `/symbols/${symbol.symbol}`;
+
+  function handleOpenSymbol() {
+    navigate(detailRoute);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleOpenSymbol();
+    }
+  }
 
   return (
-    <tr className="border-b border-white/[0.06] last:border-0">
+    <tr
+      tabIndex={0}
+      role="link"
+      aria-label={`Open ${symbol.symbol} detail`}
+      onClick={handleOpenSymbol}
+      onKeyDown={handleKeyDown}
+      className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
+    >
       <td className="py-2.5 pr-4">
-        <Link
-          to={`/symbols/${symbol.symbol}`}
-          className="font-mono text-base font-bold text-slate-50 transition hover:text-cyan-200"
-        >
-          {symbol.symbol}
-        </Link>
+        <div className="inline-flex items-center gap-3">
+          <span className="font-mono text-base font-bold text-slate-50">
+            {symbol.symbol}
+          </span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            View
+          </span>
+        </div>
       </td>
       <td className="py-2.5 pr-4">
         <HealthScore score={score} status={symbol.health?.status} />
@@ -769,44 +792,52 @@ function SymbolHealthCard({ symbol }: { symbol: DashboardSymbolSummary }) {
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
 
   return (
-    <article className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4">
-      <div className="flex items-start justify-between gap-4">
-        <Link
-          to={`/symbols/${symbol.symbol}`}
-          className="font-mono text-lg font-bold text-white transition hover:text-cyan-200"
-        >
-          {symbol.symbol}
-        </Link>
-        <StatusBadge
-          status={statusTone}
-          text={statusLabel(symbol.health?.status)}
-        />
-      </div>
-      <div className="mt-4">
-        <HealthScore
-          score={symbol.health?.score ?? null}
-          status={symbol.health?.status}
-        />
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <MobileSymbolMetric
-          label="Price"
-          value={formatTickerPrice(symbol.state?.last_trade_price)}
-        />
-        <MobileSymbolMetric
-          label="Spread"
-          value={formatTickerPercent(symbol.state?.spread_pct)}
-        />
-        <MobileSymbolMetric
-          label="Trades/min"
-          value={formatOptionalCompact(symbol.state?.trades_per_minute)}
-        />
-        <MobileSymbolMetric
-          label="Age"
-          value={formatOptionalAge(symbol.state?.last_event_age_ms)}
-        />
-      </div>
-    </article>
+    <Link
+      to={`/symbols/${symbol.symbol}`}
+      className="block rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 transition hover:border-cyan-400/20 hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+      aria-label={`Open ${symbol.symbol} detail`}
+    >
+      <article>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <p className="font-mono text-lg font-bold text-white">
+              {symbol.symbol}
+            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              View symbol detail
+            </p>
+          </div>
+          <StatusBadge
+            status={statusTone}
+            text={statusLabel(symbol.health?.status)}
+          />
+        </div>
+        <div className="mt-4">
+          <HealthScore
+            score={symbol.health?.score ?? null}
+            status={symbol.health?.status}
+          />
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <MobileSymbolMetric
+            label="Price"
+            value={formatTickerPrice(symbol.state?.last_trade_price)}
+          />
+          <MobileSymbolMetric
+            label="Spread"
+            value={formatTickerPercent(symbol.state?.spread_pct)}
+          />
+          <MobileSymbolMetric
+            label="Trades/min"
+            value={formatOptionalCompact(symbol.state?.trades_per_minute)}
+          />
+          <MobileSymbolMetric
+            label="Age"
+            value={formatOptionalAge(symbol.state?.last_event_age_ms)}
+          />
+        </div>
+      </article>
+    </Link>
   );
 }
 

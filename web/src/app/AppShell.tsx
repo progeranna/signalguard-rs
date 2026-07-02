@@ -5,7 +5,7 @@ import { StatusBadge } from "@/shared/components/StatusBadge";
 
 const navigationItems = [
   { label: "Dashboard", to: "/" },
-  { label: "BTCUSDT", to: "/symbols/BTCUSDT" },
+  { label: "Symbol", to: "/symbols/BTCUSDT" },
   { label: "Anomalies", to: "/anomalies" },
 ];
 
