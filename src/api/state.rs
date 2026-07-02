@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use sqlx::PgPool;
 
 use crate::{
     config::{DetectorSettings, HealthScoreSettings},
+    runtime::RuntimeModeHandle,
+    runtime_supervisor::IngestionSupervisor,
     storage::RedisCache,
     telemetry::InternalCounters,
 };
@@ -15,6 +19,8 @@ pub struct AppState {
     pub redis_cache: RedisCache,
     pub detector_settings: DetectorSettings,
     pub health_settings: HealthScoreSettings,
+    pub runtime_mode: RuntimeModeHandle,
+    pub supervisor: Arc<IngestionSupervisor>,
     pub counters: InternalCounters,
     #[cfg(test)]
     pub test_recent_anomalies: Option<Vec<AnomalyEvent>>,

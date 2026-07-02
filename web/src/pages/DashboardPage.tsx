@@ -11,7 +11,14 @@ import {
   YAxis,
 } from "recharts";
 
-import { useDashboardSummaryQuery } from "@/features/dashboard/api";
+import {
+  useDashboardSummaryQuery,
+  useMarketTimelineQuery,
+} from "@/features/dashboard/api";
+import {
+  buildCoveredDashboardSymbols,
+  isDashboardSymbolPlaceholder,
+} from "@/features/dashboard/marketOrder";
 import {
   normalizeSelectedSymbol,
   storeSelectedSymbol,
@@ -21,6 +28,7 @@ import type {
   DashboardAnomaly,
   DashboardSummary,
   DashboardSymbolSummary,
+  MarketTimelinePoint,
 } from "@/features/dashboard/types";
 import { ErrorPanel } from "@/shared/components/ErrorPanel";
 import { LoadingSkeleton } from "@/shared/components/LoadingSkeleton";
@@ -43,7 +51,9 @@ type DashboardModalState =
 export function DashboardPage() {
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = summary?.symbols.map((symbol) => symbol.symbol) ?? [];
+  const availableSymbols = buildCoveredDashboardSymbols(summary?.symbols ?? []).map(
+    (symbol) => symbol.symbol,
+  );
   const { selectedSymbol } = useSelectedSymbol(availableSymbols);
 
   return (
@@ -56,7 +66,7 @@ export function DashboardPage() {
         />
       ) : null}
 
-      <MarketSignalShell
+      <MarketTimelineShell
         selectedSignalSymbol={selectedSymbol}
         summary={summary}
         isLoading={dashboardSummaryQuery.isLoading}
@@ -82,7 +92,7 @@ function formatTickerPercent(value: number | null | undefined): string {
   return `${value.toFixed(2)}%`;
 }
 
-function MarketSignalShell({
+function MarketTimelineShell({
   selectedSignalSymbol,
   summary,
   isLoading,
@@ -91,155 +101,169 @@ function MarketSignalShell({
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const symbols = summary?.symbols ?? [];
+  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
   const selectedSymbol = selectSignalSymbol(symbols, selectedSignalSymbol);
-  const selectedAnomalies = selectedSymbol
-    ? (summary?.recent_anomalies ?? []).filter(
-        (anomaly) => anomaly.symbol === selectedSymbol.symbol,
-      )
-    : [];
-  const signalSeries = selectedSymbol
-    ? buildSignalSeries(selectedSymbol, selectedAnomalies)
-    : [];
-  const signalDomain = buildSignalDomain(signalSeries);
-  const signalSeverity = highestAnomalySeverity(selectedAnomalies);
+  const timelineQuery = useMarketTimelineQuery(selectedSymbol?.symbol ?? null);
+  const timelinePoints = buildTimelineChartPoints(timelineQuery.data?.points ?? []);
+  const timelinePriceDomain = buildTimelinePriceDomain(timelinePoints);
+  const timelineTimeDomain = buildTimelineTimeDomain(timelinePoints);
+  const timelineAnomalies = timelineQuery.data?.anomalies ?? [];
+  const visibleTimelineAnomalies = buildVisibleTimelineAnomalies(
+    timelineAnomalies,
+    timelineTimeDomain,
+  );
+  const timelineSeverity = highestAnomalySeverity(timelineAnomalies);
+  const statusText = selectedSymbol ? marketStatusLabel(selectedSymbol) : "No data yet";
+  const statusTone = toStatusTone(selectedSymbol?.health?.status, "neutral");
 
   return (
     <section>
       {isLoading ? (
         <LoadingSkeleton className="h-40" />
-      ) : !selectedSymbol || signalSeries.length === 0 ? (
-        <EmptyBlock message="No monitored symbol state available for the signal preview." />
       ) : (
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_248px]">
           <div className="rounded-xl border border-slate-700/70 bg-slate-950/70 px-3 py-2.5 sm:px-4">
-            <div className="mb-2">
-              <p className="flex flex-wrap items-center gap-2 font-mono text-sm font-bold text-white">
-                <span>{selectedSymbol.symbol}</span>
-                {signalSeverity ? (
-                  <span
-                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
-                      signalSeverity,
-                    )}`}
-                  >
-                    {statusLabel(signalSeverity)} signal
-                  </span>
-                ) : null}
-              </p>
-            </div>
-            <div className="flex min-h-[285px] rounded-xl bg-slate-950/35">
-              <div className="relative min-h-0 flex-1 overflow-hidden">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart
-                    data={signalSeries}
-                    margin={{ top: 4, right: 14, bottom: 2, left: 0 }}
-                  >
-                    <defs>
-                      <linearGradient id="qualitySignalFill" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stopColor="#7EE45B" stopOpacity={0.2} />
-                        <stop offset="100%" stopColor="#7EE45B" stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid
-                      stroke="rgba(100,116,139,0.18)"
-                      strokeDasharray="3 8"
-                      vertical={false}
-                    />
-                    <XAxis
-                      axisLine={false}
-                      dataKey="label"
-                      height={34}
-                      label={{
-                        value: "Preview sequence",
-                        position: "insideBottom",
-                        offset: -2,
-                        fill: "#64748b",
-                        fontSize: 11,
-                      }}
-                      tick={{ fill: "#64748b", fontSize: 11 }}
-                      tickLine={false}
-                      tickMargin={2}
-                    />
-                    <YAxis
-                      axisLine={false}
-                      domain={signalDomain}
-                      label={{
-                        value: "Quality signal",
-                        angle: -90,
-                        position: "insideLeft",
-                        fill: "#64748b",
-                        fontSize: 11,
-                      }}
-                      tick={{ fill: "#64748b", fontSize: 11 }}
-                      tickLine={false}
-                      width={40}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: "#0E1822",
-                        border: "1px solid rgba(148,163,184,0.18)",
-                        borderRadius: "10px",
-                        color: "#e2e8f0",
-                      }}
-                      formatter={(value) => [`${value}`, "Signal"]}
-                      labelFormatter={() => "Summary-backed preview"}
-                    />
-                    {signalSeries
-                      .filter((point) => point.severity)
-                      .map((point) => (
-                        <ReferenceLine
-                          key={`marker-${point.label}`}
-                          stroke={anomalySeverityColor(point.severity)}
-                          strokeDasharray="3 4"
-                          strokeOpacity={0.85}
-                          x={point.label}
-                        />
-                      ))}
-                    <Area
-                      baseValue={signalDomain[0]}
-                      dataKey="signal"
-                      fill="url(#qualitySignalFill)"
-                      isAnimationActive={false}
-                      stroke="#7EE45B"
-                      strokeWidth={2.4}
-                      type="monotone"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+            {selectedSymbol ? (
+              <>
+                <div className="mb-2">
+                  <div className="flex flex-wrap items-center gap-2 font-mono text-sm font-bold text-white">
+                    <span>{selectedSymbol.symbol}</span>
+                    {timelineSeverity ? (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
+                          timelineSeverity,
+                        )}`}
+                      >
+                        {statusLabel(timelineSeverity)} anomaly
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                {timelineQuery.isError ? (
+                  <ErrorPanel
+                    title="Market timeline unavailable"
+                    message={buildErrorMessage(timelineQuery.error)}
+                    onRetry={() => void timelineQuery.refetch()}
+                  />
+                ) : timelineQuery.isLoading ? (
+                  <LoadingSkeleton className="h-[320px]" />
+                ) : timelinePoints.length === 0 ? (
+                  <div className="border-y border-white/10 px-2 py-10 text-sm leading-6 text-slate-400">
+                    Waiting for market data
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex min-h-[285px] rounded-xl bg-slate-950/35">
+                      <div className="relative min-h-0 flex-1 overflow-hidden">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart
+                            data={timelinePoints}
+                            margin={{ top: 4, right: 14, bottom: 2, left: 0 }}
+                          >
+                            <defs>
+                              <linearGradient id="marketTimelineFill" x1="0" x2="0" y1="0" y2="1">
+                                <stop offset="0%" stopColor="#7EE45B" stopOpacity={0.2} />
+                                <stop offset="100%" stopColor="#7EE45B" stopOpacity={0.02} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid
+                              stroke="rgba(100,116,139,0.18)"
+                              strokeDasharray="3 8"
+                              vertical={false}
+                            />
+                            <XAxis
+                              axisLine={false}
+                              dataKey="timestampMs"
+                              domain={timelineTimeDomain}
+                              height={34}
+                              label={{
+                                value: "Time",
+                                position: "insideBottom",
+                                offset: -2,
+                                fill: "#64748b",
+                                fontSize: 11,
+                              }}
+                              tick={{ fill: "#64748b", fontSize: 11 }}
+                              tickFormatter={formatTimelineTick}
+                              tickLine={false}
+                              tickMargin={2}
+                              type="number"
+                            />
+                            <YAxis
+                              axisLine={false}
+                              domain={timelinePriceDomain}
+                              label={{
+                                value: "Price",
+                                angle: -90,
+                                position: "insideLeft",
+                                fill: "#64748b",
+                                fontSize: 11,
+                              }}
+                              tick={{ fill: "#64748b", fontSize: 11 }}
+                              tickFormatter={formatTimelinePriceTick}
+                              tickLine={false}
+                              type="number"
+                              width={58}
+                            />
+                            <Tooltip content={<TimelineTooltip anomalies={timelineAnomalies} />} />
+                            {visibleTimelineAnomalies.map((anomaly) => (
+                              <ReferenceLine
+                                key={anomaly.id}
+                                stroke={anomalySeverityColor(anomaly.severity)}
+                                strokeDasharray="3 4"
+                                strokeOpacity={0.55}
+                                x={anomaly.timestampMs}
+                              />
+                            ))}
+                            <Area
+                              dataKey="price"
+                              fill="url(#marketTimelineFill)"
+                              isAnimationActive={false}
+                              stroke="#7EE45B"
+                              strokeWidth={2.4}
+                              type="monotone"
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <EmptyBlock message="Waiting for market data" />
+            )}
           </div>
 
           <aside className="flex h-full min-h-[285px] flex-col rounded-xl border border-white/10 bg-white/[0.035] px-3 py-3">
             <div className="border-b border-white/10 pb-1.5">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <p className="font-mono text-sm font-bold text-white">
-                  {selectedSymbol.symbol}
+                  {selectedSymbol?.symbol ?? "Unknown market"}
                 </p>
                 <StatusBadge
-                  status={toStatusTone(selectedSymbol.health?.status, "neutral")}
-                  text={selectedSymbol.health?.status ?? "Unknown"}
+                  status={statusTone}
+                  text={statusText}
                 />
               </div>
             </div>
             <div className="mt-3 flex flex-1 flex-col justify-evenly gap-2">
               <SignalSnapshotMetric
                 label="Price"
-                value={formatTickerPrice(selectedSymbol.state?.last_trade_price)}
+                value={formatTickerPrice(selectedSymbol?.state?.last_trade_price)}
               />
               <SignalSnapshotMetric
                 label="Spread"
-                value={formatTickerPercent(selectedSymbol.state?.spread_pct)}
+                value={formatTickerPercent(selectedSymbol?.state?.spread_pct)}
               />
               <SignalSnapshotMetric
                 label="Trades/min"
-                value={formatOptionalCompact(selectedSymbol.state?.trades_per_minute)}
+                value={formatOptionalCompact(selectedSymbol?.state?.trades_per_minute)}
               />
               <SignalSnapshotMetric
                 label="Freshness"
                 value={formatOptionalAge(
-                  selectedSymbol.state?.last_event_age_ms ??
-                    summary?.pipeline.last_message_age_ms,
+                  selectedSymbol?.state?.last_event_age_ms ?? summary?.pipeline.last_message_age_ms,
                 )}
               />
             </div>
@@ -247,6 +271,71 @@ function MarketSignalShell({
         </div>
       )}
     </section>
+  );
+}
+
+function TimelineTooltip({
+  active,
+  anomalies,
+  label,
+  payload,
+}: {
+  active?: boolean;
+  anomalies: DashboardAnomaly[];
+  label?: number;
+  payload?: Array<{ payload: MarketTimelineChartPoint }>;
+}) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const point = payload[0]?.payload;
+
+  if (!point) {
+    return null;
+  }
+
+  const pointAnomalies = anomalies.filter((anomaly) => {
+    const anomalyTime = Date.parse(anomaly.event_time || anomaly.created_at);
+
+    return Number.isFinite(anomalyTime) && Math.abs(anomalyTime - point.timestampMs) <= 15_000;
+  });
+
+  return (
+    <div
+      style={{
+        background: "#0E1822",
+        border: "1px solid rgba(148,163,184,0.18)",
+        borderRadius: "10px",
+        color: "#e2e8f0",
+      }}
+      className="min-w-[14rem] px-3 py-2.5 text-sm"
+    >
+      <p className="font-semibold text-white">
+        {formatTimelineTooltipTimestamp(typeof label === "number" ? new Date(label).toISOString() : point.timestamp)}
+      </p>
+      <div className="mt-2 space-y-1 text-slate-300">
+        <p>Price: {point.priceLabel}</p>
+        {point.spreadPct !== null ? <p>Spread: {formatTickerPercent(point.spreadPct)}</p> : null}
+        {point.tradesPerMinute !== null ? (
+          <p>Trades/min: {formatOptionalCompact(point.tradesPerMinute)}</p>
+        ) : null}
+        {point.lastEventAgeMs !== null ? (
+          <p>Freshness: {formatOptionalAge(point.lastEventAgeMs)}</p>
+        ) : null}
+        {pointAnomalies.length > 0 ? (
+          <p>
+            Anomalies:{" "}
+            {pointAnomalies
+              .map(
+                (anomaly) =>
+                  `${formatAnomalyType(anomaly.anomaly_type)} (${statusLabel(anomaly.severity)})`,
+              )
+              .join(", ")}
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -269,7 +358,7 @@ function DashboardTablesGrid({
   isLoading: boolean;
 }) {
   const [modalState, setModalState] = useState<DashboardModalState>(null);
-  const symbols = summary?.symbols ?? [];
+  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
   const anomalies = summary?.recent_anomalies ?? [];
 
   function isKnownSummarySymbol(symbol: string): boolean {
@@ -355,14 +444,14 @@ function SymbolHealthShell({
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const symbols = summary?.symbols ?? [];
+  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
   const previewSymbols = symbols.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
 
   return (
     <section className="space-y-3">
       <SectionTitle
-        title="Symbol Health"
-        subtitle="Current health signals for monitored symbols."
+        title="Market Health"
+        subtitle="Current health signals for monitored markets."
         action={
           symbols.length > DASHBOARD_TABLE_PREVIEW_LIMIT ? (
             <button
@@ -383,7 +472,7 @@ function SymbolHealthShell({
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Market</th>
                   <th className="px-2 py-3 pr-4">Health Score</th>
                   <th className="px-2 py-3 pr-4">Last Price</th>
                   <th className="px-2 py-3 pr-4">Spread</th>
@@ -413,7 +502,7 @@ function SymbolHealthShell({
           </div>
         </>
       ) : (
-        <EmptyBlock message="No monitored symbols available." />
+        <EmptyBlock message="No monitored markets available." />
       )}
     </section>
   );
@@ -428,6 +517,7 @@ function SymbolHealthTableRow({
 }) {
   const score = symbol.health?.score ?? null;
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
+  const statusText = marketStatusLabel(symbol);
 
   function handleOpenSymbol() {
     onOpenSymbolDetail(symbol.symbol);
@@ -444,7 +534,7 @@ function SymbolHealthTableRow({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${symbol.symbol} detail`}
+      aria-label={`Open ${symbol.symbol} market detail`}
       onClick={handleOpenSymbol}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
@@ -474,7 +564,7 @@ function SymbolHealthTableRow({
       <td className="px-2 py-3 text-right">
         <StatusBadge
           status={statusTone}
-          text={statusLabel(symbol.health?.status)}
+          text={statusText}
         />
       </td>
     </tr>
@@ -489,6 +579,7 @@ function SymbolHealthCard({
   symbol: DashboardSymbolSummary;
 }) {
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
+  const statusText = marketStatusLabel(symbol);
 
   return (
     <button
@@ -497,7 +588,7 @@ function SymbolHealthCard({
         onOpenSymbolDetail(symbol.symbol);
       }}
       className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      aria-label={`Open ${symbol.symbol} detail`}
+      aria-label={`Open ${symbol.symbol} market detail`}
     >
       <article>
         <div className="flex items-start justify-between gap-4">
@@ -506,12 +597,12 @@ function SymbolHealthCard({
               {symbol.symbol}
             </p>
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              View symbol detail
+              View market detail
             </p>
           </div>
           <StatusBadge
             status={statusTone}
-            text={statusLabel(symbol.health?.status)}
+            text={statusText}
           />
         </div>
         <div className="mt-4">
@@ -551,13 +642,13 @@ function HealthScore({
   status: string | null | undefined;
 }) {
   const tone = healthScoreTone(score, status);
-  const width = score === null ? 18 : Math.max(score, 4);
+  const width = score === null ? 0 : Math.max(score, 4);
 
   return (
     <div className="min-w-28">
       <div className="flex items-center gap-3">
         <span className={`text-lg font-extrabold ${healthScoreTextClass(tone)}`}>
-          {score ?? "Unknown"}
+          {score ?? "—"}
         </span>
         <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/70">
           <div
@@ -599,7 +690,7 @@ function RecentAnomaliesShell({
     <section className="space-y-3">
       <SectionTitle
         title="Recent Anomalies"
-        subtitle="Latest data-quality events across monitored symbols."
+        subtitle="Latest data-quality events across monitored markets."
         action={
           anomalies.length > DASHBOARD_TABLE_PREVIEW_LIMIT ? (
             <button
@@ -621,7 +712,7 @@ function RecentAnomaliesShell({
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   <th className="px-2 py-3 pr-4">Time</th>
-                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Market</th>
                   <th className="px-2 py-3 pr-4">Type</th>
                   <th className="px-2 py-3 pr-4">Severity</th>
                   <th className="px-2 py-3 pr-4">Observed</th>
@@ -680,7 +771,7 @@ function AnomalyTableRow({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${anomaly.symbol} detail`}
+      aria-label={`Open ${anomaly.symbol} market detail`}
       onClick={handleOpenSymbol}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
@@ -723,7 +814,7 @@ function AnomalyCard({
       type="button"
       onClick={() => onOpenSymbolDetail(anomaly.symbol)}
       className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      aria-label={`Open ${anomaly.symbol} detail`}
+      aria-label={`Open ${anomaly.symbol} market detail`}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -792,7 +883,7 @@ function AllAnomaliesModal({
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Market</th>
                   <th className="px-2 py-3 pr-4">Type</th>
                   <th className="px-2 py-3 pr-4">Severity</th>
                   <th className="px-2 py-3 pr-4">Observed</th>
@@ -855,7 +946,7 @@ function AnomalyModalTableRow({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${anomaly.symbol} detail`}
+      aria-label={`Open ${anomaly.symbol} market detail`}
       onClick={handleOpenSymbol}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
@@ -901,7 +992,7 @@ function AnomalyModalCard({
       type="button"
       onClick={() => onOpenSymbolDetail(anomaly.symbol)}
       className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      aria-label={`Open ${anomaly.symbol} detail`}
+      aria-label={`Open ${anomaly.symbol} market detail`}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -962,8 +1053,8 @@ function AllSymbolHealthModal({
 }) {
   return (
     <DashboardTableModal
-      title="All symbol health"
-      subtitle="Full available symbol list from the current dashboard summary."
+      title="All markets"
+      subtitle="Full available market list from the current dashboard summary."
       dialogId="all-symbol-health-title"
       onClose={onClose}
     >
@@ -973,7 +1064,7 @@ function AllSymbolHealthModal({
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Market</th>
                   <th className="px-2 py-3 pr-4">Health Score</th>
                   <th className="px-2 py-3 pr-4">Last Price</th>
                   <th className="px-2 py-3 pr-4">Spread</th>
@@ -1005,7 +1096,7 @@ function AllSymbolHealthModal({
         </>
       ) : (
         <div className="border-y border-white/10 px-2 py-6 text-sm text-slate-400">
-          No monitored symbols available.
+          No monitored markets available.
         </div>
       )}
     </DashboardTableModal>
@@ -1021,6 +1112,7 @@ function SymbolHealthModalTableRow({
 }) {
   const score = symbol.health?.score ?? null;
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
+  const statusText = marketStatusLabel(symbol);
 
   return (
     <SymbolHealthTableRowShell
@@ -1046,7 +1138,7 @@ function SymbolHealthModalTableRow({
           <td className="px-2 py-3 text-right">
             <StatusBadge
               status={statusTone}
-              text={statusLabel(symbol.health?.status)}
+              text={statusText}
             />
           </td>
         </>
@@ -1079,7 +1171,7 @@ function SymbolHealthTableRowShell({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${symbol.symbol} detail`}
+      aria-label={`Open ${symbol.symbol} market detail`}
       onClick={handleOpenSymbol}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
@@ -1129,12 +1221,13 @@ function SymbolDetailModal({
       )
     : [];
   const statusTone = toStatusTone(selectedSymbol?.health?.status, "neutral");
-  const titleSymbol = selectedSymbol?.symbol ?? normalizedSymbol ?? "Unknown symbol";
+  const titleSymbol = selectedSymbol?.symbol ?? normalizedSymbol ?? "Unknown market";
+  const statusText = selectedSymbol ? marketStatusLabel(selectedSymbol) : "No data yet";
 
   return (
     <DashboardTableModal
-      title={`${titleSymbol} details`}
-      subtitle="Current symbol state from the dashboard summary."
+      title={`${titleSymbol} market details`}
+      subtitle="Current market state from the dashboard summary."
       dialogId="symbol-detail-title"
       onClose={onClose}
       secondaryAction={
@@ -1144,7 +1237,7 @@ function SymbolDetailModal({
             onClick={onBackToAllSymbols ?? onBackToAllAnomalies}
             className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
           >
-            {onBackToAllSymbols ? "Back to all symbols" : "Back to all anomalies"}
+            {onBackToAllSymbols ? "Back to all markets" : "Back to all anomalies"}
           </button>
         ) : null
       }
@@ -1157,14 +1250,14 @@ function SymbolDetailModal({
             </p>
             <StatusBadge
               status={statusTone}
-              text={statusLabel(selectedSymbol.health?.status)}
+              text={statusText}
             />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <SymbolDetailMetric
               label="Health"
-              value={selectedSymbol.health?.score?.toString() ?? "Unknown"}
+              value={selectedSymbol.health?.score?.toString() ?? "—"}
             />
             <SymbolDetailMetric
               label="Price"
@@ -1198,8 +1291,8 @@ function SymbolDetailModal({
 
           <section className="space-y-3">
             <SectionTitle
-              title="Recent symbol anomalies"
-              subtitle="Quality events for this symbol in the current summary."
+              title="Recent market anomalies"
+              subtitle="Quality events for this market in the current summary."
             />
             {symbolAnomalies.length > 0 ? (
               <>
@@ -1233,12 +1326,12 @@ function SymbolDetailModal({
                 </div>
               </>
             ) : (
-              <EmptyBlock message="No recent anomalies for this symbol." />
+              <EmptyBlock message="No recent anomalies for this market." />
             )}
           </section>
         </div>
       ) : (
-        <EmptyBlock message="Symbol not found in the current dashboard summary." />
+        <EmptyBlock message="Market not found in the current dashboard summary." />
       )}
     </DashboardTableModal>
   );
@@ -1403,75 +1496,102 @@ function selectSignalSymbol(
     symbols.find(
       (symbol) => normalizeSelectedSymbol(symbol.symbol) === normalizedPreferredSymbol,
     ) ??
-    symbols.find((symbol) => normalizeSelectedSymbol(symbol.symbol) === "BTCUSDT") ??
+    symbols.find(
+      (symbol) =>
+        normalizeSelectedSymbol(symbol.symbol) === "BTCUSDT" &&
+        !isDashboardSymbolPlaceholder(symbol),
+    ) ??
     symbols[0] ??
     null
   );
 }
 
-type SignalPoint = {
-  label: string;
-  signal: number;
-  severity?: DashboardAnomaly["severity"];
+type MarketTimelineChartPoint = {
+  timestamp: string;
+  timestampMs: number;
+  price: number;
+  priceLabel: string;
+  spreadPct: number | null;
+  tradesPerMinute: number | null;
+  lastEventAgeMs: number | null;
 };
 
-function buildSignalSeries(
-  symbol: DashboardSymbolSummary,
-  anomalies: DashboardAnomaly[],
-): SignalPoint[] {
-  const score = symbol.health?.score ?? 55;
-  const spread = symbol.state?.spread_pct ?? 0;
-  const tradeRate = symbol.state?.trades_per_minute ?? 0;
-  const agePenalty = Math.min((symbol.state?.last_event_age_ms ?? 0) / 30_000, 8);
-  const anomalyPenalty = Math.min(anomalies.length * 3, 12);
-  const base = clamp(score - spread * 20 - agePenalty - anomalyPenalty, 18, 94);
-  const activity = clamp(tradeRate / 12, 0, 7);
-  const statusLift =
-    symbol.health?.status === "healthy"
-      ? 4
-      : symbol.health?.status === "degraded"
-        ? -3
-        : symbol.health?.status === "unhealthy"
-          ? -9
-          : 0;
+function buildTimelineChartPoints(points: MarketTimelinePoint[]): MarketTimelineChartPoint[] {
+  return points
+    .map((point) => {
+      const timestampMs = Date.parse(point.timestamp);
+      const price = Number(point.price);
 
-  const anomalySlots = anomalies.slice(0, 5).map((anomaly, index) => ({
-    slot: Math.round(((index + 1) * 8) / (Math.min(anomalies.length, 5) + 1)),
-    severity: anomaly.severity,
-  }));
+      if (!Number.isFinite(timestampMs) || !Number.isFinite(price)) {
+        return null;
+      }
 
-  return [
-    ["S1", clamp(base - 6 + statusLift, 6, 98)],
-    ["S2", clamp(base - 1 + activity, 6, 98)],
-    ["S3", clamp(base + 4 + statusLift / 2, 6, 98)],
-    ["S4", clamp(base + 1 - anomalyPenalty / 2, 6, 98)],
-    ["S5", clamp(base + 6 - agePenalty, 6, 98)],
-    ["S6", clamp(base + 2 + activity / 2, 6, 98)],
-    ["S7", clamp(base + statusLift - anomalyPenalty / 3, 6, 98)],
-    ["S8", clamp(base + 5 - spread * 8, 6, 98)],
-  ].map(([label, signal], index) => ({
-    label: String(label),
-    severity: anomalySlots.find((marker) => marker.slot === index + 1)?.severity,
-    signal: Number(signal),
-  }));
+      return {
+        timestamp: point.timestamp,
+        timestampMs,
+        price,
+        priceLabel: point.price,
+        spreadPct: point.spread_pct,
+        tradesPerMinute: point.trades_per_minute,
+        lastEventAgeMs: point.last_event_age_ms,
+      } satisfies MarketTimelineChartPoint;
+    })
+    .filter((point): point is MarketTimelineChartPoint => point !== null);
 }
 
-function buildSignalDomain(series: SignalPoint[]): [number, number] {
-  if (series.length === 0) {
-    return [0, 100];
+function buildTimelinePriceDomain(points: MarketTimelineChartPoint[]): [number, number] {
+  if (points.length === 0) {
+    return [0, 1];
   }
 
-  const values = series.map((point) => point.signal);
+  const values = points.map((point) => point.price);
   const low = Math.min(...values);
   const high = Math.max(...values);
-  const range = Math.max(high - low, 1);
-  const targetRange = Math.max(range + 2, 8);
-  const midpoint = (low + high) / 2;
+  const range = Math.max(high - low, 0.0001);
+  const padding = Math.max(range * 0.08, Math.abs(high) * 0.002, 0.01);
 
-  return [
-    clamp(Math.floor(midpoint - targetRange / 2), 0, 100),
-    clamp(Math.ceil(midpoint + targetRange / 2), 0, 100),
-  ];
+  return [low - padding, high + padding];
+}
+
+function buildTimelineTimeDomain(points: MarketTimelineChartPoint[]): [number, number] {
+  if (points.length === 0) {
+    const now = Date.now();
+
+    return [now - 60_000, now];
+  }
+
+  if (points.length === 1) {
+    const timestamp = points[0].timestampMs;
+
+    return [timestamp - 60_000, timestamp + 60_000];
+  }
+
+  return [points[0].timestampMs, points[points.length - 1].timestampMs];
+}
+
+function buildVisibleTimelineAnomalies(
+  anomalies: DashboardAnomaly[],
+  timeDomain: [number, number],
+): Array<DashboardAnomaly & { timestampMs: number }> {
+  return anomalies
+    .map((anomaly) => {
+      const timestampMs = Date.parse(anomaly.event_time || anomaly.created_at);
+
+      if (!Number.isFinite(timestampMs)) {
+        return null;
+      }
+
+      return {
+        ...anomaly,
+        timestampMs,
+      };
+    })
+    .filter(
+      (anomaly): anomaly is DashboardAnomaly & { timestampMs: number } =>
+        anomaly !== null &&
+        anomaly.timestampMs >= timeDomain[0] &&
+        anomaly.timestampMs <= timeDomain[1],
+    );
 }
 
 function anomalySeverityColor(severity: DashboardAnomaly["severity"] | undefined): string {
@@ -1487,8 +1607,19 @@ function anomalySeverityColor(severity: DashboardAnomaly["severity"] | undefined
   }
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
+function formatTimelineTick(value: number): string {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
+
+function formatTimelinePriceTick(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: value >= 1_000 ? 0 : 2,
+  }).format(value);
 }
 
 function highestAnomalySeverity(
@@ -1584,6 +1715,28 @@ function formatAnomalyTime(value: string | null | undefined): string {
   }
 
   return new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function formatTimelineTooltipTimestamp(value: string | null | undefined): string {
+  if (!value) {
+    return "Unavailable";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -1707,6 +1860,14 @@ function statusLabel(value: string | null | undefined): string {
   }
 
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function marketStatusLabel(symbol: DashboardSymbolSummary): string {
+  if (isDashboardSymbolPlaceholder(symbol)) {
+    return "No data yet";
+  }
+
+  return statusLabel(symbol.health?.status);
 }
 
 function buildErrorMessage(error: unknown): string {

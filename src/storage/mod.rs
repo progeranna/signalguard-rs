@@ -10,4 +10,4 @@ pub use anomalies::{get_recent_anomalies, insert_anomaly};
 pub use error::StorageError;
 pub use quotes::insert_quote;
 pub use redis::{CacheError, RedisCache};
-pub use trades::insert_trade;
+pub use trades::{get_recent_trades_for_symbol, insert_trade};
