@@ -1,11 +1,10 @@
 import type { PropsWithChildren, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
 import {
-  DEFAULT_SELECTED_SYMBOL,
   normalizeSelectedSymbol,
   useSelectedSymbol,
 } from "@/features/dashboard/selectedSymbol";
@@ -13,11 +12,6 @@ import type { DashboardSummary } from "@/features/dashboard/types";
 import { statusToneMap, toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 type HeaderMenu = "mode" | "symbol" | null;
-
-const navigationItems = [
-  { label: "Dashboard", to: "/" },
-  { label: "Symbol", to: `/symbols/${DEFAULT_SELECTED_SYMBOL}` },
-];
 
 const headerControlClassName =
   "flex min-w-[11rem] items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40";
@@ -34,15 +28,19 @@ export function AppShell({ children }: PropsWithChildren) {
   const routeSymbolCandidate = location.pathname.startsWith("/symbols/")
     ? location.pathname.slice("/symbols/".length)
     : null;
-  const { selectedSymbol, setSelectedSymbol } = useSelectedSymbol(
-    availableSymbols,
-    routeSymbolCandidate,
-  );
+  const normalizedRouteSymbolCandidate = normalizeSelectedSymbol(routeSymbolCandidate);
+  const { selectedSymbol, setSelectedSymbol } = useSelectedSymbol(availableSymbols);
+  const isKnownRouteSymbol =
+    normalizedRouteSymbolCandidate !== null &&
+    availableSymbols.some(
+      (symbol) => normalizeSelectedSymbol(symbol) === normalizedRouteSymbolCandidate,
+    );
+  const displayedHeaderSymbol =
+    routeSymbolCandidate && !isKnownRouteSymbol ? "Unknown symbol" : selectedSymbol;
   const headerStatus = buildHeaderDataStatus(summary, {
     isError: dashboardSummaryQuery.isError,
     isLoading: dashboardSummaryQuery.isLoading,
   });
-  const symbolRouteTarget = `/symbols/${selectedSymbol || DEFAULT_SELECTED_SYMBOL}`;
 
   useEffect(() => {
     setActiveMenu(null);
@@ -93,38 +91,14 @@ export function AppShell({ children }: PropsWithChildren) {
         <header className="bg-[#050A11]">
           <div className="mx-auto w-full max-w-[1680px] px-4 py-3 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-              <div className="text-base font-bold tracking-tight text-white lg:justify-self-start">
+              <Link
+                to="/"
+                className="text-base font-bold tracking-tight text-white transition hover:text-cyan-100 focus-visible:outline-none focus-visible:text-cyan-100 lg:justify-self-start"
+              >
                 SignalGuard RS
-              </div>
+              </Link>
 
-              <nav className="flex flex-wrap justify-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 lg:justify-self-center">
-                {navigationItems.map((item) => (
-                  <NavLink
-                    key={item.label}
-                    to={item.label === "Symbol" ? symbolRouteTarget : item.to}
-                    className={({ isActive }) => {
-                      const matchesSymbolRoute =
-                        item.label === "Symbol" &&
-                        location.pathname.startsWith("/symbols/");
-                      const matchesDashboardRoute =
-                        item.label === "Dashboard" &&
-                        (location.pathname === "/" || location.pathname === "/dashboard");
-                      const navIsActive = matchesSymbolRoute || matchesDashboardRoute || isActive;
-
-                      return [
-                        "rounded-full border px-3 py-1.5 transition",
-                        navIsActive
-                          ? "border-cyan-400/35 bg-cyan-400/10 text-cyan-100"
-                          : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06]",
-                      ].join(" ");
-                    }}
-                  >
-                    {item.label}
-                  </NavLink>
-                ))}
-              </nav>
-
-              <div className="flex flex-wrap items-center gap-2 lg:min-w-0 lg:flex-nowrap lg:justify-self-end">
+              <div className="flex flex-wrap items-center justify-center gap-2 lg:min-w-0 lg:flex-nowrap lg:justify-self-center">
                 <HeaderSymbolSelector
                   availableSymbols={availableSymbols}
                   isDisabled={dashboardSummaryQuery.isLoading || availableSymbols.length === 0}
@@ -133,7 +107,7 @@ export function AppShell({ children }: PropsWithChildren) {
                   onToggle={() =>
                     setActiveMenu((menu) => (menu === "symbol" ? null : "symbol"))
                   }
-                  selectedSymbol={selectedSymbol}
+                  selectedSymbol={displayedHeaderSymbol}
                   selectorRef={symbolMenuRef}
                 />
                 <HeaderModeSelector
@@ -143,6 +117,9 @@ export function AppShell({ children }: PropsWithChildren) {
                   }
                   selectorRef={modeMenuRef}
                 />
+              </div>
+
+              <div className="flex justify-start lg:justify-end">
                 <HeaderDataStatus status={headerStatus} />
               </div>
             </div>
@@ -174,7 +151,30 @@ function HeaderSymbolSelector({
   selectedSymbol: string;
   selectorRef: RefObject<HTMLDivElement>;
 }) {
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const normalizedSelectedSymbol = normalizeSelectedSymbol(selectedSymbol);
+  const hasKnownSelectedSymbol = availableSymbols.some(
+    (symbol) => normalizeSelectedSymbol(symbol) === normalizedSelectedSymbol,
+  );
+  const trimmedQuery = searchQuery.trim().toUpperCase();
+  const filteredSymbols = trimmedQuery
+    ? availableSymbols.filter((symbol) => symbol.toUpperCase().includes(trimmedQuery))
+    : availableSymbols;
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSearchQuery("");
+      return;
+    }
+
+    searchInputRef.current?.focus();
+  }, [isOpen]);
+
+  function handleSelect(symbol: string) {
+    setSearchQuery("");
+    onSelect(symbol);
+  }
 
   return (
     <div ref={selectorRef} className="relative lg:min-w-0">
@@ -202,9 +202,21 @@ function HeaderSymbolSelector({
           role="menu"
           className="absolute right-0 top-full z-20 mt-2 min-w-[11rem] overflow-hidden rounded-xl border border-white/10 bg-[var(--sg-panel-strong)] shadow-[0_18px_40px_rgba(2,6,23,0.44)]"
         >
+          <div className="border-b border-white/10 px-3 py-2">
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search symbol"
+              className="w-full rounded-lg border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-medium text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+            />
+          </div>
           <div className="max-h-72 overflow-y-auto py-1">
-            {availableSymbols.map((symbol) => {
-              const isSelected = normalizeSelectedSymbol(symbol) === normalizedSelectedSymbol;
+            {filteredSymbols.length > 0 ? filteredSymbols.map((symbol) => {
+              const isSelected =
+                hasKnownSelectedSymbol &&
+                normalizeSelectedSymbol(symbol) === normalizedSelectedSymbol;
 
               return (
                 <button
@@ -212,7 +224,7 @@ function HeaderSymbolSelector({
                   type="button"
                   role="menuitemradio"
                   aria-checked={isSelected}
-                  onClick={() => onSelect(symbol)}
+                  onClick={() => handleSelect(symbol)}
                   className={[
                     "flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left text-sm font-semibold transition",
                     isSelected
@@ -228,7 +240,11 @@ function HeaderSymbolSelector({
                   ) : null}
                 </button>
               );
-            })}
+            }) : (
+              <div className="px-3 py-3 text-sm font-medium text-slate-500">
+                No matching symbols
+              </div>
+            )}
           </div>
         </div>
       ) : null}
