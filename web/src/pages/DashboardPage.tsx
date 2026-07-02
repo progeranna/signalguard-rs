@@ -251,12 +251,11 @@ function MarketSignalShell({
     <section className="overflow-hidden border-y border-white/10 bg-[var(--sg-panel)] px-4 py-2.5 shadow-[0_14px_34px_rgba(2,6,23,0.18)] sm:px-5">
       <div className="flex flex-col gap-2 border-b border-white/10 pb-2.5 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-sm font-semibold text-slate-400">Market Signal View</p>
-          <h3 className="mt-1 text-xl font-bold tracking-tight text-white">
-            Summary-backed signal preview
+          <h3 className="text-xl font-bold tracking-tight text-white">
+            {selectedSymbol?.symbol ?? selectedSignalSymbol} Signal View
           </h3>
           <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-400">
-            Latest summary-backed preview, not historical price data.
+            Current market-data quality signal based on price, spread, freshness, throughput, and anomaly markers.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -298,7 +297,6 @@ function MarketSignalShell({
                     </span>
                   ) : null}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-400">Latest state with anomaly markers</p>
               </div>
             </div>
 
@@ -324,7 +322,14 @@ function MarketSignalShell({
                       <XAxis
                         axisLine={false}
                         dataKey="label"
-                        height={18}
+                        height={34}
+                        label={{
+                          value: "Preview sequence",
+                          position: "insideBottom",
+                          offset: -2,
+                          fill: "#64748b",
+                          fontSize: 11,
+                        }}
                         tick={{ fill: "#64748b", fontSize: 11 }}
                         tickLine={false}
                         tickMargin={2}
@@ -332,9 +337,16 @@ function MarketSignalShell({
                       <YAxis
                         axisLine={false}
                         domain={signalDomain}
+                        label={{
+                          value: "Quality signal",
+                          angle: -90,
+                          position: "insideLeft",
+                          fill: "#64748b",
+                          fontSize: 11,
+                        }}
                         tick={{ fill: "#64748b", fontSize: 11 }}
                         tickLine={false}
-                        width={28}
+                        width={40}
                       />
                       <Tooltip
                         contentStyle={{
