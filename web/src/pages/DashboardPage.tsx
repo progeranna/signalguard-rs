@@ -33,7 +33,7 @@ import {
 } from "@/shared/lib/format";
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
-const DASHBOARD_ANOMALY_PREVIEW_LIMIT = 20;
+const DASHBOARD_TABLE_PREVIEW_LIMIT = 7;
 
 export function DashboardPage() {
   const dashboardSummaryQuery = useDashboardSummaryQuery();
@@ -279,12 +279,25 @@ function SymbolHealthShell({
   isLoading: boolean;
 }) {
   const symbols = summary?.symbols ?? [];
+  const previewSymbols = symbols.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
     <section className="space-y-3">
       <SectionTitle
         title="Symbol Health"
         subtitle="Current health signals for monitored symbols."
+        action={
+          symbols.length > DASHBOARD_TABLE_PREVIEW_LIMIT ? (
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-3 py-1.5 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+            >
+              View all
+            </button>
+          ) : null
+        }
       />
       {isLoading ? (
         <LoadingSkeleton className="h-44" />
@@ -303,26 +316,38 @@ function SymbolHealthShell({
                 </tr>
               </thead>
               <tbody>
-                {symbols.map((symbol) => (
+                {previewSymbols.map((symbol) => (
                   <SymbolHealthTableRow key={symbol.symbol} symbol={symbol} />
                 ))}
               </tbody>
             </table>
           </div>
           <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
-            {symbols.map((symbol) => (
+            {previewSymbols.map((symbol) => (
               <SymbolHealthCard key={symbol.symbol} symbol={symbol} />
             ))}
           </div>
         </>
       ) : (
-        <EmptyBlock message="No symbol health data available" />
+        <EmptyBlock message="No monitored symbols available." />
       )}
+      {isModalOpen ? (
+        <AllSymbolHealthModal
+          symbols={symbols}
+          onClose={() => setIsModalOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }
 
-function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
+function SymbolHealthTableRow({
+  symbol,
+  onNavigate,
+}: {
+  symbol: DashboardSymbolSummary;
+  onNavigate?: () => void;
+}) {
   const navigate = useNavigate();
   const score = symbol.health?.score ?? null;
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
@@ -330,6 +355,7 @@ function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
 
   function handleOpenSymbol() {
     storeSelectedSymbol(symbol.symbol);
+    onNavigate?.();
     navigate(detailRoute);
   }
 
@@ -381,13 +407,22 @@ function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
   );
 }
 
-function SymbolHealthCard({ symbol }: { symbol: DashboardSymbolSummary }) {
+function SymbolHealthCard({
+  symbol,
+  onNavigate,
+}: {
+  symbol: DashboardSymbolSummary;
+  onNavigate?: () => void;
+}) {
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
 
   return (
     <Link
       to={`/symbols/${symbol.symbol}`}
-      onClick={() => storeSelectedSymbol(symbol.symbol)}
+      onClick={() => {
+        storeSelectedSymbol(symbol.symbol);
+        onNavigate?.();
+      }}
       className="block py-4 transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
       aria-label={`Open ${symbol.symbol} detail`}
     >
@@ -481,7 +516,7 @@ function RecentAnomaliesShell({
   isLoading: boolean;
 }) {
   const anomalies = summary?.recent_anomalies ?? [];
-  const previewAnomalies = anomalies.slice(0, DASHBOARD_ANOMALY_PREVIEW_LIMIT);
+  const previewAnomalies = anomalies.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
@@ -490,7 +525,7 @@ function RecentAnomaliesShell({
         title="Recent Anomalies"
         subtitle="Latest data-quality events across monitored symbols."
         action={
-          anomalies.length > 0 ? (
+          anomalies.length > DASHBOARD_TABLE_PREVIEW_LIMIT ? (
             <button
               type="button"
               onClick={() => setIsModalOpen(true)}
@@ -505,7 +540,7 @@ function RecentAnomaliesShell({
         <LoadingSkeleton className="h-44" />
       ) : anomalies.length > 0 ? (
         <>
-          <div className="hidden max-h-72 overflow-y-auto border-y border-white/10 lg:block">
+          <div className="hidden border-y border-white/10 lg:block">
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -531,7 +566,7 @@ function RecentAnomaliesShell({
           </div>
         </>
       ) : (
-        <EmptyBlock message="No recent anomalies. Detector output is clean for the current summary window." />
+        <EmptyBlock message="No anomalies detected in the current summary." />
       )}
       {isModalOpen ? (
         <AllAnomaliesModal
@@ -637,92 +672,57 @@ function AllAnomaliesModal({
   anomalies: DashboardAnomaly[];
   onClose: () => void;
 }) {
-  useEffect(() => {
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose]);
-
   return (
-    <div
-      role="presentation"
-      onMouseDown={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm"
+    <DashboardTableModal
+      title="All anomalies"
+      subtitle="Full available anomaly list from the current dashboard summary."
+      dialogId="all-anomalies-title"
+      onClose={onClose}
     >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="all-anomalies-title"
-        onMouseDown={(event) => event.stopPropagation()}
-        className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[var(--sg-panel)] shadow-[0_24px_80px_rgba(2,6,23,0.6)]"
-      >
-        <div className="flex flex-col gap-4 border-b border-white/10 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h2 id="all-anomalies-title" className="text-xl font-bold tracking-tight text-white">
-              All anomalies
-            </h2>
-            <p className="mt-1 text-sm leading-5 text-slate-400">
-              Full available anomaly list from the current dashboard summary.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="self-start rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="overflow-y-auto px-5 py-4">
-          {anomalies.length > 0 ? (
-            <>
-              <div className="hidden overflow-hidden border-y border-white/10 lg:block">
-                <table className="w-full border-collapse text-left">
-                  <thead>
-                    <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      <th className="px-2 py-3 pr-4">Symbol</th>
-                      <th className="px-2 py-3 pr-4">Type</th>
-                      <th className="px-2 py-3 pr-4">Severity</th>
-                      <th className="px-2 py-3 pr-4">Observed</th>
-                      <th className="px-2 py-3 pr-4">Threshold</th>
-                      <th className="px-2 py-3 pr-4">Detected at</th>
-                      <th className="px-2 py-3">Context</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {anomalies.map((anomaly) => (
-                      <AnomalyModalTableRow key={anomaly.id} anomaly={anomaly} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
+      {anomalies.length > 0 ? (
+        <>
+          <div className="hidden overflow-hidden border-y border-white/10 lg:block">
+            <table className="w-full border-collapse text-left">
+              <thead>
+                <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Type</th>
+                  <th className="px-2 py-3 pr-4">Severity</th>
+                  <th className="px-2 py-3 pr-4">Observed</th>
+                  <th className="px-2 py-3 pr-4">Threshold</th>
+                  <th className="px-2 py-3 pr-4">Detected at</th>
+                  <th className="px-2 py-3">Context</th>
+                </tr>
+              </thead>
+              <tbody>
                 {anomalies.map((anomaly) => (
-                  <AnomalyModalCard key={anomaly.id} anomaly={anomaly} />
+                  <AnomalyModalTableRow key={anomaly.id} anomaly={anomaly} onNavigate={onClose} />
                 ))}
-              </div>
-            </>
-          ) : (
-            <div className="border-y border-white/10 px-2 py-6 text-sm text-slate-400">
-              No anomalies in the current summary.
-            </div>
-          )}
+              </tbody>
+            </table>
+          </div>
+          <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
+            {anomalies.map((anomaly) => (
+              <AnomalyModalCard key={anomaly.id} anomaly={anomaly} onNavigate={onClose} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="border-y border-white/10 px-2 py-6 text-sm text-slate-400">
+          No anomalies in the current summary.
         </div>
-      </section>
-    </div>
+      )}
+    </DashboardTableModal>
   );
 }
 
-function AnomalyModalTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
+function AnomalyModalTableRow({
+  anomaly,
+  onNavigate,
+}: {
+  anomaly: DashboardAnomaly;
+  onNavigate?: () => void;
+}) {
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
   return (
@@ -730,7 +730,10 @@ function AnomalyModalTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
       <td className="px-2 py-3 pr-4">
         <Link
           to={`/symbols/${anomaly.symbol}`}
-          onClick={() => storeSelectedSymbol(anomaly.symbol)}
+          onClick={() => {
+            storeSelectedSymbol(anomaly.symbol);
+            onNavigate?.();
+          }}
           className="font-mono text-sm font-bold text-slate-50 transition hover:text-cyan-200"
         >
           {anomaly.symbol}
@@ -758,7 +761,13 @@ function AnomalyModalTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
   );
 }
 
-function AnomalyModalCard({ anomaly }: { anomaly: DashboardAnomaly }) {
+function AnomalyModalCard({
+  anomaly,
+  onNavigate,
+}: {
+  anomaly: DashboardAnomaly;
+  onNavigate?: () => void;
+}) {
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
   return (
@@ -767,7 +776,10 @@ function AnomalyModalCard({ anomaly }: { anomaly: DashboardAnomaly }) {
         <div>
           <Link
             to={`/symbols/${anomaly.symbol}`}
-            onClick={() => storeSelectedSymbol(anomaly.symbol)}
+            onClick={() => {
+              storeSelectedSymbol(anomaly.symbol);
+              onNavigate?.();
+            }}
             className="font-mono text-base font-bold text-white transition hover:text-cyan-200"
           >
             {anomaly.symbol}
@@ -812,6 +824,229 @@ function AnomalyModalCard({ anomaly }: { anomaly: DashboardAnomaly }) {
         {anomaly.message || "—"}
       </p>
     </article>
+  );
+}
+
+function AllSymbolHealthModal({
+  symbols,
+  onClose,
+}: {
+  symbols: DashboardSymbolSummary[];
+  onClose: () => void;
+}) {
+  return (
+    <DashboardTableModal
+      title="All symbol health"
+      subtitle="Full available symbol list from the current dashboard summary."
+      dialogId="all-symbol-health-title"
+      onClose={onClose}
+    >
+      {symbols.length > 0 ? (
+        <>
+          <div className="hidden overflow-hidden border-y border-white/10 lg:block">
+            <table className="w-full border-collapse text-left">
+              <thead>
+                <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Health Score</th>
+                  <th className="px-2 py-3 pr-4">Last Price</th>
+                  <th className="px-2 py-3 pr-4">Spread</th>
+                  <th className="px-2 py-3 pr-4">Trades/min</th>
+                  <th className="px-2 py-3 pr-4">Freshness</th>
+                  <th className="px-2 py-3 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {symbols.map((symbol) => (
+                  <SymbolHealthModalTableRow
+                    key={symbol.symbol}
+                    symbol={symbol}
+                    onNavigate={onClose}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
+            {symbols.map((symbol) => (
+              <SymbolHealthCard
+                key={symbol.symbol}
+                symbol={symbol}
+                onNavigate={onClose}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="border-y border-white/10 px-2 py-6 text-sm text-slate-400">
+          No monitored symbols available.
+        </div>
+      )}
+    </DashboardTableModal>
+  );
+}
+
+function SymbolHealthModalTableRow({
+  symbol,
+  onNavigate,
+}: {
+  symbol: DashboardSymbolSummary;
+  onNavigate?: () => void;
+}) {
+  const score = symbol.health?.score ?? null;
+  const statusTone = toStatusTone(symbol.health?.status, "neutral");
+
+  return (
+    <SymbolHealthTableRowShell
+      symbol={symbol}
+      onNavigate={onNavigate}
+      cells={
+        <>
+          <td className="px-2 py-3 pr-4">
+            <HealthScore score={score} status={symbol.health?.status} />
+          </td>
+          <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-100">
+            {formatTickerPrice(symbol.state?.last_trade_price)}
+          </td>
+          <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
+            {formatTickerPercent(symbol.state?.spread_pct)}
+          </td>
+          <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
+            {formatOptionalCompact(symbol.state?.trades_per_minute)}
+          </td>
+          <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
+            {formatOptionalAge(symbol.state?.last_event_age_ms)}
+          </td>
+          <td className="px-2 py-3 text-right">
+            <StatusBadge
+              status={statusTone}
+              text={statusLabel(symbol.health?.status)}
+            />
+          </td>
+        </>
+      }
+    />
+  );
+}
+
+function SymbolHealthTableRowShell({
+  symbol,
+  onNavigate,
+  cells,
+}: {
+  symbol: DashboardSymbolSummary;
+  onNavigate?: () => void;
+  cells: React.ReactNode;
+}) {
+  const navigate = useNavigate();
+  const detailRoute = `/symbols/${symbol.symbol}`;
+
+  function handleOpenSymbol() {
+    storeSelectedSymbol(symbol.symbol);
+    onNavigate?.();
+    navigate(detailRoute);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleOpenSymbol();
+    }
+  }
+
+  return (
+    <tr
+      tabIndex={0}
+      role="link"
+      aria-label={`Open ${symbol.symbol} detail`}
+      onClick={handleOpenSymbol}
+      onKeyDown={handleKeyDown}
+      className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
+    >
+      <td className="px-2 py-3 pr-4">
+        <div className="inline-flex items-center gap-3">
+          <span className="font-mono text-base font-bold text-slate-50">
+            {symbol.symbol}
+          </span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            View
+          </span>
+        </div>
+      </td>
+      {cells}
+    </tr>
+  );
+}
+
+function DashboardTableModal({
+  children,
+  dialogId,
+  onClose,
+  subtitle,
+  title,
+}: {
+  children: React.ReactNode;
+  dialogId: string;
+  onClose: () => void;
+  subtitle?: string;
+  title: string;
+}) {
+  useEffect(() => {
+    const previousBodyOverflow = document.body.style.overflow;
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      role="presentation"
+      onMouseDown={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm"
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={dialogId}
+        onMouseDown={(event) => event.stopPropagation()}
+        className="flex h-[min(88vh,56rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[var(--sg-panel)] shadow-[0_24px_80px_rgba(2,6,23,0.6)]"
+      >
+        <div className="flex flex-col gap-4 border-b border-white/10 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 id={dialogId} className="text-xl font-bold tracking-tight text-white">
+              {title}
+            </h2>
+            {subtitle ? (
+              <p className="mt-1 text-sm leading-5 text-slate-400">
+                {subtitle}
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="self-start rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {children}
+        </div>
+      </section>
+    </div>
   );
 }
 
