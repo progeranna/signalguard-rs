@@ -15,7 +15,7 @@ export function GlobalMarketTicker() {
   return (
     <section
       aria-label="Market quality ticker"
-      className="overflow-hidden border-b border-white/10 bg-[#08131d] py-2"
+      className=" bg-[#050A11] py-2"
     >
       {dashboardSummaryQuery.isLoading ? (
         <div className="mx-auto max-w-[1680px] px-4 sm:px-6 lg:px-8">

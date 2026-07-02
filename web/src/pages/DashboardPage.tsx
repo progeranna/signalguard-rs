@@ -33,8 +33,6 @@ export function DashboardPage() {
 
   return (
     <section className="space-y-3">
-      <DashboardTitleRow />
-
       {dashboardSummaryQuery.isError ? (
         <ErrorPanel
           title="Dashboard summary unavailable"
@@ -47,25 +45,6 @@ export function DashboardPage() {
       <MarketSignalShell summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
       <DashboardTablesGrid summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
     </section>
-  );
-}
-
-function DashboardTitleRow() {
-  return (
-    <div className="flex flex-col gap-3 py-1 lg:flex-row lg:items-end lg:justify-between">
-      <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-white lg:text-3xl">
-          Market Data Quality Overview
-        </h1>
-        <p className="mt-1 max-w-3xl text-sm leading-5 text-slate-400">
-          Real-time monitoring of market-data quality, stream health, and anomaly
-          detection.
-        </p>
-      </div>
-      <div className="w-fit rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">
-        Current summary
-      </div>
-    </div>
   );
 }
 
@@ -120,11 +99,8 @@ function DashboardSummaryGrid({
 }) {
   if (isLoading) {
     return (
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <LoadingSkeleton className="h-28" />
-        <LoadingSkeleton className="h-28" />
-        <LoadingSkeleton className="h-28" />
-        <LoadingSkeleton className="h-28" />
+      <section className="sg-panel px-4 py-4">
+        <LoadingSkeleton className="h-24" />
       </section>
     );
   }
@@ -132,172 +108,92 @@ function DashboardSummaryGrid({
   const symbols = summary?.symbols ?? [];
   const anomalies = summary?.recent_anomalies ?? [];
   const pipelineStatus = summary?.pipeline.status;
+  const pipelineTone = pipelineStatus ? toStatusTone(pipelineStatus) : "neutral";
+  const hasCriticalAnomaly = anomalies.some((anomaly) => anomaly.severity === "critical");
+  const anomalyTone: StatusTone = hasCriticalAnomaly
+    ? "critical"
+    : anomalies.length > 0
+      ? "warning"
+      : "healthy";
 
   return (
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <ServiceHealthCard status={pipelineStatus} />
-      <KpiCard
-        label="Pipeline Health"
-        value={statusLabel(pipelineStatus)}
-        description={`Freshness ${formatOptionalAge(
-          summary?.pipeline.last_message_age_ms,
-        )}`}
-        tone={pipelineStatus ? toStatusTone(pipelineStatus) : "neutral"}
-        icon="pipeline"
-      />
-      <KpiCard
-        label="Tracked Symbols"
-        value={String(symbols.length)}
-        description={symbolHealthBreakdown(symbols)}
-        tone="info"
-        valueTone="neutral"
-        icon="symbols"
-      />
-      <KpiCard
-        label="Recent Anomalies"
-        value={String(anomalies.length)}
-        description="Current summary window"
-        tone={anomalies.length > 0 ? "warning" : "healthy"}
-        valueTone="neutral"
-        icon="anomalies"
-      />
+    <section className="sg-panel overflow-hidden px-4 py-4">
+      <div className="grid gap-y-4 divide-y divide-white/10 md:grid-cols-4 md:divide-x md:divide-y-0">
+        <SummaryCell
+          description={serviceStatusMessage(pipelineStatus)}
+          label="Service Health"
+          tone={pipelineTone}
+          value={statusLabel(pipelineStatus)}
+        />
+        <SummaryCell
+          description={`Freshness ${formatOptionalAge(summary?.pipeline.last_message_age_ms)}`}
+          label="Pipeline Health"
+          tone={pipelineTone}
+          value={statusLabel(pipelineStatus)}
+        />
+        <SummaryCell
+          description={symbolHealthBreakdown(symbols)}
+          label="Tracked Symbols"
+          tone="neutral"
+          value={String(symbols.length)}
+        />
+        <SummaryCell
+          description="Current summary window"
+          label="Recent Anomalies"
+          tone={anomalyTone}
+          value={String(anomalies.length)}
+        />
+      </div>
     </section>
   );
 }
 
-function ServiceHealthCard({ status }: { status: string | null | undefined }) {
-  const tone = toStatusTone(status, "neutral");
-  const palette = serviceHealthPalette(tone);
-
-  return (
-    <article className="sg-panel flex min-h-24 items-center gap-4 overflow-hidden px-4 py-3">
-      <KpiIcon tone={tone} kind="service" />
-
-      <div className="min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-          Service Health
-        </p>
-        <p className={`mt-2 text-2xl font-extrabold leading-none tracking-tight ${palette.text}`}>
-          {statusLabel(status)}
-        </p>
-        <p className="mt-1 text-sm font-medium leading-5 text-slate-400">
-          {serviceStatusMessage(status)}
-        </p>
-      </div>
-    </article>
-  );
-}
-
-function KpiCard({
-  label,
-  value,
+function SummaryCell({
   description,
-  tone = "neutral",
-  valueTone,
-  icon,
+  label,
+  tone,
+  value,
 }: {
-  label: string;
-  value: string;
   description: string;
-  tone?: StatusTone;
-  valueTone?: StatusTone;
-  icon: KpiIconKind;
+  label: string;
+  tone: StatusTone;
+  value: string;
 }) {
   return (
-    <article className="sg-panel flex min-h-24 items-center gap-4 overflow-hidden px-4 py-3">
-      <KpiIcon tone={tone} kind={icon} />
-      <div className="min-w-0">
+    <div className="pt-4 first:pt-0 md:px-4 md:pt-0 md:first:pl-0 md:last:pr-0">
+      <div className="flex items-start justify-between gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
           {label}
         </p>
-        <p
-          className={`mt-2 text-2xl font-extrabold leading-none tracking-tight ${kpiValueClass(
-            valueTone ?? tone,
-          )}`}
-        >
-          {value}
-        </p>
-        <p className="mt-1 truncate text-sm leading-5 text-slate-400">{description}</p>
+        <span className={`mt-0.5 h-2 w-2 rounded-full ${summaryDotClass(tone)}`} />
       </div>
-    </article>
-  );
-}
-
-type KpiIconKind = "service" | "pipeline" | "symbols" | "anomalies";
-
-function KpiIcon({ tone, kind }: { tone: StatusTone; kind: KpiIconKind }) {
-  const palette = serviceHealthPalette(tone);
-
-  return (
-    <div
-      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border shadow-inner ${palette.icon}`}
-    >
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 96 96"
-        className={`h-7 w-7 ${palette.pulse}`}
-        fill="none"
-      >
-        {kind === "service" ? (
-          <>
-            <circle cx="48" cy="48" r="30" stroke="currentColor" strokeOpacity="0.18" strokeWidth="6" />
-            <path
-              d="M18 50h14l8-18 13 38 9-24h16"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="6"
-            />
-          </>
-        ) : null}
-        {kind === "pipeline" ? (
-          <>
-            <path
-              d="M20 48h20m16 0h20M40 48l8-14 8 14m-16 0 8 14 8-14"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="5"
-            />
-            <circle cx="20" cy="48" r="7" fill="currentColor" />
-            <circle cx="48" cy="34" r="7" fill="currentColor" />
-            <circle cx="48" cy="62" r="7" fill="currentColor" />
-            <circle cx="76" cy="48" r="7" fill="currentColor" />
-          </>
-        ) : null}
-        {kind === "symbols" ? (
-          <>
-            <circle cx="48" cy="48" r="26" stroke="currentColor" strokeOpacity="0.22" strokeWidth="5" />
-            <circle cx="48" cy="48" r="6" fill="currentColor" />
-            <circle cx="48" cy="22" r="5" fill="currentColor" fillOpacity="0.85" />
-            <circle cx="70" cy="48" r="5" fill="currentColor" fillOpacity="0.85" />
-            <circle cx="48" cy="74" r="5" fill="currentColor" fillOpacity="0.85" />
-            <circle cx="26" cy="48" r="5" fill="currentColor" fillOpacity="0.85" />
-          </>
-        ) : null}
-        {kind === "anomalies" ? (
-          <>
-            <path
-              d="M48 20 76 72H20Z"
-              stroke="currentColor"
-              strokeLinejoin="round"
-              strokeWidth="6"
-            />
-            <path
-              d="M48 36v16"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeWidth="6"
-            />
-            <circle cx="48" cy="62" r="4" fill="currentColor" />
-          </>
-        ) : null}
-      </svg>
+      <p className={`mt-2 text-2xl font-extrabold leading-none tracking-tight ${summaryValueClass(tone)}`}>
+        {value}
+      </p>
+      <p className="mt-1 text-sm leading-5 text-slate-400">{description}</p>
     </div>
   );
 }
 
-function kpiValueClass(tone: StatusTone): string {
+function summaryDotClass(tone: StatusTone): string {
+  switch (tone) {
+    case "healthy":
+      return "bg-emerald-300";
+    case "degraded":
+    case "warning":
+      return "bg-amber-300";
+    case "unhealthy":
+    case "critical":
+      return "bg-rose-300";
+    case "info":
+    case "ok":
+      return "bg-cyan-300";
+    default:
+      return "bg-slate-500";
+  }
+}
+
+function summaryValueClass(tone: StatusTone): string {
   switch (tone) {
     case "healthy":
       return "text-emerald-300";
@@ -308,7 +204,8 @@ function kpiValueClass(tone: StatusTone): string {
     case "critical":
       return "text-rose-300";
     case "info":
-      return "text-sky-200";
+    case "ok":
+      return "text-cyan-100";
     default:
       return "text-white";
   }
@@ -508,7 +405,7 @@ function DashboardTablesGrid({
   isLoading: boolean;
 }) {
   return (
-    <section className="grid gap-3 xl:grid-cols-2">
+    <section className="grid gap-4 xl:grid-cols-2">
       <SymbolHealthShell summary={summary} isLoading={isLoading} />
       <RecentAnomaliesShell summary={summary} isLoading={isLoading} />
     </section>
@@ -525,22 +422,25 @@ function SymbolHealthShell({
   const symbols = summary?.symbols ?? [];
 
   return (
-    <section className="sg-panel overflow-hidden px-4 py-4">
-      <SectionTitle title="Symbol Health" />
+    <section className="space-y-3">
+      <SectionTitle
+        title="Symbol Health"
+        subtitle="Current health signals for monitored symbols."
+      />
       {isLoading ? (
-        <LoadingSkeleton className="mt-3 h-44" />
+        <LoadingSkeleton className="h-44" />
       ) : symbols.length > 0 ? (
         <>
-          <div className="mt-3 hidden max-h-72 overflow-y-auto pr-1 lg:block">
+          <div className="hidden max-h-72 overflow-y-auto border-y border-white/10 lg:block">
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="pb-3 pr-4">Symbol</th>
-                  <th className="pb-3 pr-4">Health Score</th>
-                  <th className="pb-3 pr-4">Last Price</th>
-                  <th className="pb-3 pr-4">Spread</th>
-                  <th className="pb-3 pr-4">Trades/min</th>
-                  <th className="pb-3 text-right">Status</th>
+                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Health Score</th>
+                  <th className="px-2 py-3 pr-4">Last Price</th>
+                  <th className="px-2 py-3 pr-4">Spread</th>
+                  <th className="px-2 py-3 pr-4">Trades/min</th>
+                  <th className="px-2 py-3 text-right">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -550,7 +450,7 @@ function SymbolHealthShell({
               </tbody>
             </table>
           </div>
-          <div className="mt-5 space-y-3 lg:hidden">
+          <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
             {symbols.slice(0, 8).map((symbol) => (
               <SymbolHealthCard key={symbol.symbol} symbol={symbol} />
             ))}
@@ -587,9 +487,9 @@ function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
       aria-label={`Open ${symbol.symbol} detail`}
       onClick={handleOpenSymbol}
       onKeyDown={handleKeyDown}
-      className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
+      className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
     >
-      <td className="py-2.5 pr-4">
+      <td className="px-2 py-3 pr-4">
         <div className="inline-flex items-center gap-3">
           <span className="font-mono text-base font-bold text-slate-50">
             {symbol.symbol}
@@ -599,19 +499,19 @@ function SymbolHealthTableRow({ symbol }: { symbol: DashboardSymbolSummary }) {
           </span>
         </div>
       </td>
-      <td className="py-2.5 pr-4">
+      <td className="px-2 py-3 pr-4">
         <HealthScore score={score} status={symbol.health?.status} />
       </td>
-      <td className="py-2.5 pr-4 text-sm font-semibold text-slate-100">
+      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-100">
         {formatTickerPrice(symbol.state?.last_trade_price)}
       </td>
-      <td className="py-2.5 pr-4 text-sm font-semibold text-slate-300">
+      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
         {formatTickerPercent(symbol.state?.spread_pct)}
       </td>
-      <td className="py-2.5 pr-4 text-sm font-semibold text-slate-300">
+      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
         {formatOptionalCompact(symbol.state?.trades_per_minute)}
       </td>
-      <td className="py-2.5 text-right">
+      <td className="px-2 py-3 text-right">
         <StatusBadge
           status={statusTone}
           text={statusLabel(symbol.health?.status)}
@@ -627,7 +527,7 @@ function SymbolHealthCard({ symbol }: { symbol: DashboardSymbolSummary }) {
   return (
     <Link
       to={`/symbols/${symbol.symbol}`}
-      className="block rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 transition hover:border-cyan-400/20 hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+      className="block py-4 transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
       aria-label={`Open ${symbol.symbol} detail`}
     >
       <article>
@@ -722,22 +622,26 @@ function RecentAnomaliesShell({
   const anomalies = summary?.recent_anomalies ?? [];
 
   return (
-    <section className="sg-panel overflow-hidden px-4 py-4">
-      <SectionTitle title="Recent Anomalies" action={<Link to="/anomalies">View all</Link>} />
+    <section className="space-y-3">
+      <SectionTitle
+        title="Recent Anomalies"
+        subtitle="Latest detector output in the current summary window."
+        action={<Link to="/anomalies">View all</Link>}
+      />
       {isLoading ? (
-        <LoadingSkeleton className="mt-3 h-44" />
+        <LoadingSkeleton className="h-44" />
       ) : anomalies.length > 0 ? (
         <>
-          <div className="mt-3 hidden max-h-72 overflow-y-auto pr-1 lg:block">
+          <div className="hidden max-h-72 overflow-y-auto border-y border-white/10 lg:block">
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="pb-3 pr-4">Time</th>
-                  <th className="pb-3 pr-4">Symbol</th>
-                  <th className="pb-3 pr-4">Type</th>
-                  <th className="pb-3 pr-4">Severity</th>
-                  <th className="pb-3 pr-4">Observed</th>
-                  <th className="pb-3">Threshold</th>
+                  <th className="px-2 py-3 pr-4">Time</th>
+                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Type</th>
+                  <th className="px-2 py-3 pr-4">Severity</th>
+                  <th className="px-2 py-3 pr-4">Observed</th>
+                  <th className="px-2 py-3">Threshold</th>
                 </tr>
               </thead>
               <tbody>
@@ -747,7 +651,7 @@ function RecentAnomaliesShell({
               </tbody>
             </table>
           </div>
-          <div className="mt-5 space-y-3 lg:hidden">
+          <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
             {anomalies.slice(0, 8).map((anomaly) => (
               <AnomalyCard key={anomaly.id} anomaly={anomaly} />
             ))}
@@ -764,11 +668,11 @@ function AnomalyTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
   return (
-    <tr className="border-b border-white/[0.06] last:border-0">
-      <td className="py-2.5 pr-4 text-sm font-semibold text-slate-300">
+    <tr className="border-b border-white/[0.06] transition hover:bg-white/[0.025] last:border-0">
+      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
         {formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
       </td>
-      <td className="py-2.5 pr-4">
+      <td className="px-2 py-3 pr-4">
         <Link
           to={`/symbols/${anomaly.symbol}`}
           className="font-mono text-sm font-bold text-slate-50 transition hover:text-cyan-200"
@@ -776,16 +680,16 @@ function AnomalyTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
           {anomaly.symbol}
         </Link>
       </td>
-      <td className="py-2.5 pr-4 text-sm font-bold text-slate-100">
+      <td className="px-2 py-3 pr-4 text-sm font-bold text-slate-100">
         {formatAnomalyType(anomaly.anomaly_type)}
       </td>
-      <td className="py-2.5 pr-4">
+      <td className="px-2 py-3 pr-4">
         <SeverityBadge severity={anomaly.severity} />
       </td>
-      <td className={`py-2.5 pr-4 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
+      <td className={`px-2 py-3 pr-4 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
         {formatAnomalyValue(anomaly.anomaly_type, anomaly.observed_value, "observed")}
       </td>
-      <td className="py-2.5 text-sm font-semibold text-slate-300">
+      <td className="px-2 py-3 text-sm font-semibold text-slate-300">
         {formatAnomalyValue(anomaly.anomaly_type, anomaly.threshold_value, "threshold")}
       </td>
     </tr>
@@ -796,7 +700,7 @@ function AnomalyCard({ anomaly }: { anomaly: DashboardAnomaly }) {
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
   return (
-    <article className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4">
+    <article className="py-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <Link
@@ -848,15 +752,22 @@ function AnomalyCard({ anomaly }: { anomaly: DashboardAnomaly }) {
 function SectionTitle({
   title,
   action,
+  subtitle,
 }: {
   title: string;
   action?: React.ReactNode;
+  subtitle?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-3">
-      <h3 className="text-xl font-bold tracking-tight text-white">{title}</h3>
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <h3 className="text-xl font-bold tracking-tight text-white">{title}</h3>
+        {subtitle ? (
+          <p className="mt-1 text-sm leading-5 text-slate-400">{subtitle}</p>
+        ) : null}
+      </div>
       {action ? (
-        <div className="text-sm font-semibold text-cyan-200 transition hover:text-cyan-100">
+        <div className="shrink-0 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100">
           {action}
         </div>
       ) : null}
@@ -866,45 +777,10 @@ function SectionTitle({
 
 function EmptyBlock({ message }: { message: string }) {
   return (
-    <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-5 text-sm leading-6 text-slate-400">
+    <div className="border-y border-white/10 px-2 py-5 text-sm leading-6 text-slate-400">
       {message}
     </div>
   );
-}
-
-function serviceHealthPalette(status: StatusTone): {
-  icon: string;
-  pulse: string;
-  text: string;
-} {
-  switch (status) {
-    case "healthy":
-      return {
-        icon: "border-emerald-500/35 bg-emerald-400/[0.14]",
-        pulse: "text-emerald-300",
-        text: "text-emerald-300",
-      };
-    case "degraded":
-    case "warning":
-      return {
-        icon: "border-amber-400/35 bg-amber-400/[0.12]",
-        pulse: "text-amber-300",
-        text: "text-amber-300",
-      };
-    case "unhealthy":
-    case "critical":
-      return {
-        icon: "border-rose-400/35 bg-rose-400/[0.12]",
-        pulse: "text-rose-300",
-        text: "text-rose-300",
-      };
-    default:
-      return {
-        icon: "border-slate-600/70 bg-slate-800/45",
-        pulse: "text-slate-400",
-        text: "text-slate-300",
-      };
-  }
 }
 
 function selectSignalSymbol(
