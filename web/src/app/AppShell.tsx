@@ -82,14 +82,7 @@ export function AppShell({ children }: PropsWithChildren) {
       }
 
       setActiveMenu(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey }),
-        queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
-      ]);
-      await queryClient.refetchQueries({
-        queryKey: dashboardSummaryQueryKey,
-        type: "active",
-      });
+      await refreshAfterRuntimeSwitch(queryClient);
     } catch {
       await queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey });
     }
@@ -351,6 +344,7 @@ function HeaderModeSelector({
     { mode: "replay", label: "Replay Demo" },
     { mode: "live", label: "Public Demo" },
   ];
+  const nextModeOption = modeOptions.find((option) => option.mode !== currentMode);
   const switchingSupported = runtimeMode?.switching_supported ?? false;
   const disableSwitchActions = isPending || runtimeModeStatus.isLoading || !switchingSupported;
 
@@ -394,29 +388,12 @@ function HeaderModeSelector({
           className="absolute right-0 top-full z-20 mt-2 min-w-[12rem] overflow-hidden rounded-xl border border-white/10 bg-[var(--sg-panel-strong)] shadow-[0_18px_40px_rgba(2,6,23,0.44)]"
         >
           <div className="border-b border-white/10 px-3 py-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Runtime mode
-                </p>
-                <p className="mt-1 text-sm font-semibold text-slate-100">
-                  {currentModeLabel}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-slate-400">
-                  Status: {currentStatusLabel}
-                </p>
-                {runtimeMode ? (
-                  <p className="text-xs leading-5 text-slate-500">
-                    Source: {runtimeMode.source}
-                  </p>
-                ) : null}
-              </div>
-              <span
-                className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${statusToneMap[currentModeTone].className}`}
-              >
-                {currentStatusLabel}
-              </span>
-            </div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Runtime mode
+            </p>
+            <p className="mt-1 text-sm font-semibold text-slate-100">
+              {currentModeLabel} · {currentStatusLabel}
+            </p>
             {currentErrorMessage ? (
               <p className="mt-2 text-xs leading-5 text-rose-300">{currentErrorMessage}</p>
             ) : null}
@@ -436,48 +413,54 @@ function HeaderModeSelector({
             ) : null}
           </div>
           <div className="py-1">
-            {modeOptions.map((option) => {
-              const isCurrent = currentMode === option.mode;
-              const isDisabled = disableSwitchActions || isCurrent;
-
-              return (
-                <button
-                  key={option.mode}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={isCurrent}
-                  disabled={isDisabled}
-                  onClick={() => onSelectMode(option.mode)}
+            {nextModeOption ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={disableSwitchActions}
+                onClick={() => onSelectMode(nextModeOption.mode)}
+                className={[
+                  "flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left text-sm font-semibold transition",
+                  disableSwitchActions
+                    ? "cursor-default text-slate-500"
+                    : "text-slate-200 hover:bg-white/[0.04] hover:text-white",
+                ].join(" ")}
+              >
+                <span>Switch to {nextModeOption.label}</span>
+                <span
                   className={[
-                    "flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left text-sm font-semibold transition",
-                    isCurrent
-                      ? "bg-cyan-400/10 text-cyan-100"
-                      : isDisabled
-                        ? "cursor-default text-slate-500"
-                        : "text-slate-200 hover:bg-white/[0.04] hover:text-white",
+                    "text-[11px] font-semibold uppercase tracking-[0.16em]",
+                    disableSwitchActions ? "text-slate-600" : "text-slate-500",
                   ].join(" ")}
                 >
-                  <span>{option.label}</span>
-                  <span
-                    className={[
-                      "text-[11px] font-semibold uppercase tracking-[0.16em]",
-                      isCurrent
-                        ? "text-cyan-200/90"
-                        : isDisabled
-                          ? "text-slate-600"
-                          : "text-slate-500",
-                    ].join(" ")}
-                  >
-                    {isCurrent ? "Current" : isPending ? "Waiting" : "Switch"}
-                  </span>
-                </button>
-              );
-            })}
+                  {isPending ? "Waiting" : "Switch"}
+                </span>
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
     </div>
   );
+}
+
+async function refreshAfterRuntimeSwitch(queryClient: ReturnType<typeof useQueryClient>) {
+  await queryClient.cancelQueries({ queryKey: dashboardSummaryQueryKey });
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey }),
+    queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
+  ]);
+  await Promise.all([
+    queryClient.refetchQueries({ queryKey: runtimeModeQueryKey, type: "active" }),
+    queryClient.refetchQueries({ queryKey: dashboardSummaryQueryKey, type: "all" }),
+  ]);
+
+  for (const delayMs of [1_500, 4_000]) {
+    window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey });
+      void queryClient.refetchQueries({ queryKey: dashboardSummaryQueryKey, type: "active" });
+    }, delayMs);
+  }
 }
 
 function buildModeSwitchRequest(mode: RuntimeMode) {

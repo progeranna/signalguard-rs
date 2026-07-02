@@ -11,6 +11,7 @@ export function GlobalMarketTicker() {
   const summary = dashboardSummaryQuery.data ?? null;
   const symbols = summary?.symbols ?? [];
   const anomalies = summary?.recent_anomalies ?? [];
+  const tickerKey = buildTickerKey(symbols);
 
   return (
     <section
@@ -28,24 +29,19 @@ export function GlobalMarketTicker() {
       ) : symbols.length > 0 ? (
         <div className="overflow-x-auto lg:overflow-hidden">
           <div
-            className={`flex w-max min-w-full gap-2 ${
-              symbols.length > 1 ? "sg-ticker-track" : ""
-            }`.trim()}
+            key={tickerKey}
+            className="flex w-max min-w-full gap-2 sg-ticker-track"
           >
             <TickerItemGroup symbols={symbols} anomalies={anomalies} />
-            {symbols.length > 1 ? (
-              <>
-                <div aria-hidden="true" className="flex gap-2">
-                  <TickerItemGroup symbols={symbols} anomalies={anomalies} />
-                </div>
-                <div aria-hidden="true" className="flex gap-2">
-                  <TickerItemGroup symbols={symbols} anomalies={anomalies} />
-                </div>
-                <div aria-hidden="true" className="flex gap-2">
-                  <TickerItemGroup symbols={symbols} anomalies={anomalies} />
-                </div>
-              </>
-            ) : null}
+            <div aria-hidden="true" className="flex gap-2">
+              <TickerItemGroup symbols={symbols} anomalies={anomalies} />
+            </div>
+            <div aria-hidden="true" className="flex gap-2">
+              <TickerItemGroup symbols={symbols} anomalies={anomalies} />
+            </div>
+            <div aria-hidden="true" className="flex gap-2">
+              <TickerItemGroup symbols={symbols} anomalies={anomalies} />
+            </div>
           </div>
         </div>
       ) : (
@@ -55,6 +51,19 @@ export function GlobalMarketTicker() {
       )}
     </section>
   );
+}
+
+function buildTickerKey(symbols: DashboardSymbolSummary[]): string {
+  return symbols
+    .map((symbol) =>
+      [
+        symbol.symbol,
+        symbol.state?.last_event_time ?? "none",
+        symbol.state?.last_trade_price ?? "none",
+        symbol.health?.status ?? "unknown",
+      ].join(":"),
+    )
+    .join("|");
 }
 
 function TickerItemGroup({
