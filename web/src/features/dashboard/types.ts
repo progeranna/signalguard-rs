@@ -64,9 +64,43 @@ export const dashboardSummarySchema = z.object({
   recent_anomalies: z.array(anomalySchema),
 });
 
+export const runtimeModeSchema = z.enum(["replay", "live"]);
+export const runtimeModeStatusSchema = z.enum([
+  "starting",
+  "running",
+  "switching",
+  "failed",
+  "stopped",
+  "completed",
+]);
+export const runtimeModeSourceSchema = z.enum(["config", "runtime"]);
+
+export const runtimeModeResponseSchema = z.object({
+  mode: runtimeModeSchema,
+  mode_label: z.string(),
+  status: runtimeModeStatusSchema,
+  symbols: z.array(z.string()),
+  switching_supported: z.boolean(),
+  source: runtimeModeSourceSchema,
+  last_started_at: z.string().datetime().nullable(),
+  last_switched_at: z.string().datetime().nullable(),
+  last_error: z.string().nullable(),
+});
+
 export type PipelineHealth = z.infer<typeof pipelineHealthSchema>;
 export type DashboardStateSummary = z.infer<typeof dashboardStateSummarySchema>;
 export type DashboardHealthSummary = z.infer<typeof dashboardHealthSummarySchema>;
 export type DashboardSymbolSummary = z.infer<typeof dashboardSymbolSummarySchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
 export type DashboardAnomaly = z.infer<typeof anomalySchema>;
+export type RuntimeMode = z.infer<typeof runtimeModeSchema>;
+export type RuntimeModeStatus = z.infer<typeof runtimeModeStatusSchema>;
+export type RuntimeModeSource = z.infer<typeof runtimeModeSourceSchema>;
+export type RuntimeModeResponse = z.infer<typeof runtimeModeResponseSchema>;
+
+export interface RuntimeModeSwitchRequest {
+  mode: RuntimeMode;
+  symbols?: string[];
+  reset_state?: boolean;
+  reset_storage?: boolean;
+}
