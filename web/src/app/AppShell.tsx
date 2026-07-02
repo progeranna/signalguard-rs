@@ -1,6 +1,7 @@
 import type { PropsWithChildren } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
+import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
 import { StatusBadge } from "@/shared/components/StatusBadge";
 
 const navigationItems = [
@@ -15,7 +16,7 @@ export function AppShell({ children }: PropsWithChildren) {
   return (
     <div className="min-h-screen bg-[var(--sg-bg)] text-slate-100">
       <div className="flex min-h-screen w-full flex-col">
-        <header className="border-b border-white/10 bg-[#050A11]">
+        <header className="bg-[#050A11]">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
             <div className="text-base font-bold tracking-tight text-white">
               SignalGuard RS
@@ -54,6 +55,7 @@ export function AppShell({ children }: PropsWithChildren) {
             </div>
           </div>
         </header>
+        <GlobalMarketTicker />
         <main className="mx-auto w-full max-w-[1680px] flex-1 px-4 py-3 sm:px-6 lg:px-8">
           {children}
         </main>
