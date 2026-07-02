@@ -105,20 +105,22 @@ export function SymbolDetailPage() {
           ) : null}
         </div>
 
-        <div className="mt-5 border-t border-white/10 pt-4">
-          {dashboardSummaryQuery.isLoading ? (
-            <LoadingSkeleton className="h-20" />
-          ) : (
-            <MetricStrip
-              healthScore={selectedSummary?.health?.score ?? null}
-              freshness={selectedSummary?.state?.last_event_age_ms ?? null}
-              lastPrice={selectedSummary?.state?.last_trade_price ?? null}
-              spread={selectedSummary?.state?.spread_pct ?? null}
-              statusTone={statusTone}
-              tradesPerMinute={selectedSummary?.state?.trades_per_minute ?? null}
-            />
-          )}
-        </div>
+        {dashboardSummaryQuery.isLoading || isKnownSymbol ? (
+          <div className="mt-5 border-t border-white/10 pt-4">
+            {dashboardSummaryQuery.isLoading ? (
+              <LoadingSkeleton className="h-20" />
+            ) : (
+              <MetricStrip
+                healthScore={selectedSummary?.health?.score ?? null}
+                freshness={selectedSummary?.state?.last_event_age_ms ?? null}
+                lastPrice={selectedSummary?.state?.last_trade_price ?? null}
+                spread={selectedSummary?.state?.spread_pct ?? null}
+                statusTone={statusTone}
+                tradesPerMinute={selectedSummary?.state?.trades_per_minute ?? null}
+              />
+            )}
+          </div>
+        ) : null}
       </section>
 
       {dashboardSummaryQuery.isError ? (
@@ -133,135 +135,139 @@ export function SymbolDetailPage() {
         <SymbolNotFoundState selectedSymbol={selectedSymbol} availableSymbols={availableSymbols} />
       ) : null}
 
-      <section className="sg-panel px-5 py-5">
-        {dashboardSummaryQuery.isLoading ? (
-          <LoadingSkeleton className="h-64" />
-        ) : (
-          <div className="grid gap-6 xl:grid-cols-[1fr_1.1fr]">
-            <div>
-              <PanelHeader
-                eyebrow="Signal Preview"
-                title={`${selectedSymbol} signal snapshot`}
-                description="Summary-backed preview only."
-              />
-              {selectedSummary ? (
-                <dl className="mt-5 divide-y divide-white/[0.08] border-y border-white/[0.08]">
-                  <InlineDataRow
-                    label="Summary status"
-                    value={symbolStatusText}
-                    valueClassName={toneTextClass(statusTone)}
+      {dashboardSummaryQuery.isLoading || isKnownSymbol ? (
+        <>
+          <section className="sg-panel px-5 py-5">
+            {dashboardSummaryQuery.isLoading ? (
+              <LoadingSkeleton className="h-64" />
+            ) : (
+              <div className="grid gap-6 xl:grid-cols-[1fr_1.1fr]">
+                <div>
+                  <PanelHeader
+                    eyebrow="Signal Preview"
+                    title={`${selectedSymbol} signal snapshot`}
+                    description="Summary-backed preview only."
                   />
-                  <InlineDataRow
-                    label="Recent anomalies"
-                    value={formatCount(selectedAnomalies.length)}
-                  />
-                  <InlineDataRow
-                    label="Price move (1m)"
-                    value={formatDisplayPercent(selectedSummary.state?.price_change_1m_pct)}
-                  />
-                  <InlineDataRow
-                    label="Depth sequence gaps"
-                    value={formatCount(selectedSummary.state?.depth_sequence_gap_count ?? 0)}
-                  />
-                </dl>
-              ) : (
-                <FlatEmptyState message="Summary-backed preview is unavailable for this symbol." />
-              )}
-            </div>
+                  {selectedSummary ? (
+                    <dl className="mt-5 divide-y divide-white/[0.08] border-y border-white/[0.08]">
+                      <InlineDataRow
+                        label="Summary status"
+                        value={symbolStatusText}
+                        valueClassName={toneTextClass(statusTone)}
+                      />
+                      <InlineDataRow
+                        label="Recent anomalies"
+                        value={formatCount(selectedAnomalies.length)}
+                      />
+                      <InlineDataRow
+                        label="Price move (1m)"
+                        value={formatDisplayPercent(selectedSummary.state?.price_change_1m_pct)}
+                      />
+                      <InlineDataRow
+                        label="Depth sequence gaps"
+                        value={formatCount(selectedSummary.state?.depth_sequence_gap_count ?? 0)}
+                      />
+                    </dl>
+                  ) : (
+                    <FlatEmptyState message="Summary-backed preview is unavailable for this symbol." />
+                  )}
+                </div>
 
-            <div>
-              <PanelHeader
-                eyebrow="Current Market State"
-                title="Latest normalized state"
-                description="Read-only fields derived from the existing summary response."
-              />
-              {selectedSummary?.state ? (
-                <dl className="mt-5 grid gap-x-8 border-y border-white/[0.08] md:grid-cols-2">
-                  <InlineDataRow
-                    label="Last trade price"
-                    value={formatDisplayValue(selectedSummary.state.last_trade_price)}
+                <div>
+                  <PanelHeader
+                    eyebrow="Current Market State"
+                    title="Latest normalized state"
+                    description="Read-only fields derived from the existing summary response."
                   />
-                  <InlineDataRow
-                    label="Best bid"
-                    value={formatDisplayValue(selectedSummary.state.best_bid_price)}
-                  />
-                  <InlineDataRow
-                    label="Best ask"
-                    value={formatDisplayValue(selectedSummary.state.best_ask_price)}
-                  />
-                  <InlineDataRow
-                    label="Spread"
-                    value={formatDisplayPercent(selectedSummary.state.spread_pct)}
-                  />
-                  <InlineDataRow
-                    label="Trades/min"
-                    value={formatDisplayCompact(selectedSummary.state.trades_per_minute)}
-                  />
-                  <InlineDataRow
-                    label="Last event"
-                    value={formatDisplayTimestamp(selectedSummary.state.last_event_time)}
-                  />
-                  <InlineDataRow
-                    label="Freshness"
-                    value={formatDisplayAge(selectedSummary.state.last_event_age_ms)}
-                  />
-                  <InlineDataRow
-                    label="Depth gap count"
-                    value={formatCount(selectedSummary.state.depth_sequence_gap_count)}
-                  />
-                </dl>
-              ) : (
-                <FlatEmptyState message="No current market state available for this symbol." />
-              )}
-            </div>
-          </div>
-        )}
-      </section>
+                  {selectedSummary?.state ? (
+                    <dl className="mt-5 grid gap-x-8 border-y border-white/[0.08] md:grid-cols-2">
+                      <InlineDataRow
+                        label="Last trade price"
+                        value={formatDisplayValue(selectedSummary.state.last_trade_price)}
+                      />
+                      <InlineDataRow
+                        label="Best bid"
+                        value={formatDisplayValue(selectedSummary.state.best_bid_price)}
+                      />
+                      <InlineDataRow
+                        label="Best ask"
+                        value={formatDisplayValue(selectedSummary.state.best_ask_price)}
+                      />
+                      <InlineDataRow
+                        label="Spread"
+                        value={formatDisplayPercent(selectedSummary.state.spread_pct)}
+                      />
+                      <InlineDataRow
+                        label="Trades/min"
+                        value={formatDisplayCompact(selectedSummary.state.trades_per_minute)}
+                      />
+                      <InlineDataRow
+                        label="Last event"
+                        value={formatDisplayTimestamp(selectedSummary.state.last_event_time)}
+                      />
+                      <InlineDataRow
+                        label="Freshness"
+                        value={formatDisplayAge(selectedSummary.state.last_event_age_ms)}
+                      />
+                      <InlineDataRow
+                        label="Depth gap count"
+                        value={formatCount(selectedSummary.state.depth_sequence_gap_count)}
+                      />
+                    </dl>
+                  ) : (
+                    <FlatEmptyState message="No current market state available for this symbol." />
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
 
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight text-white">
-            Recent anomalies for {selectedSymbol}
-          </h2>
-          <p className="mt-1 text-sm text-slate-400">
-            Latest quality events for the selected symbol.
-          </p>
-        </div>
-        {dashboardSummaryQuery.isLoading ? (
-          <LoadingSkeleton className="h-52" />
-        ) : selectedAnomalies.length > 0 ? (
-          <>
-            <div className="hidden overflow-hidden border-y border-white/10 lg:block">
-              <table className="w-full border-collapse text-left">
-                <thead>
-                  <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    <th className="px-2 py-3 pr-4">Type</th>
-                    <th className="px-2 py-3 pr-4">Severity</th>
-                    <th className="px-2 py-3 pr-4">Observed</th>
-                    <th className="px-2 py-3 pr-4">Threshold</th>
-                    <th className="px-2 py-3 pr-4">Detected at</th>
-                    <th className="px-2 py-3">Context</th>
-                  </tr>
-                </thead>
-                <tbody>
+          <section className="space-y-3">
+            <div>
+              <h2 className="text-xl font-semibold tracking-tight text-white">
+                Recent anomalies for {selectedSymbol}
+              </h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Latest quality events for the selected symbol.
+              </p>
+            </div>
+            {dashboardSummaryQuery.isLoading ? (
+              <LoadingSkeleton className="h-52" />
+            ) : selectedAnomalies.length > 0 ? (
+              <>
+                <div className="hidden overflow-hidden border-y border-white/10 lg:block">
+                  <table className="w-full border-collapse text-left">
+                    <thead>
+                      <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        <th className="px-2 py-3 pr-4">Type</th>
+                        <th className="px-2 py-3 pr-4">Severity</th>
+                        <th className="px-2 py-3 pr-4">Observed</th>
+                        <th className="px-2 py-3 pr-4">Threshold</th>
+                        <th className="px-2 py-3 pr-4">Detected at</th>
+                        <th className="px-2 py-3">Context</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedAnomalies.map((anomaly) => (
+                        <AnomalyTableRow key={anomaly.id} anomaly={anomaly} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
                   {selectedAnomalies.map((anomaly) => (
-                    <AnomalyTableRow key={anomaly.id} anomaly={anomaly} />
+                    <AnomalyMobileRow key={anomaly.id} anomaly={anomaly} />
                   ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
-              {selectedAnomalies.map((anomaly) => (
-                <AnomalyMobileRow key={anomaly.id} anomaly={anomaly} />
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="border-y border-white/10 px-2 py-5 text-sm text-slate-400">
-            No recent anomalies for this symbol.
-          </div>
-        )}
-      </section>
+                </div>
+              </>
+            ) : (
+              <div className="border-y border-white/10 px-2 py-5 text-sm text-slate-400">
+                No recent anomalies for this symbol.
+              </div>
+            )}
+          </section>
+        </>
+      ) : null}
     </section>
   );
 }
