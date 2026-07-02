@@ -6,6 +6,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
 import {
   dashboardSummaryQueryKey,
+  fetchDashboardSummary,
+  fetchRuntimeMode,
   runtimeModeQueryKey,
   useDashboardSummaryQuery,
   useRuntimeModeQuery,
@@ -24,12 +26,32 @@ import { isApiError, isApiValidationError } from "@/shared/api/errors";
 import { statusToneMap, toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 type HeaderMenu = "mode" | "symbol" | null;
+type RuntimeSwitchState = {
+  startedAt: number;
+  targetMode: RuntimeMode;
+};
 
 const headerControlClassName =
   "flex min-w-[11rem] items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40";
 
-const PUBLIC_DEMO_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"] as const;
+const PUBLIC_DEMO_SYMBOLS = [
+  "BTCUSDT",
+  "ETHUSDT",
+  "SOLUSDT",
+  "XRPUSDT",
+  "BNBUSDT",
+  "ADAUSDT",
+  "DOGEUSDT",
+  "AVAXUSDT",
+  "LINKUSDT",
+  "DOTUSDT",
+  "TRXUSDT",
+  "LTCUSDT",
+  "TONUSDT",
+] as const;
 const REPLAY_DEMO_SYMBOLS = ["BTCUSDT", "ETHUSDT"] as const;
+const REPLAY_DEMO_SYMBOL_SET = new Set<string>(REPLAY_DEMO_SYMBOLS);
+const RUNTIME_SWITCH_TIMEOUT_MS = 7_000;
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
@@ -38,6 +60,10 @@ export function AppShell({ children }: PropsWithChildren) {
   const symbolMenuRef = useRef<HTMLDivElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const [activeMenu, setActiveMenu] = useState<HeaderMenu>(null);
+  const [runtimeSwitchState, setRuntimeSwitchState] = useState<RuntimeSwitchState | null>(
+    null,
+  );
+  const [runtimeSwitchError, setRuntimeSwitchError] = useState<unknown>(null);
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const runtimeModeQuery = useRuntimeModeQuery();
   const switchRuntimeModeMutation = useSwitchRuntimeModeMutation();
@@ -59,9 +85,21 @@ export function AppShell({ children }: PropsWithChildren) {
     isError: dashboardSummaryQuery.isError,
     isLoading: dashboardSummaryQuery.isLoading,
   });
+  const isRuntimeSwitchRefreshing = runtimeSwitchState !== null;
+  const showRuntimeSwitchOverlay =
+    isRuntimeSwitchRefreshing ||
+    switchRuntimeModeMutation.status === "pending" ||
+    runtimeModeQuery.data?.status === "switching";
 
   async function handleModeSelect(nextMode: RuntimeMode) {
     const request = buildModeSwitchRequest(nextMode);
+    const nextSwitchState = {
+      startedAt: Date.now(),
+      targetMode: nextMode,
+    } satisfies RuntimeSwitchState;
+
+    setRuntimeSwitchError(null);
+    setRuntimeSwitchState(nextSwitchState);
 
     try {
       const runtimeMode = await switchRuntimeModeMutation.mutateAsync(request);
@@ -82,9 +120,19 @@ export function AppShell({ children }: PropsWithChildren) {
       }
 
       setActiveMenu(null);
-      await refreshAfterRuntimeSwitch(queryClient);
-    } catch {
-      await queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey });
+      await refreshAfterRuntimeSwitch({
+        queryClient,
+        startedAt: nextSwitchState.startedAt,
+        targetMode: runtimeMode.mode,
+      });
+      setRuntimeSwitchState(null);
+    } catch (error) {
+      setRuntimeSwitchState(null);
+      setRuntimeSwitchError(error);
+      await Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey }),
+        queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
+      ]);
     }
   }
 
@@ -157,6 +205,7 @@ export function AppShell({ children }: PropsWithChildren) {
                   selectorRef={symbolMenuRef}
                 />
                 <HeaderModeSelector
+                  isRefreshingSwitch={isRuntimeSwitchRefreshing}
                   isOpen={activeMenu === "mode"}
                   onRefreshRuntimeMode={() => void runtimeModeQuery.refetch()}
                   onSelectMode={(mode) => void handleModeSelect(mode)}
@@ -170,7 +219,7 @@ export function AppShell({ children }: PropsWithChildren) {
                     isLoading: runtimeModeQuery.isLoading,
                   }}
                   selectorRef={modeMenuRef}
-                  switchError={switchRuntimeModeMutation.error}
+                  switchError={runtimeSwitchError ?? switchRuntimeModeMutation.error}
                   switchStatus={switchRuntimeModeMutation.status}
                 />
               </div>
@@ -181,10 +230,18 @@ export function AppShell({ children }: PropsWithChildren) {
             </div>
           </div>
         </header>
-        <GlobalMarketTicker />
-        <main className="mx-auto w-full max-w-[1680px] flex-1 px-4 py-3 sm:px-6 lg:px-8">
-          {children}
-        </main>
+        <div className="relative flex flex-1 flex-col">
+          <GlobalMarketTicker />
+          <main className="mx-auto w-full max-w-[1680px] flex-1 px-4 py-3 sm:px-6 lg:px-8">
+            {children}
+          </main>
+          {showRuntimeSwitchOverlay ? (
+            <RuntimeSwitchOverlay
+              runtimeMode={runtimeModeQuery.data ?? null}
+              switchStatus={switchRuntimeModeMutation.status}
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -309,6 +366,7 @@ function HeaderSymbolSelector({
 }
 
 function HeaderModeSelector({
+  isRefreshingSwitch,
   isOpen,
   onRefreshRuntimeMode,
   onSelectMode,
@@ -320,6 +378,7 @@ function HeaderModeSelector({
   switchError,
   switchStatus,
 }: {
+  isRefreshingSwitch: boolean;
   isOpen: boolean;
   onRefreshRuntimeMode: () => void;
   onSelectMode: (mode: RuntimeMode) => void;
@@ -331,10 +390,10 @@ function HeaderModeSelector({
   switchError: unknown;
   switchStatus: "idle" | "pending" | "success" | "error";
 }) {
-  const isPending = switchStatus === "pending";
+  const isPending = switchStatus === "pending" || isRefreshingSwitch;
   const currentMode = runtimeMode?.mode ?? null;
-  const currentModeLabel = runtimeMode?.mode_label ?? "Runtime mode";
-  const currentStatusLabel = runtimeModeStatusLabel(runtimeMode, runtimeModeStatus, isPending);
+  const currentModeLabel = currentMode ? modeOptionLabel(currentMode) : "Runtime mode";
+  const currentStatusLabel = runtimeModeStatusText(runtimeMode, runtimeModeStatus, isPending);
   const currentErrorMessage = buildRuntimeModeMessage(
     switchError ?? runtimeModeError ?? runtimeMode?.last_error ?? null,
     runtimeMode?.last_error ?? null,
@@ -344,9 +403,9 @@ function HeaderModeSelector({
     { mode: "replay", label: "Replay Demo" },
     { mode: "live", label: "Public Demo" },
   ];
-  const nextModeOption = modeOptions.find((option) => option.mode !== currentMode);
   const switchingSupported = runtimeMode?.switching_supported ?? false;
-  const disableSwitchActions = isPending || runtimeModeStatus.isLoading || !switchingSupported;
+  const disableAllOptions = isPending || runtimeModeStatus.isLoading;
+  const disableSwitchActions = disableAllOptions || !switchingSupported;
 
   return (
     <div ref={selectorRef} className="relative lg:min-w-0">
@@ -365,15 +424,20 @@ function HeaderModeSelector({
         title="Runtime mode is controlled by the backend"
       >
         <span className="flex min-w-0 items-center gap-2">
-          <span
-            aria-hidden="true"
-            className={[
-              "h-2 w-2 shrink-0 rounded-full",
-              statusToneMap[currentModeTone].dotClassName,
-              isPending || runtimeMode?.status === "switching" ? "animate-pulse" : "",
-            ].join(" ")}
-          />
           <span className="truncate">{currentModeLabel}</span>
+          <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+            {isPending || runtimeMode?.status === "switching" ? (
+              <span className="h-3 w-3 animate-spin rounded-full border border-slate-500 border-t-cyan-300" />
+            ) : (
+              <span
+                aria-hidden="true"
+                className={[
+                  "h-2 w-2 rounded-full",
+                  statusToneMap[currentModeTone].dotClassName,
+                ].join(" ")}
+              />
+            )}
+          </span>
         </span>
         <span
           aria-hidden="true"
@@ -391,8 +455,8 @@ function HeaderModeSelector({
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               Runtime mode
             </p>
-            <p className="mt-1 text-sm font-semibold text-slate-100">
-              {currentModeLabel} · {currentStatusLabel}
+            <p className="mt-1 text-sm font-medium text-slate-300">
+              Status: <span className="font-semibold text-slate-100">{currentStatusLabel}</span>
             </p>
             {currentErrorMessage ? (
               <p className="mt-2 text-xs leading-5 text-rose-300">{currentErrorMessage}</p>
@@ -413,30 +477,43 @@ function HeaderModeSelector({
             ) : null}
           </div>
           <div className="py-1">
-            {nextModeOption ? (
-              <button
-                type="button"
-                role="menuitem"
-                disabled={disableSwitchActions}
-                onClick={() => onSelectMode(nextModeOption.mode)}
-                className={[
-                  "flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left text-sm font-semibold transition",
-                  disableSwitchActions
-                    ? "cursor-default text-slate-500"
-                    : "text-slate-200 hover:bg-white/[0.04] hover:text-white",
-                ].join(" ")}
-              >
-                <span>Switch to {nextModeOption.label}</span>
-                <span
+            {modeOptions.map((option) => {
+              const isCurrent = option.mode === currentMode;
+              const isDisabled = isCurrent ? disableAllOptions : disableSwitchActions;
+
+              return (
+                <button
+                  key={option.mode}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={isCurrent}
+                  disabled={isDisabled}
+                  onClick={isCurrent ? undefined : () => onSelectMode(option.mode)}
                   className={[
-                    "text-[11px] font-semibold uppercase tracking-[0.16em]",
-                    disableSwitchActions ? "text-slate-600" : "text-slate-500",
+                    "flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left text-sm font-semibold transition",
+                    isCurrent
+                      ? "text-cyan-100"
+                      : isDisabled
+                        ? "cursor-default text-slate-500"
+                        : "text-slate-200 hover:bg-white/[0.04] hover:text-white",
                   ].join(" ")}
                 >
-                  {isPending ? "Waiting" : "Switch"}
-                </span>
-              </button>
-            ) : null}
+                  <span>{option.label}</span>
+                  <span
+                    className={[
+                      "text-[11px] font-semibold uppercase tracking-[0.16em]",
+                      isCurrent
+                        ? "text-cyan-200/90"
+                        : isDisabled
+                          ? "text-slate-600"
+                          : "text-slate-500",
+                    ].join(" ")}
+                  >
+                    {isCurrent ? "Current" : "Switch"}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -444,22 +521,75 @@ function HeaderModeSelector({
   );
 }
 
-async function refreshAfterRuntimeSwitch(queryClient: ReturnType<typeof useQueryClient>) {
-  await queryClient.cancelQueries({ queryKey: dashboardSummaryQueryKey });
+function RuntimeSwitchOverlay({
+  runtimeMode,
+  switchStatus,
+}: {
+  runtimeMode: RuntimeModeResponse | null;
+  switchStatus: "idle" | "pending" | "success" | "error";
+}) {
+  const isSwitching = switchStatus === "pending" || runtimeMode?.status === "switching";
+
+  return (
+    <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm">
+      <div className="flex min-w-[16rem] max-w-sm flex-col items-center rounded-2xl border border-white/10 bg-[#08131d]/95 px-6 py-7 text-center shadow-[0_24px_80px_rgba(2,6,23,0.5)]">
+        <span className="h-10 w-10 animate-spin rounded-full border-[3px] border-slate-700 border-t-cyan-300" />
+        <p className="mt-4 text-base font-semibold text-white">Refreshing market data...</p>
+        <p className="mt-2 text-sm text-slate-300">
+          {isSwitching ? "Switching runtime mode" : "Waiting for market snapshot"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+async function refreshAfterRuntimeSwitch({
+  queryClient,
+  startedAt,
+  targetMode,
+}: {
+  queryClient: ReturnType<typeof useQueryClient>;
+  startedAt: number;
+  targetMode: RuntimeMode;
+}) {
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: runtimeModeQueryKey }),
+    queryClient.cancelQueries({ queryKey: dashboardSummaryQueryKey }),
+  ]);
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey }),
     queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
   ]);
   await Promise.all([
-    queryClient.refetchQueries({ queryKey: runtimeModeQueryKey, type: "active" }),
+    queryClient.refetchQueries({ queryKey: runtimeModeQueryKey, type: "all" }),
     queryClient.refetchQueries({ queryKey: dashboardSummaryQueryKey, type: "all" }),
   ]);
 
-  for (const delayMs of [1_500, 4_000]) {
-    window.setTimeout(() => {
-      void queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey });
-      void queryClient.refetchQueries({ queryKey: dashboardSummaryQueryKey, type: "active" });
-    }, delayMs);
+  const timeoutAt = startedAt + RUNTIME_SWITCH_TIMEOUT_MS;
+
+  while (Date.now() < timeoutAt) {
+    const [runtimeMode, summary] = await Promise.all([
+      queryClient.fetchQuery({
+        queryKey: runtimeModeQueryKey,
+        queryFn: fetchRuntimeMode,
+        staleTime: 0,
+      }),
+      queryClient.fetchQuery({
+        queryKey: dashboardSummaryQueryKey,
+        queryFn: fetchDashboardSummary,
+        staleTime: 0,
+      }),
+    ]);
+
+    if (runtimeMode.status === "failed") {
+      throw new Error(runtimeMode.last_error ?? "Runtime mode switch failed");
+    }
+
+    if (isRuntimeSwitchRefreshReady(targetMode, runtimeMode, summary)) {
+      return;
+    }
+
+    await delay(600);
   }
 }
 
@@ -481,36 +611,40 @@ function buildModeSwitchRequest(mode: RuntimeMode) {
   };
 }
 
-function runtimeModeStatusLabel(
+function modeOptionLabel(mode: RuntimeMode): string {
+  return mode === "replay" ? "Replay Demo" : "Public Demo";
+}
+
+function runtimeModeStatusText(
   runtimeMode: RuntimeModeResponse | null,
   queryState: { isError: boolean; isLoading: boolean },
   isPending: boolean,
 ): string {
   if (isPending || runtimeMode?.status === "switching") {
-    return "Switching…";
+    return "switching";
   }
 
   if (queryState.isLoading && !runtimeMode) {
-    return "Loading";
+    return "loading";
   }
 
   if (queryState.isError && !runtimeMode) {
-    return "Unavailable";
+    return "unavailable";
   }
 
   switch (runtimeMode?.status) {
     case "running":
-      return "Running";
+      return "running";
     case "completed":
-      return "Completed";
+      return "completed";
     case "failed":
-      return "Failed";
+      return "failed";
     case "stopped":
-      return "Stopped";
+      return "stopped";
     case "starting":
-      return "Starting";
+      return "starting";
     default:
-      return "Unknown";
+      return "unknown";
   }
 }
 
@@ -563,6 +697,42 @@ function buildRuntimeModeMessage(
   }
 
   return null;
+}
+
+function isRuntimeSwitchRefreshReady(
+  targetMode: RuntimeMode,
+  runtimeMode: RuntimeModeResponse,
+  summary: DashboardSummary,
+): boolean {
+  if (runtimeMode.mode !== targetMode) {
+    return false;
+  }
+
+  if (targetMode === "live") {
+    return runtimeMode.status === "running" && summaryHasLiveDemoData(summary);
+  }
+
+  return runtimeMode.status === "completed";
+}
+
+function summaryHasLiveDemoData(summary: DashboardSummary): boolean {
+  const summarySymbols = new Set(
+    summary.symbols
+      .map((symbol) => normalizeSelectedSymbol(symbol.symbol))
+      .filter((symbol): symbol is string => symbol !== null),
+  );
+
+  return PUBLIC_DEMO_SYMBOLS.some(
+    (symbol) =>
+      !REPLAY_DEMO_SYMBOL_SET.has(symbol) &&
+      summarySymbols.has(normalizeSelectedSymbol(symbol) ?? symbol),
+  );
+}
+
+function delay(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, timeoutMs);
+  });
 }
 
 function HeaderDataStatus({ status }: { status: HeaderDataStatusModel }) {
