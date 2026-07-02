@@ -122,7 +122,7 @@ function MarketSignalShell({
                 ) : null}
               </p>
             </div>
-            <div className="flex min-h-[190px] rounded-xl border border-slate-700/70 bg-slate-950/70">
+            <div className="flex min-h-[285px] rounded-xl bg-slate-950/35">
               <div className="relative min-h-0 flex-1 overflow-hidden">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart
@@ -205,7 +205,7 @@ function MarketSignalShell({
             </div>
           </div>
 
-          <aside className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2.5">
+          <aside className="flex h-full min-h-[285px] flex-col rounded-xl border border-white/10 bg-white/[0.035] px-3 py-3">
             <div className="border-b border-white/10 pb-1.5">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <p className="font-mono text-sm font-bold text-white">
@@ -216,14 +216,8 @@ function MarketSignalShell({
                   text={selectedSymbol.health?.status ?? "Unknown"}
                 />
               </div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Signal Snapshot
-              </p>
-              <p className="mt-0.5 text-xs font-medium text-slate-300">
-                Current summary-backed state
-              </p>
             </div>
-            <div className="mt-2 space-y-1">
+            <div className="mt-3 flex flex-1 flex-col justify-evenly gap-2">
               <SignalSnapshotMetric
                 label="Price"
                 value={formatTickerPrice(selectedSymbol.state?.last_trade_price)}
@@ -253,7 +247,7 @@ function MarketSignalShell({
 
 function SignalSnapshotMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-slate-950/35 px-3 py-1.5">
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-slate-950/35 px-3 py-2.5">
       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
         {label}
       </p>
