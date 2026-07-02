@@ -93,7 +93,7 @@ export function AppShell({ children }: PropsWithChildren) {
     <div className="min-h-screen bg-[var(--sg-bg)] text-slate-100">
       <div className="flex min-h-screen w-full flex-col">
         <header className="bg-[#050A11]">
-          <div className="mx-auto w-full max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
+          <div className="mx-auto w-full max-w-[1680px] px-4 py-3 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-center">
               <div className="text-base font-bold tracking-tight text-white lg:justify-self-start">
                 SignalGuard RS
@@ -126,7 +126,7 @@ export function AppShell({ children }: PropsWithChildren) {
                 ))}
               </nav>
 
-              <div className="flex flex-wrap items-center gap-2 lg:justify-self-end">
+              <div className="flex flex-wrap items-center gap-2 lg:min-w-0 lg:flex-nowrap lg:justify-self-end">
                 <HeaderSymbolSelector
                   availableSymbols={availableSymbols}
                   isDisabled={dashboardSummaryQuery.isLoading || availableSymbols.length === 0}
@@ -179,7 +179,7 @@ function HeaderSymbolSelector({
   const normalizedSelectedSymbol = normalizeSelectedSymbol(selectedSymbol);
 
   return (
-    <div ref={selectorRef} className="relative">
+    <div ref={selectorRef} className="relative lg:min-w-0">
       <button
         type="button"
         aria-haspopup="menu"
@@ -248,7 +248,7 @@ function HeaderModeSelector({
   selectorRef: RefObject<HTMLDivElement>;
 }) {
   return (
-    <div ref={selectorRef} className="relative">
+    <div ref={selectorRef} className="relative lg:min-w-0">
       <button
         type="button"
         aria-haspopup="menu"
