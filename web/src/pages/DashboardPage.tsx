@@ -1,4 +1,5 @@
 import type { KeyboardEvent } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Area,
@@ -31,6 +32,8 @@ import {
   formatCompactNumber,
 } from "@/shared/lib/format";
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
+
+const DASHBOARD_ANOMALY_PREVIEW_LIMIT = 20;
 
 export function DashboardPage() {
   const dashboardSummaryQuery = useDashboardSummaryQuery();
@@ -484,13 +487,25 @@ function RecentAnomaliesShell({
   isLoading: boolean;
 }) {
   const anomalies = summary?.recent_anomalies ?? [];
+  const previewAnomalies = anomalies.slice(0, DASHBOARD_ANOMALY_PREVIEW_LIMIT);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
     <section className="space-y-3">
       <SectionTitle
         title="Recent Anomalies"
-        subtitle="Latest detector output in the current summary window."
-        action={<Link to="/anomalies">View all</Link>}
+        subtitle="Latest data-quality events across monitored symbols."
+        action={
+          anomalies.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-3 py-1.5 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+            >
+              View all
+            </button>
+          ) : null
+        }
       />
       {isLoading ? (
         <LoadingSkeleton className="h-44" />
@@ -509,14 +524,14 @@ function RecentAnomaliesShell({
                 </tr>
               </thead>
               <tbody>
-                {anomalies.slice(0, 8).map((anomaly) => (
+                {previewAnomalies.map((anomaly) => (
                   <AnomalyTableRow key={anomaly.id} anomaly={anomaly} />
                 ))}
               </tbody>
             </table>
           </div>
           <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
-            {anomalies.slice(0, 8).map((anomaly) => (
+            {previewAnomalies.map((anomaly) => (
               <AnomalyCard key={anomaly.id} anomaly={anomaly} />
             ))}
           </div>
@@ -524,6 +539,12 @@ function RecentAnomaliesShell({
       ) : (
         <EmptyBlock message="No recent anomalies. Detector output is clean for the current summary window." />
       )}
+      {isModalOpen ? (
+        <AllAnomaliesModal
+          anomalies={anomalies}
+          onClose={() => setIsModalOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -611,6 +632,191 @@ function AnomalyCard({ anomaly }: { anomaly: DashboardAnomaly }) {
           </p>
         </div>
       </div>
+    </article>
+  );
+}
+
+function AllAnomaliesModal({
+  anomalies,
+  onClose,
+}: {
+  anomalies: DashboardAnomaly[];
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      role="presentation"
+      onMouseDown={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm"
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="all-anomalies-title"
+        onMouseDown={(event) => event.stopPropagation()}
+        className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[var(--sg-panel)] shadow-[0_24px_80px_rgba(2,6,23,0.6)]"
+      >
+        <div className="flex flex-col gap-4 border-b border-white/10 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 id="all-anomalies-title" className="text-xl font-bold tracking-tight text-white">
+              All anomalies
+            </h2>
+            <p className="mt-1 text-sm leading-5 text-slate-400">
+              Full available anomaly list from the current dashboard summary.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="self-start rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-5 py-4">
+          {anomalies.length > 0 ? (
+            <>
+              <div className="hidden overflow-hidden border-y border-white/10 lg:block">
+                <table className="w-full border-collapse text-left">
+                  <thead>
+                    <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <th className="px-2 py-3 pr-4">Symbol</th>
+                      <th className="px-2 py-3 pr-4">Type</th>
+                      <th className="px-2 py-3 pr-4">Severity</th>
+                      <th className="px-2 py-3 pr-4">Observed</th>
+                      <th className="px-2 py-3 pr-4">Threshold</th>
+                      <th className="px-2 py-3 pr-4">Detected at</th>
+                      <th className="px-2 py-3">Context</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {anomalies.map((anomaly) => (
+                      <AnomalyModalTableRow key={anomaly.id} anomaly={anomaly} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
+                {anomalies.map((anomaly) => (
+                  <AnomalyModalCard key={anomaly.id} anomaly={anomaly} />
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="border-y border-white/10 px-2 py-6 text-sm text-slate-400">
+              No anomalies in the current summary.
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AnomalyModalTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
+  const severityTone = toStatusTone(anomaly.severity, "neutral");
+
+  return (
+    <tr className="border-b border-white/[0.06] transition hover:bg-white/[0.025] last:border-0">
+      <td className="px-2 py-3 pr-4">
+        <Link
+          to={`/symbols/${anomaly.symbol}`}
+          onClick={() => storeSelectedSymbol(anomaly.symbol)}
+          className="font-mono text-sm font-bold text-slate-50 transition hover:text-cyan-200"
+        >
+          {anomaly.symbol}
+        </Link>
+      </td>
+      <td className="px-2 py-3 pr-4 text-sm font-bold text-slate-100">
+        {formatAnomalyType(anomaly.anomaly_type)}
+      </td>
+      <td className="px-2 py-3 pr-4">
+        <SeverityBadge severity={anomaly.severity} />
+      </td>
+      <td className={`px-2 py-3 pr-4 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
+        {formatAnomalyValue(anomaly.anomaly_type, anomaly.observed_value, "observed")}
+      </td>
+      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
+        {formatAnomalyValue(anomaly.anomaly_type, anomaly.threshold_value, "threshold")}
+      </td>
+      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
+        {formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
+      </td>
+      <td className="px-2 py-3 text-sm leading-5 text-slate-400">
+        {anomaly.message || "—"}
+      </td>
+    </tr>
+  );
+}
+
+function AnomalyModalCard({ anomaly }: { anomaly: DashboardAnomaly }) {
+  const severityTone = toStatusTone(anomaly.severity, "neutral");
+
+  return (
+    <article className="py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <Link
+            to={`/symbols/${anomaly.symbol}`}
+            onClick={() => storeSelectedSymbol(anomaly.symbol)}
+            className="font-mono text-base font-bold text-white transition hover:text-cyan-200"
+          >
+            {anomaly.symbol}
+          </Link>
+          <p className="mt-2 text-base font-bold text-slate-100">
+            {formatAnomalyType(anomaly.anomaly_type)}
+          </p>
+        </div>
+        <SeverityBadge severity={anomaly.severity} />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <MobileSymbolMetric
+          label="Observed"
+          value={formatAnomalyValue(
+            anomaly.anomaly_type,
+            anomaly.observed_value,
+            "observed",
+          )}
+        />
+        <MobileSymbolMetric
+          label="Threshold"
+          value={formatAnomalyValue(
+            anomaly.anomaly_type,
+            anomaly.threshold_value,
+            "threshold",
+          )}
+        />
+        <MobileSymbolMetric
+          label="Detected"
+          value={formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
+        />
+        <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Severity
+          </p>
+          <p className={`mt-1 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
+            {statusLabel(anomaly.severity)}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-slate-400">
+        {anomaly.message || "—"}
+      </p>
     </article>
   );
 }

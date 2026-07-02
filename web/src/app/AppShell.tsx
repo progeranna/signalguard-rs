@@ -18,7 +18,6 @@ type HeaderMenu = "mode" | "symbol" | null;
 const navigationItems = [
   { label: "Dashboard", to: "/" },
   { label: "Symbol", to: `/symbols/${DEFAULT_SELECTED_SYMBOL}` },
-  { label: "Anomalies", to: "/anomalies" },
 ];
 
 const headerControlClassName =
