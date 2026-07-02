@@ -290,7 +290,7 @@ function SymbolHealthShell({
         <LoadingSkeleton className="h-44" />
       ) : symbols.length > 0 ? (
         <>
-          <div className="hidden max-h-72 overflow-y-auto border-y border-white/10 lg:block">
+          <div className="hidden border-y border-white/10 lg:block">
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -303,14 +303,14 @@ function SymbolHealthShell({
                 </tr>
               </thead>
               <tbody>
-                {symbols.slice(0, 8).map((symbol) => (
+                {symbols.map((symbol) => (
                   <SymbolHealthTableRow key={symbol.symbol} symbol={symbol} />
                 ))}
               </tbody>
             </table>
           </div>
           <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
-            {symbols.slice(0, 8).map((symbol) => (
+            {symbols.map((symbol) => (
               <SymbolHealthCard key={symbol.symbol} symbol={symbol} />
             ))}
           </div>
