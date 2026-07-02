@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
+import { orderMarketEntries } from "@/features/dashboard/marketOrder";
 import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
 import type {
   DashboardAnomaly,
@@ -22,7 +23,7 @@ import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 export function SymbolDetailPage() {
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = summary?.symbols ?? [];
+  const availableSymbols = orderMarketEntries(summary?.symbols ?? [], (symbol) => symbol.symbol);
   const recentAnomalies = summary?.recent_anomalies ?? [];
   const routeSymbol = useParams().symbol ?? "";
   const selectedSymbol = normalizeSymbol(routeSymbol);
@@ -46,7 +47,7 @@ export function SymbolDetailPage() {
       <section className="sg-panel overflow-visible px-5 py-5 sm:px-6">
         <div className="space-y-3">
           <p className="font-mono text-xs uppercase tracking-[0.24em] text-cyan-200/80">
-            Dashboard / Symbol
+            Dashboard / Market
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
@@ -55,7 +56,7 @@ export function SymbolDetailPage() {
             <StatusBadge status={statusTone} text={symbolStatusText} />
           </div>
           <p className="max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
-            Symbol-level market-data quality, freshness, and anomaly context.
+            Market-level market-data quality, freshness, and anomaly context.
           </p>
         </div>
 
@@ -80,7 +81,7 @@ export function SymbolDetailPage() {
       {dashboardSummaryQuery.isError ? (
         <ErrorPanel
           title="Dashboard summary unavailable"
-          message="Symbol detail is using the existing dashboard summary in this phase. Retry once the summary endpoint is available."
+          message="Market detail is using the existing dashboard summary in this phase. Retry once the summary endpoint is available."
           onRetry={() => void dashboardSummaryQuery.refetch()}
         />
       ) : null}
@@ -123,7 +124,7 @@ export function SymbolDetailPage() {
                       />
                     </dl>
                   ) : (
-                    <FlatEmptyState message="Summary-backed preview is unavailable for this symbol." />
+                    <FlatEmptyState message="Summary-backed preview is unavailable for this market." />
                   )}
                 </div>
 
@@ -169,7 +170,7 @@ export function SymbolDetailPage() {
                       />
                     </dl>
                   ) : (
-                    <FlatEmptyState message="No current market state available for this symbol." />
+                    <FlatEmptyState message="No current market state available for this market." />
                   )}
                 </div>
               </div>
@@ -182,7 +183,7 @@ export function SymbolDetailPage() {
                 Recent anomalies for {selectedSymbol}
               </h2>
               <p className="mt-1 text-sm text-slate-400">
-                Latest quality events for the selected symbol.
+                Latest quality events for the selected market.
               </p>
             </div>
             {dashboardSummaryQuery.isLoading ? (
@@ -216,7 +217,7 @@ export function SymbolDetailPage() {
               </>
             ) : (
               <div className="border-y border-white/10 px-2 py-5 text-sm text-slate-400">
-                No recent anomalies for this symbol.
+                No recent anomalies for this market.
               </div>
             )}
           </section>
@@ -236,9 +237,9 @@ function SymbolNotFoundState({
   return (
     <section className="sg-panel border-amber-400/20 bg-amber-950/10 px-5 py-5">
       <PanelHeader
-        eyebrow="Symbol Status"
-        title={`${selectedSymbol} is not in the current summary`}
-        description="Symbol not found in current dashboard summary. Choose one of the currently monitored symbols."
+        eyebrow="Market Status"
+        title={`${selectedSymbol} market is not in the current summary`}
+        description="Market not found in current dashboard summary. Choose one of the currently monitored markets."
       />
       {availableSymbols.length > 0 ? (
         <div className="mt-4 flex flex-wrap gap-2">
@@ -254,7 +255,7 @@ function SymbolNotFoundState({
           ))}
         </div>
       ) : (
-        <FlatEmptyState message="No monitored symbols are available from the current dashboard summary." />
+        <FlatEmptyState message="No monitored markets are available from the current dashboard summary." />
       )}
     </section>
   );

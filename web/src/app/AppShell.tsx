@@ -14,9 +14,10 @@ import {
   useSwitchRuntimeModeMutation,
 } from "@/features/dashboard/api";
 import {
-  normalizeSelectedSymbol,
-  useSelectedSymbol,
-} from "@/features/dashboard/selectedSymbol";
+  DEMO_MARKETS,
+  orderMarkets,
+} from "@/features/dashboard/marketOrder";
+import { normalizeSelectedSymbol, useSelectedSymbol } from "@/features/dashboard/selectedSymbol";
 import type {
   DashboardSummary,
   RuntimeMode,
@@ -34,23 +35,6 @@ type RuntimeSwitchState = {
 const headerControlClassName =
   "flex min-w-[11rem] items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40";
 
-const PUBLIC_DEMO_SYMBOLS = [
-  "BTCUSDT",
-  "ETHUSDT",
-  "SOLUSDT",
-  "XRPUSDT",
-  "BNBUSDT",
-  "ADAUSDT",
-  "DOGEUSDT",
-  "AVAXUSDT",
-  "LINKUSDT",
-  "DOTUSDT",
-  "TRXUSDT",
-  "LTCUSDT",
-  "TONUSDT",
-] as const;
-const REPLAY_DEMO_SYMBOLS = ["BTCUSDT", "ETHUSDT"] as const;
-const REPLAY_DEMO_SYMBOL_SET = new Set<string>(REPLAY_DEMO_SYMBOLS);
 const RUNTIME_SWITCH_TIMEOUT_MS = 7_000;
 
 export function AppShell({ children }: PropsWithChildren) {
@@ -68,7 +52,7 @@ export function AppShell({ children }: PropsWithChildren) {
   const runtimeModeQuery = useRuntimeModeQuery();
   const switchRuntimeModeMutation = useSwitchRuntimeModeMutation();
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = summary?.symbols.map((symbol) => symbol.symbol) ?? [];
+  const availableSymbols = orderMarkets(summary?.symbols.map((symbol) => symbol.symbol) ?? []);
   const routeSymbolCandidate = location.pathname.startsWith("/symbols/")
     ? location.pathname.slice("/symbols/".length)
     : null;
@@ -80,7 +64,7 @@ export function AppShell({ children }: PropsWithChildren) {
       (symbol) => normalizeSelectedSymbol(symbol) === normalizedRouteSymbolCandidate,
     );
   const displayedHeaderSymbol =
-    routeSymbolCandidate && !isKnownRouteSymbol ? "Unknown symbol" : selectedSymbol;
+    routeSymbolCandidate && !isKnownRouteSymbol ? "Unknown market" : selectedSymbol;
   const headerStatus = buildHeaderDataStatus(summary, {
     isError: dashboardSummaryQuery.isError,
     isLoading: dashboardSummaryQuery.isLoading,
@@ -321,7 +305,7 @@ function HeaderSymbolSelector({
               type="text"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search symbol"
+              placeholder="Search market"
               className="w-full rounded-lg border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-medium text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
             />
           </div>
@@ -355,7 +339,7 @@ function HeaderSymbolSelector({
               );
             }) : (
               <div className="px-3 py-3 text-sm font-medium text-slate-500">
-                No matching symbols
+                No matching markets
               </div>
             )}
           </div>
@@ -401,7 +385,7 @@ function HeaderModeSelector({
   const currentModeTone = runtimeModeTone(runtimeMode?.status, runtimeModeStatus, isPending);
   const modeOptions: Array<{ mode: RuntimeMode; label: string }> = [
     { mode: "replay", label: "Replay Demo" },
-    { mode: "live", label: "Public Demo" },
+    { mode: "live", label: "Live Mode" },
   ];
   const switchingSupported = runtimeMode?.switching_supported ?? false;
   const disableAllOptions = isPending || runtimeModeStatus.isLoading;
@@ -594,25 +578,16 @@ async function refreshAfterRuntimeSwitch({
 }
 
 function buildModeSwitchRequest(mode: RuntimeMode) {
-  if (mode === "live") {
-    return {
-      mode,
-      symbols: [...PUBLIC_DEMO_SYMBOLS],
-      reset_state: true,
-      reset_storage: true,
-    };
-  }
-
   return {
     mode,
-    symbols: [...REPLAY_DEMO_SYMBOLS],
+    symbols: [...DEMO_MARKETS],
     reset_state: true,
     reset_storage: true,
   };
 }
 
 function modeOptionLabel(mode: RuntimeMode): string {
-  return mode === "replay" ? "Replay Demo" : "Public Demo";
+  return mode === "replay" ? "Replay Demo" : "Live Mode";
 }
 
 function runtimeModeStatusText(
@@ -722,10 +697,8 @@ function summaryHasLiveDemoData(summary: DashboardSummary): boolean {
       .filter((symbol): symbol is string => symbol !== null),
   );
 
-  return PUBLIC_DEMO_SYMBOLS.some(
-    (symbol) =>
-      !REPLAY_DEMO_SYMBOL_SET.has(symbol) &&
-      summarySymbols.has(normalizeSelectedSymbol(symbol) ?? symbol),
+  return DEMO_MARKETS.slice(2).some((symbol) =>
+    summarySymbols.has(normalizeSelectedSymbol(symbol) ?? symbol),
   );
 }
 

@@ -1,4 +1,5 @@
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
+import { orderMarketEntries } from "@/features/dashboard/marketOrder";
 import type {
   DashboardAnomaly,
   DashboardSymbolSummary,
@@ -9,7 +10,7 @@ import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 export function GlobalMarketTicker() {
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const summary = dashboardSummaryQuery.data ?? null;
-  const symbols = summary?.symbols ?? [];
+  const symbols = orderMarketEntries(summary?.symbols ?? [], (symbol) => symbol.symbol);
   const anomalies = summary?.recent_anomalies ?? [];
   const tickerKey = buildTickerKey(symbols);
 
@@ -46,7 +47,7 @@ export function GlobalMarketTicker() {
         </div>
       ) : (
         <p className="mx-auto max-w-[1680px] px-4 text-sm font-medium text-slate-400 sm:px-6 lg:px-8">
-          No symbol health data available
+          No market health data available
         </p>
       )}
     </section>

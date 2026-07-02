@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
+import { orderMarketEntries, orderMarkets } from "@/features/dashboard/marketOrder";
 import {
   normalizeSelectedSymbol,
   storeSelectedSymbol,
@@ -43,7 +44,7 @@ type DashboardModalState =
 export function DashboardPage() {
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = summary?.symbols.map((symbol) => symbol.symbol) ?? [];
+  const availableSymbols = orderMarkets(summary?.symbols.map((symbol) => symbol.symbol) ?? []);
   const { selectedSymbol } = useSelectedSymbol(availableSymbols);
 
   return (
@@ -109,7 +110,7 @@ function MarketSignalShell({
       {isLoading ? (
         <LoadingSkeleton className="h-40" />
       ) : !selectedSymbol || signalSeries.length === 0 ? (
-        <EmptyBlock message="No monitored symbol state available for the signal preview." />
+        <EmptyBlock message="No monitored market state available for the signal preview." />
       ) : (
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_248px]">
           <div className="rounded-xl border border-slate-700/70 bg-slate-950/70 px-3 py-2.5 sm:px-4">
@@ -269,7 +270,7 @@ function DashboardTablesGrid({
   isLoading: boolean;
 }) {
   const [modalState, setModalState] = useState<DashboardModalState>(null);
-  const symbols = summary?.symbols ?? [];
+  const symbols = orderMarketEntries(summary?.symbols ?? [], (symbol) => symbol.symbol);
   const anomalies = summary?.recent_anomalies ?? [];
 
   function isKnownSummarySymbol(symbol: string): boolean {
@@ -355,14 +356,14 @@ function SymbolHealthShell({
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const symbols = summary?.symbols ?? [];
+  const symbols = orderMarketEntries(summary?.symbols ?? [], (symbol) => symbol.symbol);
   const previewSymbols = symbols.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
 
   return (
     <section className="space-y-3">
       <SectionTitle
-        title="Symbol Health"
-        subtitle="Current health signals for monitored symbols."
+        title="Market Health"
+        subtitle="Current health signals for monitored markets."
         action={
           symbols.length > DASHBOARD_TABLE_PREVIEW_LIMIT ? (
             <button
@@ -383,7 +384,7 @@ function SymbolHealthShell({
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Market</th>
                   <th className="px-2 py-3 pr-4">Health Score</th>
                   <th className="px-2 py-3 pr-4">Last Price</th>
                   <th className="px-2 py-3 pr-4">Spread</th>
@@ -413,7 +414,7 @@ function SymbolHealthShell({
           </div>
         </>
       ) : (
-        <EmptyBlock message="No monitored symbols available." />
+        <EmptyBlock message="No monitored markets available." />
       )}
     </section>
   );
@@ -444,7 +445,7 @@ function SymbolHealthTableRow({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${symbol.symbol} detail`}
+      aria-label={`Open ${symbol.symbol} market detail`}
       onClick={handleOpenSymbol}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
@@ -497,7 +498,7 @@ function SymbolHealthCard({
         onOpenSymbolDetail(symbol.symbol);
       }}
       className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      aria-label={`Open ${symbol.symbol} detail`}
+      aria-label={`Open ${symbol.symbol} market detail`}
     >
       <article>
         <div className="flex items-start justify-between gap-4">
@@ -506,7 +507,7 @@ function SymbolHealthCard({
               {symbol.symbol}
             </p>
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              View symbol detail
+              View market detail
             </p>
           </div>
           <StatusBadge
@@ -599,7 +600,7 @@ function RecentAnomaliesShell({
     <section className="space-y-3">
       <SectionTitle
         title="Recent Anomalies"
-        subtitle="Latest data-quality events across monitored symbols."
+        subtitle="Latest data-quality events across monitored markets."
         action={
           anomalies.length > DASHBOARD_TABLE_PREVIEW_LIMIT ? (
             <button
@@ -621,7 +622,7 @@ function RecentAnomaliesShell({
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   <th className="px-2 py-3 pr-4">Time</th>
-                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Market</th>
                   <th className="px-2 py-3 pr-4">Type</th>
                   <th className="px-2 py-3 pr-4">Severity</th>
                   <th className="px-2 py-3 pr-4">Observed</th>
@@ -680,7 +681,7 @@ function AnomalyTableRow({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${anomaly.symbol} detail`}
+      aria-label={`Open ${anomaly.symbol} market detail`}
       onClick={handleOpenSymbol}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
@@ -723,7 +724,7 @@ function AnomalyCard({
       type="button"
       onClick={() => onOpenSymbolDetail(anomaly.symbol)}
       className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      aria-label={`Open ${anomaly.symbol} detail`}
+      aria-label={`Open ${anomaly.symbol} market detail`}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -792,7 +793,7 @@ function AllAnomaliesModal({
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Market</th>
                   <th className="px-2 py-3 pr-4">Type</th>
                   <th className="px-2 py-3 pr-4">Severity</th>
                   <th className="px-2 py-3 pr-4">Observed</th>
@@ -855,7 +856,7 @@ function AnomalyModalTableRow({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${anomaly.symbol} detail`}
+      aria-label={`Open ${anomaly.symbol} market detail`}
       onClick={handleOpenSymbol}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
@@ -901,7 +902,7 @@ function AnomalyModalCard({
       type="button"
       onClick={() => onOpenSymbolDetail(anomaly.symbol)}
       className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      aria-label={`Open ${anomaly.symbol} detail`}
+      aria-label={`Open ${anomaly.symbol} market detail`}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -962,8 +963,8 @@ function AllSymbolHealthModal({
 }) {
   return (
     <DashboardTableModal
-      title="All symbol health"
-      subtitle="Full available symbol list from the current dashboard summary."
+      title="All markets"
+      subtitle="Full available market list from the current dashboard summary."
       dialogId="all-symbol-health-title"
       onClose={onClose}
     >
@@ -973,7 +974,7 @@ function AllSymbolHealthModal({
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-4">Symbol</th>
+                  <th className="px-2 py-3 pr-4">Market</th>
                   <th className="px-2 py-3 pr-4">Health Score</th>
                   <th className="px-2 py-3 pr-4">Last Price</th>
                   <th className="px-2 py-3 pr-4">Spread</th>
@@ -1005,7 +1006,7 @@ function AllSymbolHealthModal({
         </>
       ) : (
         <div className="border-y border-white/10 px-2 py-6 text-sm text-slate-400">
-          No monitored symbols available.
+          No monitored markets available.
         </div>
       )}
     </DashboardTableModal>
@@ -1079,7 +1080,7 @@ function SymbolHealthTableRowShell({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${symbol.symbol} detail`}
+      aria-label={`Open ${symbol.symbol} market detail`}
       onClick={handleOpenSymbol}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
@@ -1129,12 +1130,12 @@ function SymbolDetailModal({
       )
     : [];
   const statusTone = toStatusTone(selectedSymbol?.health?.status, "neutral");
-  const titleSymbol = selectedSymbol?.symbol ?? normalizedSymbol ?? "Unknown symbol";
+  const titleSymbol = selectedSymbol?.symbol ?? normalizedSymbol ?? "Unknown market";
 
   return (
     <DashboardTableModal
-      title={`${titleSymbol} details`}
-      subtitle="Current symbol state from the dashboard summary."
+      title={`${titleSymbol} market details`}
+      subtitle="Current market state from the dashboard summary."
       dialogId="symbol-detail-title"
       onClose={onClose}
       secondaryAction={
@@ -1144,7 +1145,7 @@ function SymbolDetailModal({
             onClick={onBackToAllSymbols ?? onBackToAllAnomalies}
             className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
           >
-            {onBackToAllSymbols ? "Back to all symbols" : "Back to all anomalies"}
+            {onBackToAllSymbols ? "Back to all markets" : "Back to all anomalies"}
           </button>
         ) : null
       }
@@ -1198,8 +1199,8 @@ function SymbolDetailModal({
 
           <section className="space-y-3">
             <SectionTitle
-              title="Recent symbol anomalies"
-              subtitle="Quality events for this symbol in the current summary."
+              title="Recent market anomalies"
+              subtitle="Quality events for this market in the current summary."
             />
             {symbolAnomalies.length > 0 ? (
               <>
@@ -1233,12 +1234,12 @@ function SymbolDetailModal({
                 </div>
               </>
             ) : (
-              <EmptyBlock message="No recent anomalies for this symbol." />
+              <EmptyBlock message="No recent anomalies for this market." />
             )}
           </section>
         </div>
       ) : (
-        <EmptyBlock message="Symbol not found in the current dashboard summary." />
+        <EmptyBlock message="Market not found in the current dashboard summary." />
       )}
     </DashboardTableModal>
   );
