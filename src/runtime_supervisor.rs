@@ -6,7 +6,7 @@ use tokio::{sync::Mutex, sync::watch, task::JoinHandle};
 use crate::{
     config::{BinanceSettings, DetectorSettings, IngestionMode, IngestionSettings},
     ingestion,
-    runtime::{RuntimeModeHandle, RuntimeModeSnapshot, RuntimeModeStatus},
+    runtime::{RuntimeModeHandle, RuntimeModeSnapshot, RuntimeModeStatus, RuntimeResetPolicy},
     storage::{self, RedisCache},
     telemetry::InternalCounters,
 };
@@ -81,6 +81,10 @@ impl IngestionSupervisor {
     }
 
     pub async fn shutdown(&self) -> Result<()> {
+        self.shutdown_active_ingestion().await
+    }
+
+    pub async fn shutdown_active_ingestion(&self) -> Result<()> {
         let active_task = {
             let mut active_task = self.active_task.lock().await;
             active_task.take()
@@ -94,7 +98,36 @@ impl IngestionSupervisor {
             let _ = shutdown_tx.send(true);
         }
 
-        join_task(active_task.kind, active_task.join_handle).await
+        let kind = active_task.kind;
+        let join_result = join_task(kind, active_task.join_handle).await;
+
+        match &join_result {
+            Ok(()) if kind == ActiveIngestionKind::Live => {
+                self.runtime_mode.update(|snapshot| {
+                    snapshot.status = RuntimeModeStatus::Stopped;
+                    snapshot.last_error = None;
+                });
+            }
+            Err(error) => mark_runtime_failed(&self.runtime_mode, error),
+            _ => {}
+        }
+
+        join_result
+    }
+
+    pub async fn reset_runtime_state(&self, policy: RuntimeResetPolicy) -> Result<()> {
+        let result = self.reset_runtime_state_inner(policy).await;
+
+        if let Err(error) = &result {
+            mark_runtime_failed(&self.runtime_mode, error);
+        }
+
+        result
+    }
+
+    pub async fn stop_and_reset(&self, policy: RuntimeResetPolicy) -> Result<()> {
+        self.shutdown_active_ingestion().await?;
+        self.reset_runtime_state(policy).await
     }
 
     fn spawn_replay_task(&self) -> ActiveIngestionTask {
@@ -213,12 +246,40 @@ async fn reset_replay_storage_if_needed(
     postgres_pool: &PgPool,
 ) -> Result<()> {
     if settings.replay_reset_storage {
-        storage::postgres::reset_replay_storage(postgres_pool)
-            .await
-            .context("failed to reset replay historical tables")?;
+        reset_demo_storage(postgres_pool).await?;
     }
 
     Ok(())
+}
+
+async fn reset_demo_storage(postgres_pool: &PgPool) -> Result<()> {
+    storage::postgres::reset_replay_storage(postgres_pool)
+        .await
+        .context("failed to reset replay historical tables")
+}
+
+impl IngestionSupervisor {
+    async fn reset_runtime_state_inner(&self, policy: RuntimeResetPolicy) -> Result<()> {
+        if policy.reset_state {
+            self.redis_cache
+                .clear_market_state_cache()
+                .await
+                .context("failed to clear runtime market state cache")?;
+        }
+
+        if policy.reset_storage {
+            reset_demo_storage(&self.pg_pool).await?;
+        }
+
+        if policy.reset_state || policy.reset_storage {
+            self.runtime_mode.update(|snapshot| {
+                snapshot.status = RuntimeModeStatus::Stopped;
+                snapshot.last_error = None;
+            });
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -233,7 +294,7 @@ mod tests {
     use crate::{
         config::{BinanceSettings, DetectorSettings, IngestionMode, IngestionSettings},
         domain::Symbol,
-        runtime::RuntimeModeStatus,
+        runtime::{RuntimeModeStatus, RuntimeResetPolicy},
         storage::RedisCache,
         telemetry::InternalCounters,
     };
@@ -254,11 +315,95 @@ mod tests {
         let supervisor = test_supervisor(IngestionMode::Replay);
 
         supervisor.start_initial().await.unwrap();
-        supervisor.shutdown().await.unwrap();
+        supervisor.shutdown_active_ingestion().await.unwrap();
 
         assert_eq!(
             supervisor.runtime_mode_handle().snapshot().status,
             RuntimeModeStatus::Completed
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_active_ingestion_is_safe_when_nothing_is_running() {
+        let supervisor = test_supervisor(IngestionMode::Replay);
+
+        supervisor.shutdown_active_ingestion().await.unwrap();
+
+        assert_eq!(
+            supervisor.runtime_mode_handle().snapshot().status,
+            RuntimeModeStatus::Running
+        );
+    }
+
+    #[tokio::test]
+    async fn reset_runtime_state_clears_in_memory_redis_state_when_requested() {
+        let cache = RedisCache::in_memory(vec![crate::domain::MarketState::new(
+            Symbol::new("BTCUSDT").unwrap(),
+        )]);
+        let supervisor = IngestionSupervisor::new(
+            &IngestionSettings {
+                mode: IngestionMode::Replay,
+                symbols: vec![Symbol::new("BTCUSDT").unwrap()],
+                replay_path: PathBuf::from("examples/replay/sample.jsonl"),
+                replay_delay_ms: 0,
+                replay_reset_storage: false,
+                event_channel_capacity: 16,
+            },
+            &BinanceSettings {
+                websocket_base_url: String::from("wss://stream.binance.com:9443"),
+                reconnect_min_backoff_ms: 500,
+                reconnect_max_backoff_ms: 5_000,
+            },
+            &DetectorSettings {
+                price_move_1m_pct_threshold: Decimal::new(25, 1),
+                spread_spike_pct_threshold: Decimal::new(5, 1),
+                stale_data_ms_threshold: 5_000,
+                trade_burst_multiplier: Decimal::new(3, 0),
+                trade_burst_min_warmup_windows: 5,
+                quote_stuck_ms_threshold: 10_000,
+                event_lag_spike_ms_threshold: 3_000,
+                depth_sequence_gap_min_increment: 1,
+            },
+            unused_test_pool(),
+            cache.clone(),
+            InternalCounters::default(),
+        );
+
+        supervisor
+            .reset_runtime_state(RuntimeResetPolicy {
+                reset_state: true,
+                reset_storage: false,
+            })
+            .await
+            .unwrap();
+
+        assert!(cache.list_symbols().await.unwrap().is_empty());
+        assert_eq!(
+            supervisor.runtime_mode_handle().snapshot().status,
+            RuntimeModeStatus::Stopped
+        );
+    }
+
+    #[tokio::test]
+    async fn reset_runtime_state_marks_runtime_failed_when_storage_reset_fails() {
+        let supervisor = test_supervisor(IngestionMode::Replay);
+
+        let error = supervisor
+            .reset_runtime_state(RuntimeResetPolicy {
+                reset_state: false,
+                reset_storage: true,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("failed to reset replay historical tables")
+        );
+        assert_eq!(
+            supervisor.runtime_mode_handle().snapshot().status,
+            RuntimeModeStatus::Failed
         );
     }
 

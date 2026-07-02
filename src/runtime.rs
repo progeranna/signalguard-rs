@@ -38,6 +38,12 @@ pub struct RuntimeModeSnapshot {
     pub last_error: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeResetPolicy {
+    pub reset_state: bool,
+    pub reset_storage: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct RuntimeModeHandle {
     inner: Arc<RwLock<RuntimeModeSnapshot>>,
@@ -100,6 +106,15 @@ impl RuntimeModeSnapshot {
     }
 }
 
+impl RuntimeResetPolicy {
+    pub const fn reset_safe_demo_defaults() -> Self {
+        Self {
+            reset_state: true,
+            reset_storage: true,
+        }
+    }
+}
+
 impl RuntimeModeHandle {
     pub fn new(snapshot: RuntimeModeSnapshot) -> Self {
         Self {
@@ -139,7 +154,10 @@ impl From<IngestionMode> for RuntimeMode {
 mod tests {
     use chrono::TimeZone;
 
-    use super::{RuntimeModeHandle, RuntimeModeSnapshot, RuntimeModeSource, RuntimeModeStatus};
+    use super::{
+        RuntimeModeHandle, RuntimeModeSnapshot, RuntimeModeSource, RuntimeModeStatus,
+        RuntimeResetPolicy,
+    };
     use crate::{config::IngestionMode, domain::Symbol};
 
     #[test]
@@ -181,5 +199,13 @@ mod tests {
         let snapshot = handle.snapshot();
         assert_eq!(snapshot.status, RuntimeModeStatus::Completed);
         assert_eq!(snapshot.last_error.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn reset_policy_defaults_to_reset_safe_demo_behavior() {
+        let policy = RuntimeResetPolicy::reset_safe_demo_defaults();
+
+        assert!(policy.reset_state);
+        assert!(policy.reset_storage);
     }
 }
