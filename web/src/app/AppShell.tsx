@@ -1,11 +1,10 @@
 import type { PropsWithChildren, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
 import {
-  DEFAULT_SELECTED_SYMBOL,
   normalizeSelectedSymbol,
   useSelectedSymbol,
 } from "@/features/dashboard/selectedSymbol";
@@ -13,11 +12,6 @@ import type { DashboardSummary } from "@/features/dashboard/types";
 import { statusToneMap, toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 type HeaderMenu = "mode" | "symbol" | null;
-
-const navigationItems = [
-  { label: "Dashboard", to: "/" },
-  { label: "Symbol", to: `/symbols/${DEFAULT_SELECTED_SYMBOL}` },
-];
 
 const headerControlClassName =
   "flex min-w-[11rem] items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40";
@@ -47,7 +41,6 @@ export function AppShell({ children }: PropsWithChildren) {
     isError: dashboardSummaryQuery.isError,
     isLoading: dashboardSummaryQuery.isLoading,
   });
-  const symbolRouteTarget = `/symbols/${selectedSymbol || DEFAULT_SELECTED_SYMBOL}`;
 
   useEffect(() => {
     setActiveMenu(null);
@@ -98,38 +91,14 @@ export function AppShell({ children }: PropsWithChildren) {
         <header className="bg-[#050A11]">
           <div className="mx-auto w-full max-w-[1680px] px-4 py-3 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-              <div className="text-base font-bold tracking-tight text-white lg:justify-self-start">
+              <Link
+                to="/"
+                className="text-base font-bold tracking-tight text-white transition hover:text-cyan-100 focus-visible:outline-none focus-visible:text-cyan-100 lg:justify-self-start"
+              >
                 SignalGuard RS
-              </div>
+              </Link>
 
-              <nav className="flex flex-wrap justify-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 lg:justify-self-center">
-                {navigationItems.map((item) => (
-                  <NavLink
-                    key={item.label}
-                    to={item.label === "Symbol" ? symbolRouteTarget : item.to}
-                    className={({ isActive }) => {
-                      const matchesSymbolRoute =
-                        item.label === "Symbol" &&
-                        location.pathname.startsWith("/symbols/");
-                      const matchesDashboardRoute =
-                        item.label === "Dashboard" &&
-                        (location.pathname === "/" || location.pathname === "/dashboard");
-                      const navIsActive = matchesSymbolRoute || matchesDashboardRoute || isActive;
-
-                      return [
-                        "rounded-full border px-3 py-1.5 transition",
-                        navIsActive
-                          ? "border-cyan-400/35 bg-cyan-400/10 text-cyan-100"
-                          : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06]",
-                      ].join(" ");
-                    }}
-                  >
-                    {item.label}
-                  </NavLink>
-                ))}
-              </nav>
-
-              <div className="flex flex-wrap items-center gap-2 lg:min-w-0 lg:flex-nowrap lg:justify-self-end">
+              <div className="flex flex-wrap items-center justify-center gap-2 lg:min-w-0 lg:flex-nowrap lg:justify-self-center">
                 <HeaderSymbolSelector
                   availableSymbols={availableSymbols}
                   isDisabled={dashboardSummaryQuery.isLoading || availableSymbols.length === 0}
@@ -148,6 +117,9 @@ export function AppShell({ children }: PropsWithChildren) {
                   }
                   selectorRef={modeMenuRef}
                 />
+              </div>
+
+              <div className="flex justify-start lg:justify-end">
                 <HeaderDataStatus status={headerStatus} />
               </div>
             </div>
