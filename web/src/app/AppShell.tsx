@@ -73,14 +73,23 @@ export function AppShell({ children }: PropsWithChildren) {
           (symbol) => normalizeSelectedSymbol(symbol) === normalizeSelectedSymbol(selectedSymbol),
         )
       ) {
-        setSelectedSymbol(runtimeMode.symbols[0]);
+        const nextSymbol = runtimeMode.symbols[0];
+        setSelectedSymbol(nextSymbol);
+
+        if (location.pathname.startsWith("/symbols/")) {
+          navigate(`/symbols/${nextSymbol}`);
+        }
       }
 
       setActiveMenu(null);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
         queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey }),
+        queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
       ]);
+      await queryClient.refetchQueries({
+        queryKey: dashboardSummaryQueryKey,
+        type: "active",
+      });
     } catch {
       await queryClient.invalidateQueries({ queryKey: runtimeModeQueryKey });
     }
@@ -331,7 +340,7 @@ function HeaderModeSelector({
 }) {
   const isPending = switchStatus === "pending";
   const currentMode = runtimeMode?.mode ?? null;
-  const currentModeLabel = runtimeMode?.mode_label ?? "Loading mode";
+  const currentModeLabel = runtimeMode?.mode_label ?? "Runtime mode";
   const currentStatusLabel = runtimeModeStatusLabel(runtimeMode, runtimeModeStatus, isPending);
   const currentErrorMessage = buildRuntimeModeMessage(
     switchError ?? runtimeModeError ?? runtimeMode?.last_error ?? null,
@@ -343,8 +352,7 @@ function HeaderModeSelector({
     { mode: "live", label: "Public Demo" },
   ];
   const switchingSupported = runtimeMode?.switching_supported ?? false;
-  const disableSwitchActions =
-    isPending || runtimeModeStatus.isLoading || !switchingSupported;
+  const disableSwitchActions = isPending || runtimeModeStatus.isLoading || !switchingSupported;
 
   return (
     <div ref={selectorRef} className="relative lg:min-w-0">
@@ -362,13 +370,16 @@ function HeaderModeSelector({
         ].join(" ")}
         title="Runtime mode is controlled by the backend"
       >
-        <span className="min-w-0">
-          <span className="block truncate">{currentModeLabel}</span>
+        <span className="flex min-w-0 items-center gap-2">
           <span
-            className={`block truncate text-[11px] font-semibold uppercase tracking-[0.14em] ${statusToneMap[currentModeTone].dotClassName.replace("bg-", "text-")}`}
-          >
-            {currentStatusLabel}
-          </span>
+            aria-hidden="true"
+            className={[
+              "h-2 w-2 shrink-0 rounded-full",
+              statusToneMap[currentModeTone].dotClassName,
+              isPending || runtimeMode?.status === "switching" ? "animate-pulse" : "",
+            ].join(" ")}
+          />
+          <span className="truncate">{currentModeLabel}</span>
         </span>
         <span
           aria-hidden="true"
@@ -391,6 +402,14 @@ function HeaderModeSelector({
                 <p className="mt-1 text-sm font-semibold text-slate-100">
                   {currentModeLabel}
                 </p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Status: {currentStatusLabel}
+                </p>
+                {runtimeMode ? (
+                  <p className="text-xs leading-5 text-slate-500">
+                    Source: {runtimeMode.source}
+                  </p>
+                ) : null}
               </div>
               <span
                 className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${statusToneMap[currentModeTone].className}`}
