@@ -665,19 +665,33 @@ function AnomalyTableRow({
 }) {
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
+  function handleOpenSymbol() {
+    onOpenSymbolDetail(anomaly.symbol);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleOpenSymbol();
+    }
+  }
+
   return (
-    <tr className="border-b border-white/[0.06] transition hover:bg-white/[0.025] last:border-0">
+    <tr
+      tabIndex={0}
+      role="button"
+      aria-label={`Open ${anomaly.symbol} detail`}
+      onClick={handleOpenSymbol}
+      onKeyDown={handleKeyDown}
+      className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
+    >
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
         {formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
       </td>
       <td className="px-2 py-3 pr-4">
-        <button
-          type="button"
-          onClick={() => onOpenSymbolDetail(anomaly.symbol)}
-          className="font-mono text-sm font-bold text-slate-50 transition hover:text-cyan-200"
-        >
+        <span className="font-mono text-sm font-bold text-slate-50">
           {anomaly.symbol}
-        </button>
+        </span>
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-bold text-slate-100">
         {formatAnomalyType(anomaly.anomaly_type)}
@@ -705,16 +719,17 @@ function AnomalyCard({
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
   return (
-    <article className="py-4">
+    <button
+      type="button"
+      onClick={() => onOpenSymbolDetail(anomaly.symbol)}
+      className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+      aria-label={`Open ${anomaly.symbol} detail`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <button
-            type="button"
-            onClick={() => onOpenSymbolDetail(anomaly.symbol)}
-            className="font-mono text-base font-bold text-white transition hover:text-cyan-200"
-          >
+          <span className="font-mono text-base font-bold text-white transition">
             {anomaly.symbol}
-          </button>
+          </span>
           <p className="mt-2 text-base font-bold text-slate-100">
             {formatAnomalyType(anomaly.anomaly_type)}
           </p>
@@ -751,7 +766,7 @@ function AnomalyCard({
           </p>
         </div>
       </div>
-    </article>
+    </button>
   );
 }
 
@@ -825,16 +840,30 @@ function AnomalyModalTableRow({
 }) {
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
+  function handleOpenSymbol() {
+    onOpenSymbolDetail(anomaly.symbol);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleOpenSymbol();
+    }
+  }
+
   return (
-    <tr className="border-b border-white/[0.06] transition hover:bg-white/[0.025] last:border-0">
+    <tr
+      tabIndex={0}
+      role="button"
+      aria-label={`Open ${anomaly.symbol} detail`}
+      onClick={handleOpenSymbol}
+      onKeyDown={handleKeyDown}
+      className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
+    >
       <td className="px-2 py-3 pr-4">
-        <button
-          type="button"
-          onClick={() => onOpenSymbolDetail(anomaly.symbol)}
-          className="font-mono text-sm font-bold text-slate-50 transition hover:text-cyan-200"
-        >
+        <span className="font-mono text-sm font-bold text-slate-50 transition">
           {anomaly.symbol}
-        </button>
+        </span>
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-bold text-slate-100">
         {formatAnomalyType(anomaly.anomaly_type)}
@@ -868,16 +897,17 @@ function AnomalyModalCard({
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
   return (
-    <article className="py-4">
+    <button
+      type="button"
+      onClick={() => onOpenSymbolDetail(anomaly.symbol)}
+      className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+      aria-label={`Open ${anomaly.symbol} detail`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <button
-            type="button"
-            onClick={() => onOpenSymbolDetail(anomaly.symbol)}
-            className="font-mono text-base font-bold text-white transition hover:text-cyan-200"
-          >
+          <span className="font-mono text-base font-bold text-white transition">
             {anomaly.symbol}
-          </button>
+          </span>
           <p className="mt-2 text-base font-bold text-slate-100">
             {formatAnomalyType(anomaly.anomaly_type)}
           </p>
@@ -917,7 +947,7 @@ function AnomalyModalCard({
       <p className="mt-3 text-sm leading-6 text-slate-400">
         {anomaly.message || "—"}
       </p>
-    </article>
+    </button>
   );
 }
 
