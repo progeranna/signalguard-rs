@@ -23,11 +23,12 @@ use super::{
         AnomaliesResponse, AnomalyResponse, DashboardHealthSummary, DashboardServiceSummary,
         DashboardStateSummary, DashboardSummaryResponse, DashboardSymbolSummary, HealthResponse,
         MarketHealthResponse, MarketStateResponse, PipelineHealthResponse, RuntimeModeResponse,
-        SymbolsResponse,
+        RuntimeModeSwitchRequest, SymbolsResponse,
     },
     error::ApiError,
     state::AppState,
 };
+use crate::runtime_supervisor::{RuntimeModeSwitchCommand, SwitchModeError};
 
 const DEFAULT_ANOMALY_LIMIT: u32 = 50;
 const HEALTH_ANOMALY_LIMIT: u32 = 100;
@@ -55,6 +56,24 @@ pub async fn runtime_mode(State(state): State<AppState>) -> Json<RuntimeModeResp
     Json(RuntimeModeResponse::from_snapshot(
         &state.runtime_mode.snapshot(),
     ))
+}
+
+pub async fn switch_runtime_mode(
+    State(state): State<AppState>,
+    Json(request): Json<RuntimeModeSwitchRequest>,
+) -> Result<Json<RuntimeModeResponse>, ApiError> {
+    let snapshot = state
+        .supervisor
+        .switch_mode(RuntimeModeSwitchCommand {
+            mode: request.mode,
+            symbols: request.symbols,
+            reset_state: request.reset_state,
+            reset_storage: request.reset_storage,
+        })
+        .await
+        .map_err(map_switch_error)?;
+
+    Ok(Json(RuntimeModeResponse::from_snapshot(&snapshot)))
 }
 
 pub async fn dashboard_summary(
@@ -190,6 +209,19 @@ fn map_storage_error(state: &AppState, error: StorageError) -> ApiError {
     ApiError::from(error)
 }
 
+fn map_switch_error(error: SwitchModeError) -> ApiError {
+    match error {
+        SwitchModeError::Validation(message) => ApiError::InvalidRequest(message),
+        SwitchModeError::Conflict => {
+            ApiError::Conflict(String::from("runtime mode switch is already in progress"))
+        }
+        SwitchModeError::Execution(error) => {
+            tracing::warn!(%error, "runtime mode switch failed");
+            ApiError::Internal(String::from("failed to switch runtime mode"))
+        }
+    }
+}
+
 async fn load_dashboard_recent_anomalies(state: &AppState) -> Result<Vec<AnomalyEvent>, ApiError> {
     #[cfg(test)]
     if let Some(anomalies) = &state.test_recent_anomalies {
@@ -311,6 +343,8 @@ fn parse_anomaly_limit(value: &str) -> Result<u32, ApiError> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use axum::extract::{Path, State};
     use axum::response::IntoResponse;
     use chrono::{Duration, TimeZone, Utc};
@@ -318,19 +352,22 @@ mod tests {
 
     use super::{
         AnomaliesQuery, anomalies, dashboard_summary, market_health, market_state, metrics,
-        parse_anomalies_query, pipeline_health, runtime_mode, symbols,
+        parse_anomalies_query, pipeline_health, runtime_mode, switch_runtime_mode, symbols,
     };
     use crate::api::AppState;
+    use crate::api::dto::RuntimeModeSwitchRequest;
     use crate::config::{
-        DetectorSettings, HealthScoreSettings, HealthStatusThresholds, IngestionMode,
-        SeverityPenaltySettings,
+        BinanceSettings, DetectorSettings, HealthScoreSettings, HealthStatusThresholds,
+        IngestionMode, IngestionSettings, SeverityPenaltySettings,
     };
     use crate::domain::{
         AnomalyEvent, AnomalyMeasurement, AnomalyType, MarketSignals, MarketState, Severity, Symbol,
     };
     use crate::runtime::RuntimeModeSnapshot;
+    use crate::runtime_supervisor::IngestionSupervisor;
     use crate::storage::RedisCache;
     use crate::telemetry::InternalCounters;
+    use axum::Json;
     use rust_decimal::Decimal;
 
     #[tokio::test]
@@ -391,6 +428,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         };
@@ -409,6 +447,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         };
@@ -427,6 +466,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         };
@@ -460,11 +500,31 @@ mod tests {
         assert_eq!(body["mode_label"], "Replay Demo");
         assert_eq!(body["status"], "running");
         assert_eq!(body["symbols"], serde_json::json!(["BTCUSDT"]));
-        assert_eq!(body["switching_supported"], false);
+        assert_eq!(body["switching_supported"], true);
         assert_eq!(body["source"], "config");
         assert!(body["last_started_at"].is_string());
         assert!(body["last_switched_at"].is_null());
         assert!(body["last_error"].is_null());
+    }
+
+    #[tokio::test]
+    async fn switch_runtime_mode_rejects_empty_live_symbols() {
+        let error = switch_runtime_mode(
+            State(unavailable_state()),
+            Json(RuntimeModeSwitchRequest {
+                mode: String::from("live"),
+                symbols: Some(Vec::new()),
+                reset_state: Some(false),
+                reset_storage: Some(false),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            crate::api::error::ApiError::InvalidRequest(_)
+        ));
     }
 
     #[tokio::test]
@@ -486,6 +546,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters,
             test_recent_anomalies: None,
         }))
@@ -524,6 +585,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters,
             test_recent_anomalies: None,
         }))
@@ -629,6 +691,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
         };
@@ -740,6 +803,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
         };
@@ -759,6 +823,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         };
@@ -842,6 +907,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         }
@@ -869,6 +935,7 @@ mod tests {
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
             runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(anomalies),
         }
@@ -884,6 +951,28 @@ mod tests {
 
     fn test_runtime_mode_handle() -> crate::runtime::RuntimeModeHandle {
         crate::runtime::RuntimeModeHandle::new(test_runtime_mode_snapshot())
+    }
+
+    fn test_supervisor() -> Arc<IngestionSupervisor> {
+        Arc::new(IngestionSupervisor::new(
+            &IngestionSettings {
+                mode: IngestionMode::Replay,
+                symbols: vec![Symbol::new("BTCUSDT").unwrap()],
+                replay_path: std::path::PathBuf::from("examples/replay/sample.jsonl"),
+                replay_delay_ms: 0,
+                replay_reset_storage: false,
+                event_channel_capacity: 16,
+            },
+            &BinanceSettings {
+                websocket_base_url: String::from("wss://stream.binance.com:9443"),
+                reconnect_min_backoff_ms: 500,
+                reconnect_max_backoff_ms: 5_000,
+            },
+            &test_detector_settings(),
+            unused_test_pool(),
+            RedisCache::in_memory(Vec::new()),
+            InternalCounters::default(),
+        ))
     }
 
     fn test_anomaly(symbol: &str) -> AnomalyEvent {

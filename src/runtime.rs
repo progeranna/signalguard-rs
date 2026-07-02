@@ -97,7 +97,7 @@ impl RuntimeModeSnapshot {
             mode: RuntimeMode::from(mode),
             status: RuntimeModeStatus::Running,
             symbols: symbols.to_vec(),
-            switching_supported: false,
+            switching_supported: true,
             source: RuntimeModeSource::Config,
             last_started_at: started_at,
             last_switched_at: None,
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(snapshot.status, RuntimeModeStatus::Running);
         assert_eq!(snapshot.source, RuntimeModeSource::Config);
         assert_eq!(snapshot.symbols, symbols);
-        assert!(!snapshot.switching_supported);
+        assert!(snapshot.switching_supported);
         assert_eq!(snapshot.last_started_at, started_at);
         assert_eq!(snapshot.last_switched_at, None);
         assert_eq!(snapshot.last_error, None);

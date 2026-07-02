@@ -1,8 +1,9 @@
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use signalguard_rs::{
     api::{self, AppState},
     config::Settings,
-    runtime::RuntimeModeHandle,
     runtime_supervisor::IngestionSupervisor,
     storage::{self, RedisCache},
     telemetry::{self, InternalCounters},
@@ -31,20 +32,20 @@ async fn main() -> Result<()> {
         .with_context(|| format!("failed to bind HTTP server to {address}"))?;
 
     let redis_cache = clear_market_state_cache(redis_cache, &counters).await;
-    let supervisor = IngestionSupervisor::new(
+    let supervisor = Arc::new(IngestionSupervisor::new(
         &settings.ingestion,
         &settings.binance,
         &settings.detectors,
         postgres_pool.clone(),
         redis_cache.clone(),
         counters.clone(),
-    );
+    ));
     let app_state = build_app_state(
         &postgres_pool,
         &redis_cache,
         &settings,
         &counters,
-        supervisor.runtime_mode_handle(),
+        supervisor.clone(),
     );
 
     log_startup(&settings);
@@ -102,14 +103,15 @@ fn build_app_state(
     redis_cache: &RedisCache,
     settings: &Settings,
     counters: &InternalCounters,
-    runtime_mode: RuntimeModeHandle,
+    supervisor: Arc<IngestionSupervisor>,
 ) -> AppState {
     AppState {
         pg_pool: postgres_pool.clone(),
         redis_cache: redis_cache.clone(),
         detector_settings: settings.detectors.clone(),
         health_settings: settings.health.clone(),
-        runtime_mode,
+        runtime_mode: supervisor.runtime_mode_handle(),
+        supervisor,
         counters: counters.clone(),
     }
 }

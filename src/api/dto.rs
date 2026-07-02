@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use uuid::Uuid;
 
@@ -33,6 +33,14 @@ pub struct RuntimeModeResponse {
     pub last_started_at: DateTime<Utc>,
     pub last_switched_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RuntimeModeSwitchRequest {
+    pub mode: String,
+    pub symbols: Option<Vec<String>>,
+    pub reset_state: Option<bool>,
+    pub reset_storage: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

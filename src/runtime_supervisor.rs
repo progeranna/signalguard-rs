@@ -1,12 +1,22 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use sqlx::PgPool;
+use thiserror::Error;
 use tokio::{sync::Mutex, sync::watch, task::JoinHandle};
 
 use crate::{
     config::{BinanceSettings, DetectorSettings, IngestionMode, IngestionSettings},
+    domain::Symbol,
     ingestion,
-    runtime::{RuntimeModeHandle, RuntimeModeSnapshot, RuntimeModeStatus, RuntimeResetPolicy},
+    runtime::{
+        RuntimeMode, RuntimeModeHandle, RuntimeModeSnapshot, RuntimeModeSource, RuntimeModeStatus,
+        RuntimeResetPolicy,
+    },
     storage::{self, RedisCache},
     telemetry::InternalCounters,
 };
@@ -14,15 +24,19 @@ use crate::{
 pub struct IngestionSupervisor {
     runtime_mode: RuntimeModeHandle,
     active_task: Mutex<Option<ActiveIngestionTask>>,
+    switch_guard: Mutex<()>,
     ingestion_settings: IngestionSettings,
     binance_settings: BinanceSettings,
     detector_settings: DetectorSettings,
     pg_pool: PgPool,
     redis_cache: RedisCache,
     counters: InternalCounters,
+    next_run_id: AtomicU64,
+    current_run_id: Arc<AtomicU64>,
 }
 
 struct ActiveIngestionTask {
+    run_id: u64,
     kind: ActiveIngestionKind,
     join_handle: JoinHandle<Result<()>>,
     shutdown_tx: Option<watch::Sender<bool>>,
@@ -32,6 +46,31 @@ struct ActiveIngestionTask {
 enum ActiveIngestionKind {
     Replay,
     Live,
+}
+
+#[derive(Clone, Debug)]
+pub struct RuntimeModeSwitchCommand {
+    pub mode: String,
+    pub symbols: Option<Vec<String>>,
+    pub reset_state: Option<bool>,
+    pub reset_storage: Option<bool>,
+}
+
+#[derive(Debug, Error)]
+pub enum SwitchModeError {
+    #[error("{0}")]
+    Validation(String),
+    #[error("runtime mode switch is already in progress")]
+    Conflict,
+    #[error(transparent)]
+    Execution(#[from] anyhow::Error),
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedSwitchRequest {
+    mode: IngestionMode,
+    symbols: Vec<Symbol>,
+    reset_policy: RuntimeResetPolicy,
 }
 
 impl IngestionSupervisor {
@@ -52,12 +91,15 @@ impl IngestionSupervisor {
                 started_at,
             )),
             active_task: Mutex::new(None),
+            switch_guard: Mutex::new(()),
             ingestion_settings: ingestion_settings.clone(),
             binance_settings: binance_settings.clone(),
             detector_settings: detector_settings.clone(),
             pg_pool,
             redis_cache,
             counters,
+            next_run_id: AtomicU64::new(1),
+            current_run_id: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -66,18 +108,10 @@ impl IngestionSupervisor {
     }
 
     pub async fn start_initial(&self) -> Result<()> {
-        let mut active_task = self.active_task.lock().await;
-        if active_task.is_some() {
-            bail!("initial ingestion task is already running");
-        }
-
-        let task = match self.ingestion_settings.mode {
-            IngestionMode::Replay => self.spawn_replay_task(),
-            IngestionMode::Live => self.spawn_live_task(),
-        };
-        *active_task = Some(task);
-
-        Ok(())
+        let run_id = self.next_run_id();
+        self.current_run_id.store(run_id, Ordering::SeqCst);
+        self.start_mode(self.ingestion_settings.clone(), run_id, true)
+            .await
     }
 
     pub async fn shutdown(&self) -> Result<()> {
@@ -85,6 +119,107 @@ impl IngestionSupervisor {
     }
 
     pub async fn shutdown_active_ingestion(&self) -> Result<()> {
+        self.shutdown_active_ingestion_with_status(true).await
+    }
+
+    pub async fn reset_runtime_state(&self, policy: RuntimeResetPolicy) -> Result<()> {
+        self.reset_runtime_state_with_status(policy, true).await
+    }
+
+    pub async fn stop_and_reset(&self, policy: RuntimeResetPolicy) -> Result<()> {
+        self.shutdown_active_ingestion_with_status(true).await?;
+        self.reset_runtime_state_with_status(policy, true).await
+    }
+
+    pub async fn switch_mode(
+        &self,
+        command: RuntimeModeSwitchCommand,
+    ) -> std::result::Result<RuntimeModeSnapshot, SwitchModeError> {
+        let request = self.resolve_switch_request(command)?;
+        let _switch_guard = self
+            .switch_guard
+            .try_lock()
+            .map_err(|_| SwitchModeError::Conflict)?;
+        let run_id = self.next_run_id();
+
+        self.current_run_id.store(run_id, Ordering::SeqCst);
+        self.runtime_mode.update(|snapshot| {
+            snapshot.mode = RuntimeMode::from(request.mode);
+            snapshot.status = RuntimeModeStatus::Switching;
+            snapshot.symbols = request.symbols.clone();
+            snapshot.switching_supported = true;
+            snapshot.source = RuntimeModeSource::Runtime;
+            snapshot.last_error = None;
+        });
+
+        if let Err(error) = self.shutdown_active_ingestion_with_status(false).await {
+            mark_runtime_failed(
+                &self.runtime_mode,
+                self.current_run_id.as_ref(),
+                run_id,
+                &error,
+            );
+            return Err(SwitchModeError::Execution(error));
+        }
+        self.reset_runtime_state_with_status(request.reset_policy, false)
+            .await
+            .map_err(SwitchModeError::Execution)?;
+
+        let settings = self.settings_for_mode(request.mode, request.symbols.clone());
+        if let Err(error) = self.start_mode(settings, run_id, false).await {
+            mark_runtime_failed(
+                &self.runtime_mode,
+                self.current_run_id.as_ref(),
+                run_id,
+                &error,
+            );
+            return Err(SwitchModeError::Execution(error));
+        }
+
+        let switched_at = Utc::now();
+        update_runtime_if_current(
+            &self.runtime_mode,
+            self.current_run_id.as_ref(),
+            run_id,
+            |snapshot| {
+                snapshot.mode = RuntimeMode::from(request.mode);
+                snapshot.symbols = request.symbols.clone();
+                snapshot.switching_supported = true;
+                snapshot.source = RuntimeModeSource::Runtime;
+                snapshot.last_switched_at = Some(switched_at);
+                snapshot.last_error = None;
+            },
+        );
+
+        Ok(self.runtime_mode.snapshot())
+    }
+
+    async fn start_mode(
+        &self,
+        settings: IngestionSettings,
+        run_id: u64,
+        reset_storage_before_start: bool,
+    ) -> Result<()> {
+        let mut active_task = self.active_task.lock().await;
+        if active_task.is_some() {
+            bail!("ingestion task is already running");
+        }
+
+        let task = match settings.mode {
+            IngestionMode::Replay => {
+                self.spawn_replay_task(settings, run_id, reset_storage_before_start)
+            }
+            IngestionMode::Live => self.spawn_live_task(settings, run_id),
+        };
+        *active_task = Some(task);
+
+        Ok(())
+    }
+
+    async fn shutdown_active_ingestion_with_status(
+        &self,
+        mark_stopped_on_success: bool,
+    ) -> Result<()> {
         let active_task = {
             let mut active_task = self.active_task.lock().await;
             active_task.take()
@@ -99,50 +234,78 @@ impl IngestionSupervisor {
         }
 
         let kind = active_task.kind;
+        let run_id = active_task.run_id;
         let join_result = join_task(kind, active_task.join_handle).await;
 
         match &join_result {
-            Ok(()) if kind == ActiveIngestionKind::Live => {
-                self.runtime_mode.update(|snapshot| {
-                    snapshot.status = RuntimeModeStatus::Stopped;
-                    snapshot.last_error = None;
-                });
+            Ok(()) if kind == ActiveIngestionKind::Live && mark_stopped_on_success => {
+                update_runtime_if_current(
+                    &self.runtime_mode,
+                    self.current_run_id.as_ref(),
+                    run_id,
+                    |snapshot| {
+                        snapshot.status = RuntimeModeStatus::Stopped;
+                        snapshot.last_error = None;
+                    },
+                );
             }
-            Err(error) => mark_runtime_failed(&self.runtime_mode, error),
+            Err(error) => {
+                mark_runtime_failed(
+                    &self.runtime_mode,
+                    self.current_run_id.as_ref(),
+                    run_id,
+                    error,
+                );
+            }
             _ => {}
         }
 
         join_result
     }
 
-    pub async fn reset_runtime_state(&self, policy: RuntimeResetPolicy) -> Result<()> {
-        let result = self.reset_runtime_state_inner(policy).await;
+    async fn reset_runtime_state_with_status(
+        &self,
+        policy: RuntimeResetPolicy,
+        mark_stopped_on_success: bool,
+    ) -> Result<()> {
+        let run_id = self.current_run_id.load(Ordering::SeqCst);
+        let result = self
+            .reset_runtime_state_inner(policy, run_id, mark_stopped_on_success)
+            .await;
 
         if let Err(error) = &result {
-            mark_runtime_failed(&self.runtime_mode, error);
+            mark_runtime_failed(
+                &self.runtime_mode,
+                self.current_run_id.as_ref(),
+                run_id,
+                error,
+            );
         }
 
         result
     }
 
-    pub async fn stop_and_reset(&self, policy: RuntimeResetPolicy) -> Result<()> {
-        self.shutdown_active_ingestion().await?;
-        self.reset_runtime_state(policy).await
-    }
-
-    fn spawn_replay_task(&self) -> ActiveIngestionTask {
+    fn spawn_replay_task(
+        &self,
+        settings: IngestionSettings,
+        run_id: u64,
+        reset_storage_before_start: bool,
+    ) -> ActiveIngestionTask {
         let runtime_mode = self.runtime_mode.clone();
-        let settings = self.ingestion_settings.clone();
+        let current_run_id = self.current_run_id.clone();
         let detector_settings = self.detector_settings.clone();
         let pg_pool = self.pg_pool.clone();
         let redis_cache = self.redis_cache.clone();
         let counters = self.counters.clone();
 
-        mark_runtime_started(&runtime_mode);
+        mark_runtime_started(&runtime_mode, current_run_id.as_ref(), run_id);
 
         let join_handle = tokio::spawn(async move {
             let result = async {
-                reset_replay_storage_if_needed(&settings, &pg_pool).await?;
+                if reset_storage_before_start {
+                    reset_replay_storage_if_needed(&settings, &pg_pool).await?;
+                }
+
                 ingestion::run_replay_ingestion(
                     &settings,
                     pg_pool,
@@ -159,27 +322,35 @@ impl IngestionSupervisor {
 
             match &result {
                 Ok(()) => {
-                    runtime_mode.update(|snapshot| {
-                        snapshot.status = RuntimeModeStatus::Completed;
-                        snapshot.last_error = None;
-                    });
+                    update_runtime_if_current(
+                        &runtime_mode,
+                        current_run_id.as_ref(),
+                        run_id,
+                        |snapshot| {
+                            snapshot.status = RuntimeModeStatus::Completed;
+                            snapshot.last_error = None;
+                        },
+                    );
                 }
-                Err(error) => mark_runtime_failed(&runtime_mode, error),
+                Err(error) => {
+                    mark_runtime_failed(&runtime_mode, current_run_id.as_ref(), run_id, error);
+                }
             }
 
             result
         });
 
         ActiveIngestionTask {
+            run_id,
             kind: ActiveIngestionKind::Replay,
             join_handle,
             shutdown_tx: None,
         }
     }
 
-    fn spawn_live_task(&self) -> ActiveIngestionTask {
+    fn spawn_live_task(&self, settings: IngestionSettings, run_id: u64) -> ActiveIngestionTask {
         let runtime_mode = self.runtime_mode.clone();
-        let settings = self.ingestion_settings.clone();
+        let current_run_id = self.current_run_id.clone();
         let binance_settings = self.binance_settings.clone();
         let detector_settings = self.detector_settings.clone();
         let pg_pool = self.pg_pool.clone();
@@ -187,7 +358,7 @@ impl IngestionSupervisor {
         let counters = self.counters.clone();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-        mark_runtime_started(&runtime_mode);
+        mark_runtime_started(&runtime_mode, current_run_id.as_ref(), run_id);
 
         let join_handle = tokio::spawn(async move {
             let result = ingestion::run_live_ingestion(
@@ -204,34 +375,151 @@ impl IngestionSupervisor {
             .map(|_| ());
 
             if let Err(error) = &result {
-                mark_runtime_failed(&runtime_mode, error);
+                mark_runtime_failed(&runtime_mode, current_run_id.as_ref(), run_id, error);
             }
 
             result
         });
 
         ActiveIngestionTask {
+            run_id,
             kind: ActiveIngestionKind::Live,
             join_handle,
             shutdown_tx: Some(shutdown_tx),
         }
     }
+
+    fn resolve_switch_request(
+        &self,
+        command: RuntimeModeSwitchCommand,
+    ) -> std::result::Result<ResolvedSwitchRequest, SwitchModeError> {
+        let mode = match command.mode.as_str() {
+            "replay" => IngestionMode::Replay,
+            "live" => IngestionMode::Live,
+            _ => {
+                return Err(SwitchModeError::Validation(format!(
+                    "runtime mode must be `replay` or `live`: {}",
+                    command.mode
+                )));
+            }
+        };
+
+        let symbols = match command.symbols {
+            Some(symbols) => parse_symbols(symbols)?,
+            None => self.ingestion_settings.symbols.clone(),
+        };
+
+        if mode == IngestionMode::Live && symbols.is_empty() {
+            return Err(SwitchModeError::Validation(String::from(
+                "live mode requires at least one symbol",
+            )));
+        }
+
+        Ok(ResolvedSwitchRequest {
+            mode,
+            symbols,
+            reset_policy: RuntimeResetPolicy {
+                reset_state: command.reset_state.unwrap_or(true),
+                reset_storage: command.reset_storage.unwrap_or(true),
+            },
+        })
+    }
+
+    fn settings_for_mode(&self, mode: IngestionMode, symbols: Vec<Symbol>) -> IngestionSettings {
+        let mut settings = self.ingestion_settings.clone();
+        settings.mode = mode;
+        settings.symbols = symbols;
+        settings
+    }
+
+    fn next_run_id(&self) -> u64 {
+        self.next_run_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    async fn reset_runtime_state_inner(
+        &self,
+        policy: RuntimeResetPolicy,
+        run_id: u64,
+        mark_stopped_on_success: bool,
+    ) -> Result<()> {
+        if policy.reset_state {
+            self.redis_cache
+                .clear_market_state_cache()
+                .await
+                .context("failed to clear runtime market state cache")?;
+        }
+
+        if policy.reset_storage {
+            reset_demo_storage(&self.pg_pool).await?;
+        }
+
+        if (policy.reset_state || policy.reset_storage) && mark_stopped_on_success {
+            update_runtime_if_current(
+                &self.runtime_mode,
+                self.current_run_id.as_ref(),
+                run_id,
+                |snapshot| {
+                    snapshot.status = RuntimeModeStatus::Stopped;
+                    snapshot.last_error = None;
+                },
+            );
+        }
+
+        Ok(())
+    }
 }
 
-fn mark_runtime_started(runtime_mode: &RuntimeModeHandle) {
+fn parse_symbols(raw_symbols: Vec<String>) -> std::result::Result<Vec<Symbol>, SwitchModeError> {
+    if raw_symbols.is_empty() {
+        return Err(SwitchModeError::Validation(String::from(
+            "symbols must contain at least one symbol",
+        )));
+    }
+
+    raw_symbols
+        .into_iter()
+        .map(|raw_symbol| {
+            Symbol::new(raw_symbol.clone()).map_err(|error| {
+                SwitchModeError::Validation(format!(
+                    "invalid runtime symbol `{raw_symbol}`: {error}"
+                ))
+            })
+        })
+        .collect()
+}
+
+fn mark_runtime_started(runtime_mode: &RuntimeModeHandle, current_run_id: &AtomicU64, run_id: u64) {
     let started_at = Utc::now();
-    runtime_mode.update(|snapshot| {
+    update_runtime_if_current(runtime_mode, current_run_id, run_id, |snapshot| {
         snapshot.status = RuntimeModeStatus::Running;
         snapshot.last_started_at = started_at;
         snapshot.last_error = None;
     });
 }
 
-fn mark_runtime_failed(runtime_mode: &RuntimeModeHandle, error: &anyhow::Error) {
-    runtime_mode.update(|snapshot| {
+fn mark_runtime_failed(
+    runtime_mode: &RuntimeModeHandle,
+    current_run_id: &AtomicU64,
+    run_id: u64,
+    error: &anyhow::Error,
+) {
+    update_runtime_if_current(runtime_mode, current_run_id, run_id, |snapshot| {
         snapshot.status = RuntimeModeStatus::Failed;
         snapshot.last_error = Some(error.to_string());
     });
+}
+
+fn update_runtime_if_current(
+    runtime_mode: &RuntimeModeHandle,
+    current_run_id: &AtomicU64,
+    run_id: u64,
+    update: impl FnOnce(&mut RuntimeModeSnapshot),
+) {
+    if current_run_id.load(Ordering::SeqCst) != run_id {
+        return;
+    }
+
+    runtime_mode.update(update);
 }
 
 async fn join_task(kind: ActiveIngestionKind, join_handle: JoinHandle<Result<()>>) -> Result<()> {
@@ -258,30 +546,6 @@ async fn reset_demo_storage(postgres_pool: &PgPool) -> Result<()> {
         .context("failed to reset replay historical tables")
 }
 
-impl IngestionSupervisor {
-    async fn reset_runtime_state_inner(&self, policy: RuntimeResetPolicy) -> Result<()> {
-        if policy.reset_state {
-            self.redis_cache
-                .clear_market_state_cache()
-                .await
-                .context("failed to clear runtime market state cache")?;
-        }
-
-        if policy.reset_storage {
-            reset_demo_storage(&self.pg_pool).await?;
-        }
-
-        if policy.reset_state || policy.reset_storage {
-            self.runtime_mode.update(|snapshot| {
-                snapshot.status = RuntimeModeStatus::Stopped;
-                snapshot.last_error = None;
-            });
-        }
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -290,11 +554,11 @@ mod tests {
     use rust_decimal::Decimal;
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
-    use super::IngestionSupervisor;
+    use super::{IngestionSupervisor, RuntimeModeSwitchCommand, SwitchModeError};
     use crate::{
         config::{BinanceSettings, DetectorSettings, IngestionMode, IngestionSettings},
         domain::Symbol,
-        runtime::{RuntimeModeStatus, RuntimeResetPolicy},
+        runtime::{RuntimeModeSource, RuntimeModeStatus, RuntimeResetPolicy},
         storage::RedisCache,
         telemetry::InternalCounters,
     };
@@ -307,7 +571,7 @@ mod tests {
         assert_eq!(snapshot.mode.as_str(), "replay");
         assert_eq!(snapshot.status, RuntimeModeStatus::Running);
         assert_eq!(snapshot.symbols.len(), 1);
-        assert!(!snapshot.switching_supported);
+        assert!(snapshot.switching_supported);
     }
 
     #[tokio::test]
@@ -333,6 +597,57 @@ mod tests {
             supervisor.runtime_mode_handle().snapshot().status,
             RuntimeModeStatus::Running
         );
+    }
+
+    #[tokio::test]
+    async fn concurrent_switch_attempt_returns_conflict() {
+        let supervisor = test_supervisor(IngestionMode::Replay);
+        let _guard = supervisor.switch_guard.lock().await;
+
+        let error = supervisor
+            .switch_mode(RuntimeModeSwitchCommand {
+                mode: String::from("replay"),
+                symbols: None,
+                reset_state: Some(false),
+                reset_storage: Some(false),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, SwitchModeError::Conflict));
+    }
+
+    #[tokio::test]
+    async fn switch_mode_updates_snapshot_to_runtime_source() {
+        let supervisor = test_supervisor(IngestionMode::Replay);
+
+        let snapshot = supervisor
+            .switch_mode(RuntimeModeSwitchCommand {
+                mode: String::from("replay"),
+                symbols: Some(vec![String::from("ethusdt"), String::from("solusdt")]),
+                reset_state: Some(false),
+                reset_storage: Some(false),
+            })
+            .await
+            .unwrap();
+        supervisor.shutdown_active_ingestion().await.unwrap();
+
+        assert_eq!(snapshot.mode.as_str(), "replay");
+        assert_eq!(snapshot.source, RuntimeModeSource::Runtime);
+        assert!(snapshot.switching_supported);
+        assert_eq!(
+            snapshot.symbols,
+            vec![
+                Symbol::new("ETHUSDT").unwrap(),
+                Symbol::new("SOLUSDT").unwrap()
+            ]
+        );
+        assert!(matches!(
+            snapshot.status,
+            RuntimeModeStatus::Running | RuntimeModeStatus::Completed
+        ));
+        assert!(snapshot.last_switched_at.is_some());
+        assert_eq!(snapshot.last_error, None);
     }
 
     #[tokio::test]

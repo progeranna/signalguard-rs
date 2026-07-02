@@ -12,6 +12,7 @@ use crate::storage::{CacheError, StorageError};
 pub enum ApiError {
     InvalidSymbol(String),
     InvalidRequest(String),
+    Conflict(String),
     NotFound(String),
     CacheUnavailable,
     Internal(String),
@@ -28,6 +29,7 @@ impl IntoResponse for ApiError {
         let (status, error, message) = match self {
             Self::InvalidSymbol(message) => (StatusCode::BAD_REQUEST, "invalid_symbol", message),
             Self::InvalidRequest(message) => (StatusCode::BAD_REQUEST, "invalid_request", message),
+            Self::Conflict(message) => (StatusCode::CONFLICT, "conflict", message),
             Self::NotFound(message) => (StatusCode::NOT_FOUND, "not_found", message),
             Self::CacheUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -112,5 +114,12 @@ mod tests {
         let response = ApiError::InvalidRequest(String::from("invalid limit")).into_response();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn conflict_maps_to_conflict() {
+        let response = ApiError::Conflict(String::from("already switching")).into_response();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 }
