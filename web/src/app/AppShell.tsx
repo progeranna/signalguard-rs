@@ -10,7 +10,6 @@ import {
   useSelectedSymbol,
 } from "@/features/dashboard/selectedSymbol";
 import type { DashboardSummary } from "@/features/dashboard/types";
-import { formatAgeMs } from "@/shared/lib/format";
 import { statusToneMap, toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 type HeaderMenu = "mode" | "symbol" | null;
@@ -362,7 +361,6 @@ function buildHeaderDataStatus(
           ? "healthy"
           : "neutral";
   const lastEventTime = getLatestEventTime(summary);
-  const lastEventAge = summary.pipeline.last_message_age_ms;
 
   return {
     label:
@@ -370,10 +368,10 @@ function buildHeaderDataStatus(
         ? "Data Healthy"
         : tone === "degraded"
           ? "Data Degraded"
-          : tone === "critical"
+        : tone === "critical"
             ? "Data Critical"
             : "Status Unknown",
-    lastUpdateLabel: buildLastUpdateLabel(lastEventTime, lastEventAge),
+    lastUpdateLabel: buildLastUpdateLabel(lastEventTime),
     tone,
   };
 }
@@ -392,23 +390,11 @@ function getLatestEventTime(summary: DashboardSummary): string | null {
   });
 }
 
-function buildLastUpdateLabel(
-  absoluteTimestamp: string | null,
-  lastEventAgeMs: number | null,
-): string {
-  const relativeAge = lastEventAgeMs === null ? null : `${formatAgeMs(lastEventAgeMs)} ago`;
+function buildLastUpdateLabel(absoluteTimestamp: string | null): string {
   const absoluteLabel = absoluteTimestamp ? formatHeaderTimestamp(absoluteTimestamp) : null;
-
-  if (absoluteLabel && relativeAge) {
-    return `Last update: ${absoluteLabel} · ${relativeAge}`;
-  }
 
   if (absoluteLabel) {
     return `Last update: ${absoluteLabel}`;
-  }
-
-  if (relativeAge) {
-    return `Last update: ${relativeAge}`;
   }
 
   return "Last update: unavailable";
