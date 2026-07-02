@@ -179,10 +179,30 @@ function HeaderSymbolSelector({
   selectedSymbol: string;
   selectorRef: RefObject<HTMLDivElement>;
 }) {
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const normalizedSelectedSymbol = normalizeSelectedSymbol(selectedSymbol);
   const hasKnownSelectedSymbol = availableSymbols.some(
     (symbol) => normalizeSelectedSymbol(symbol) === normalizedSelectedSymbol,
   );
+  const trimmedQuery = searchQuery.trim().toUpperCase();
+  const filteredSymbols = trimmedQuery
+    ? availableSymbols.filter((symbol) => symbol.toUpperCase().includes(trimmedQuery))
+    : availableSymbols;
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSearchQuery("");
+      return;
+    }
+
+    searchInputRef.current?.focus();
+  }, [isOpen]);
+
+  function handleSelect(symbol: string) {
+    setSearchQuery("");
+    onSelect(symbol);
+  }
 
   return (
     <div ref={selectorRef} className="relative lg:min-w-0">
@@ -210,8 +230,18 @@ function HeaderSymbolSelector({
           role="menu"
           className="absolute right-0 top-full z-20 mt-2 min-w-[11rem] overflow-hidden rounded-xl border border-white/10 bg-[var(--sg-panel-strong)] shadow-[0_18px_40px_rgba(2,6,23,0.44)]"
         >
+          <div className="border-b border-white/10 px-3 py-2">
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search symbol"
+              className="w-full rounded-lg border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-medium text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+            />
+          </div>
           <div className="max-h-72 overflow-y-auto py-1">
-            {availableSymbols.map((symbol) => {
+            {filteredSymbols.length > 0 ? filteredSymbols.map((symbol) => {
               const isSelected =
                 hasKnownSelectedSymbol &&
                 normalizeSelectedSymbol(symbol) === normalizedSelectedSymbol;
@@ -222,7 +252,7 @@ function HeaderSymbolSelector({
                   type="button"
                   role="menuitemradio"
                   aria-checked={isSelected}
-                  onClick={() => onSelect(symbol)}
+                  onClick={() => handleSelect(symbol)}
                   className={[
                     "flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left text-sm font-semibold transition",
                     isSelected
@@ -238,7 +268,11 @@ function HeaderSymbolSelector({
                   ) : null}
                 </button>
               );
-            })}
+            }) : (
+              <div className="px-3 py-3 text-sm font-medium text-slate-500">
+                No matching symbols
+              </div>
+            )}
           </div>
         </div>
       ) : null}
