@@ -1,6 +1,5 @@
-import type { RefObject } from "react";
-import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect } from "react";
+import { Link, useParams } from "react-router-dom";
 
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
 import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
@@ -21,8 +20,6 @@ import {
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 export function SymbolDetailPage() {
-  const navigate = useNavigate();
-  const selectorRef = useRef<HTMLDivElement | null>(null);
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const summary = dashboardSummaryQuery.data ?? null;
   const availableSymbols = summary?.symbols ?? [];
@@ -37,13 +34,6 @@ export function SymbolDetailPage() {
   const isKnownSymbol = selectedSummary !== null;
   const statusTone = toStatusTone(selectedSummary?.health?.status, "neutral");
   const symbolStatusText = formatStatusLabel(selectedSummary?.health?.status);
-  const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
-
-  function handleSymbolChange(nextSymbol: string) {
-    storeSelectedSymbol(nextSymbol);
-    setIsSymbolMenuOpen(false);
-    navigate(`/symbols/${nextSymbol}`);
-  }
 
   useEffect(() => {
     if (isKnownSymbol && selectedSummary) {
@@ -51,66 +41,22 @@ export function SymbolDetailPage() {
     }
   }, [isKnownSymbol, selectedSummary]);
 
-  useEffect(() => {
-    setIsSymbolMenuOpen(false);
-  }, [selectedSymbol]);
-
-  useEffect(() => {
-    if (!isSymbolMenuOpen) {
-      return undefined;
-    }
-
-    function handlePointerDown(event: MouseEvent) {
-      if (!selectorRef.current?.contains(event.target as Node)) {
-        setIsSymbolMenuOpen(false);
-      }
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsSymbolMenuOpen(false);
-      }
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isSymbolMenuOpen]);
-
   return (
     <section className="space-y-4">
       <section className="sg-panel overflow-visible px-5 py-5 sm:px-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div className="space-y-3">
-            <p className="font-mono text-xs uppercase tracking-[0.24em] text-cyan-200/80">
-              Dashboard / Symbol
-            </p>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                {selectedSymbol}
-              </h1>
-              <StatusBadge status={statusTone} text={symbolStatusText} />
-            </div>
-            <p className="max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
-              Symbol-level market-data quality, freshness, and anomaly context.
-            </p>
+        <div className="space-y-3">
+          <p className="font-mono text-xs uppercase tracking-[0.24em] text-cyan-200/80">
+            Dashboard / Symbol
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+              {selectedSymbol}
+            </h1>
+            <StatusBadge status={statusTone} text={symbolStatusText} />
           </div>
-
-          {availableSymbols.length > 0 ? (
-            <SymbolSelector
-              availableSymbols={availableSymbols}
-              isKnownSymbol={isKnownSymbol}
-              isSymbolMenuOpen={isSymbolMenuOpen}
-              onChange={handleSymbolChange}
-              onToggle={() => setIsSymbolMenuOpen((open) => !open)}
-              selectedSymbol={selectedSymbol}
-              selectorRef={selectorRef}
-            />
-          ) : null}
+          <p className="max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
+            Symbol-level market-data quality, freshness, and anomaly context.
+          </p>
         </div>
 
         {dashboardSummaryQuery.isLoading || isKnownSymbol ? (
@@ -311,83 +257,6 @@ function SymbolNotFoundState({
         <FlatEmptyState message="No monitored symbols are available from the current dashboard summary." />
       )}
     </section>
-  );
-}
-
-function SymbolSelector({
-  availableSymbols,
-  isKnownSymbol,
-  isSymbolMenuOpen,
-  onChange,
-  onToggle,
-  selectedSymbol,
-  selectorRef,
-}: {
-  availableSymbols: DashboardSymbolSummary[];
-  isKnownSymbol: boolean;
-  isSymbolMenuOpen: boolean;
-  onChange: (symbol: string) => void;
-  onToggle: () => void;
-  selectedSymbol: string;
-  selectorRef: RefObject<HTMLDivElement>;
-}) {
-  return (
-    <div
-      ref={selectorRef}
-      className="relative flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400"
-    >
-      <span>Monitored symbol</span>
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={isSymbolMenuOpen}
-        onClick={onToggle}
-        className="flex min-w-[12rem] items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-semibold tracking-normal text-slate-100 transition hover:border-white/20 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      >
-        <span>{isKnownSymbol ? selectedSymbol : "Choose a symbol"}</span>
-        <span
-          aria-hidden="true"
-          className={`text-slate-500 transition ${isSymbolMenuOpen ? "rotate-180" : ""}`}
-        >
-          ▾
-        </span>
-      </button>
-      {isSymbolMenuOpen ? (
-        <div
-          role="menu"
-          className="absolute right-0 top-full z-20 mt-2 min-w-[12rem] overflow-hidden rounded-xl border border-white/10 bg-[var(--sg-panel-strong)] shadow-[0_18px_40px_rgba(2,6,23,0.44)]"
-        >
-          <div className="max-h-72 overflow-y-auto py-1">
-            {availableSymbols.map((entry) => {
-              const isSelected = normalizeSymbol(entry.symbol) === selectedSymbol;
-
-              return (
-                <button
-                  key={entry.symbol}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={isSelected}
-                  onClick={() => onChange(entry.symbol)}
-                  className={[
-                    "flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left text-sm font-semibold tracking-normal transition",
-                    isSelected
-                      ? "bg-cyan-400/10 text-cyan-100"
-                      : "text-slate-200 hover:bg-white/[0.04] hover:text-white",
-                  ].join(" ")}
-                >
-                  <span>{entry.symbol}</span>
-                  {isSelected ? (
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200/90">
-                      Current
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
-    </div>
   );
 }
 

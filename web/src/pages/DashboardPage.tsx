@@ -36,7 +36,7 @@ export function DashboardPage() {
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const summary = dashboardSummaryQuery.data ?? null;
   const availableSymbols = summary?.symbols.map((symbol) => symbol.symbol) ?? [];
-  const { selectedSymbol, setSelectedSymbol } = useSelectedSymbol(availableSymbols);
+  const { selectedSymbol } = useSelectedSymbol(availableSymbols);
 
   return (
     <section className="space-y-3">
@@ -48,9 +48,7 @@ export function DashboardPage() {
         />
       ) : null}
 
-      <DashboardSummaryGrid summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
       <MarketSignalShell
-        onSymbolSelect={setSelectedSymbol}
         selectedSignalSymbol={selectedSymbol}
         summary={summary}
         isLoading={dashboardSummaryQuery.isLoading}
@@ -76,160 +74,11 @@ function formatTickerPercent(value: number | null | undefined): string {
   return `${value.toFixed(2)}%`;
 }
 
-function symbolHealthBreakdown(symbols: DashboardSymbolSummary[]): string {
-  if (symbols.length === 0) {
-    return "No symbols";
-  }
-
-  const healthyCount = symbols.filter(
-    (symbol) => symbol.health?.status === "healthy",
-  ).length;
-  const attentionCount = symbols.filter(
-    (symbol) =>
-      symbol.health?.status === "degraded" ||
-      symbol.health?.status === "unhealthy",
-  ).length;
-  const unknownCount = symbols.filter((symbol) => !symbol.health?.status).length;
-
-  if (healthyCount === 0 && attentionCount === 0 && unknownCount > 0) {
-    return "Health Unknown";
-  }
-
-  if (attentionCount > 0) {
-    return `${attentionCount} need attention`;
-  }
-
-  return `${healthyCount} healthy`;
-}
-
-function DashboardSummaryGrid({
-  summary,
-  isLoading,
-}: {
-  summary: DashboardSummary | null;
-  isLoading: boolean;
-}) {
-  if (isLoading) {
-    return (
-      <section className="sg-panel px-4 py-4">
-        <LoadingSkeleton className="h-24" />
-      </section>
-    );
-  }
-
-  const symbols = summary?.symbols ?? [];
-  const anomalies = summary?.recent_anomalies ?? [];
-  const pipelineStatus = summary?.pipeline.status;
-  const pipelineTone = pipelineStatus ? toStatusTone(pipelineStatus) : "neutral";
-  const hasCriticalAnomaly = anomalies.some((anomaly) => anomaly.severity === "critical");
-  const anomalyTone: StatusTone = hasCriticalAnomaly
-    ? "critical"
-    : anomalies.length > 0
-      ? "warning"
-      : "healthy";
-
-  return (
-    <section className="sg-panel overflow-hidden px-4 py-4">
-      <div className="grid gap-y-4 divide-y divide-white/10 md:grid-cols-4 md:divide-x md:divide-y-0">
-        <SummaryCell
-          description={serviceStatusMessage(pipelineStatus)}
-          label="Service Health"
-          tone={pipelineTone}
-          value={statusLabel(pipelineStatus)}
-        />
-        <SummaryCell
-          description={`Freshness ${formatOptionalAge(summary?.pipeline.last_message_age_ms)}`}
-          label="Pipeline Health"
-          tone={pipelineTone}
-          value={statusLabel(pipelineStatus)}
-        />
-        <SummaryCell
-          description={symbolHealthBreakdown(symbols)}
-          label="Tracked Symbols"
-          tone="neutral"
-          value={String(symbols.length)}
-        />
-        <SummaryCell
-          description="Current summary window"
-          label="Recent Anomalies"
-          tone={anomalyTone}
-          value={String(anomalies.length)}
-        />
-      </div>
-    </section>
-  );
-}
-
-function SummaryCell({
-  description,
-  label,
-  tone,
-  value,
-}: {
-  description: string;
-  label: string;
-  tone: StatusTone;
-  value: string;
-}) {
-  return (
-    <div className="pt-4 first:pt-0 md:px-4 md:pt-0 md:first:pl-0 md:last:pr-0">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-          {label}
-        </p>
-        <span className={`mt-0.5 h-2 w-2 rounded-full ${summaryDotClass(tone)}`} />
-      </div>
-      <p className={`mt-2 text-2xl font-extrabold leading-none tracking-tight ${summaryValueClass(tone)}`}>
-        {value}
-      </p>
-      <p className="mt-1 text-sm leading-5 text-slate-400">{description}</p>
-    </div>
-  );
-}
-
-function summaryDotClass(tone: StatusTone): string {
-  switch (tone) {
-    case "healthy":
-      return "bg-emerald-300";
-    case "degraded":
-    case "warning":
-      return "bg-amber-300";
-    case "unhealthy":
-    case "critical":
-      return "bg-rose-300";
-    case "info":
-    case "ok":
-      return "bg-cyan-300";
-    default:
-      return "bg-slate-500";
-  }
-}
-
-function summaryValueClass(tone: StatusTone): string {
-  switch (tone) {
-    case "healthy":
-      return "text-emerald-300";
-    case "degraded":
-    case "warning":
-      return "text-amber-300";
-    case "unhealthy":
-    case "critical":
-      return "text-rose-300";
-    case "info":
-    case "ok":
-      return "text-cyan-100";
-    default:
-      return "text-white";
-  }
-}
-
 function MarketSignalShell({
-  onSymbolSelect,
   selectedSignalSymbol,
   summary,
   isLoading,
 }: {
-  onSymbolSelect: (symbol: string) => void;
   selectedSignalSymbol: string;
   summary: DashboardSummary | null;
   isLoading: boolean;
@@ -248,217 +97,154 @@ function MarketSignalShell({
   const signalSeverity = highestAnomalySeverity(selectedAnomalies);
 
   return (
-    <section className="overflow-hidden border-y border-white/10 bg-[var(--sg-panel)] px-4 py-2.5 shadow-[0_14px_34px_rgba(2,6,23,0.18)] sm:px-5">
-      <div className="flex flex-col gap-2 border-b border-white/10 pb-2.5 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h3 className="text-xl font-bold tracking-tight text-white">
-            {selectedSymbol?.symbol ?? selectedSignalSymbol} Signal View
-          </h3>
-          <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-400">
-            Current market-data quality signal based on price, spread, freshness, throughput, and anomaly markers.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {symbols.length > 0 ? (
-            <DashboardSignalSymbolSelector
-              onSymbolSelect={onSymbolSelect}
-              selectedSymbol={selectedSymbol?.symbol ?? selectedSignalSymbol}
-              symbols={symbols}
-            />
-          ) : null}
-          <StatusBadge status="info" text="Latest state" />
-          {selectedSymbol ? (
-            <StatusBadge
-              status={toStatusTone(selectedSymbol.health?.status, "neutral")}
-              text={selectedSymbol.health?.status ?? "Unknown"}
-            />
-          ) : null}
-        </div>
-      </div>
-
+    <section>
       {isLoading ? (
-        <LoadingSkeleton className="mt-2.5 h-40" />
+        <LoadingSkeleton className="h-40" />
       ) : !selectedSymbol || signalSeries.length === 0 ? (
         <EmptyBlock message="No monitored symbol state available for the signal preview." />
       ) : (
-        <div className="mt-2.5">
-          <div className="rounded-xl border border-white/10 bg-[#0b141d] px-3 py-2.5 sm:px-4">
-            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="flex flex-wrap items-center gap-2 font-mono text-sm font-bold text-white">
-                  <span>{selectedSymbol.symbol}</span>
-                  {signalSeverity ? (
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
-                        signalSeverity,
-                      )}`}
-                    >
-                      {statusLabel(signalSeverity)} signal
-                    </span>
-                  ) : null}
-                </p>
-              </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_248px]">
+          <div className="rounded-xl border border-slate-700/70 bg-slate-950/70 px-3 py-2.5 sm:px-4">
+            <div className="mb-2">
+              <p className="flex flex-wrap items-center gap-2 font-mono text-sm font-bold text-white">
+                <span>{selectedSymbol.symbol}</span>
+                {signalSeverity ? (
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
+                      signalSeverity,
+                    )}`}
+                  >
+                    {statusLabel(signalSeverity)} signal
+                  </span>
+                ) : null}
+              </p>
             </div>
-
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_248px]">
-              <div className="flex min-h-[190px] rounded-xl border border-slate-700/70 bg-slate-950/70">
-                <div className="relative min-h-0 flex-1 overflow-hidden">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                      data={signalSeries}
-                      margin={{ top: 4, right: 14, bottom: 2, left: 0 }}
-                    >
-                      <defs>
-                        <linearGradient id="qualitySignalFill" x1="0" x2="0" y1="0" y2="1">
-                          <stop offset="0%" stopColor="#7EE45B" stopOpacity={0.2} />
-                          <stop offset="100%" stopColor="#7EE45B" stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid
-                        stroke="rgba(100,116,139,0.18)"
-                        strokeDasharray="3 8"
-                        vertical={false}
-                      />
-                      <XAxis
-                        axisLine={false}
-                        dataKey="label"
-                        height={34}
-                        label={{
-                          value: "Preview sequence",
-                          position: "insideBottom",
-                          offset: -2,
-                          fill: "#64748b",
-                          fontSize: 11,
-                        }}
-                        tick={{ fill: "#64748b", fontSize: 11 }}
-                        tickLine={false}
-                        tickMargin={2}
-                      />
-                      <YAxis
-                        axisLine={false}
-                        domain={signalDomain}
-                        label={{
-                          value: "Quality signal",
-                          angle: -90,
-                          position: "insideLeft",
-                          fill: "#64748b",
-                          fontSize: 11,
-                        }}
-                        tick={{ fill: "#64748b", fontSize: 11 }}
-                        tickLine={false}
-                        width={40}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: "#0E1822",
-                          border: "1px solid rgba(148,163,184,0.18)",
-                          borderRadius: "10px",
-                          color: "#e2e8f0",
-                        }}
-                        formatter={(value) => [`${value}`, "Signal"]}
-                        labelFormatter={() => "Summary-backed preview"}
-                      />
-                      {signalSeries
-                        .filter((point) => point.severity)
-                        .map((point) => (
-                          <ReferenceLine
-                            key={`marker-${point.label}`}
-                            stroke={anomalySeverityColor(point.severity)}
-                            strokeDasharray="3 4"
-                            strokeOpacity={0.85}
-                            x={point.label}
-                          />
-                        ))}
-                      <Area
-                        baseValue={signalDomain[0]}
-                        dataKey="signal"
-                        fill="url(#qualitySignalFill)"
-                        isAnimationActive={false}
-                        stroke="#7EE45B"
-                        strokeWidth={2.4}
-                        type="monotone"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+            <div className="flex min-h-[190px] rounded-xl border border-slate-700/70 bg-slate-950/70">
+              <div className="relative min-h-0 flex-1 overflow-hidden">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={signalSeries}
+                    margin={{ top: 4, right: 14, bottom: 2, left: 0 }}
+                  >
+                    <defs>
+                      <linearGradient id="qualitySignalFill" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="0%" stopColor="#7EE45B" stopOpacity={0.2} />
+                        <stop offset="100%" stopColor="#7EE45B" stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid
+                      stroke="rgba(100,116,139,0.18)"
+                      strokeDasharray="3 8"
+                      vertical={false}
+                    />
+                    <XAxis
+                      axisLine={false}
+                      dataKey="label"
+                      height={34}
+                      label={{
+                        value: "Preview sequence",
+                        position: "insideBottom",
+                        offset: -2,
+                        fill: "#64748b",
+                        fontSize: 11,
+                      }}
+                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tickLine={false}
+                      tickMargin={2}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      domain={signalDomain}
+                      label={{
+                        value: "Quality signal",
+                        angle: -90,
+                        position: "insideLeft",
+                        fill: "#64748b",
+                        fontSize: 11,
+                      }}
+                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tickLine={false}
+                      width={40}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: "#0E1822",
+                        border: "1px solid rgba(148,163,184,0.18)",
+                        borderRadius: "10px",
+                        color: "#e2e8f0",
+                      }}
+                      formatter={(value) => [`${value}`, "Signal"]}
+                      labelFormatter={() => "Summary-backed preview"}
+                    />
+                    {signalSeries
+                      .filter((point) => point.severity)
+                      .map((point) => (
+                        <ReferenceLine
+                          key={`marker-${point.label}`}
+                          stroke={anomalySeverityColor(point.severity)}
+                          strokeDasharray="3 4"
+                          strokeOpacity={0.85}
+                          x={point.label}
+                        />
+                      ))}
+                    <Area
+                      baseValue={signalDomain[0]}
+                      dataKey="signal"
+                      fill="url(#qualitySignalFill)"
+                      isAnimationActive={false}
+                      stroke="#7EE45B"
+                      strokeWidth={2.4}
+                      type="monotone"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-
-              <aside className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2.5">
-                <div className="border-b border-white/10 pb-1.5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    Signal Snapshot
-                  </p>
-                  <p className="mt-0.5 text-xs font-medium text-slate-300">
-                    Current summary-backed state
-                  </p>
-                </div>
-                <div className="mt-2 space-y-1">
-                  <SignalSnapshotMetric
-                    label="Price"
-                    value={formatTickerPrice(selectedSymbol.state?.last_trade_price)}
-                  />
-                  <SignalSnapshotMetric
-                    label="Spread"
-                    value={formatTickerPercent(selectedSymbol.state?.spread_pct)}
-                  />
-                  <SignalSnapshotMetric
-                    label="Trades/min"
-                    value={formatOptionalCompact(selectedSymbol.state?.trades_per_minute)}
-                  />
-                  <SignalSnapshotMetric
-                    label="Freshness"
-                    value={formatOptionalAge(
-                      selectedSymbol.state?.last_event_age_ms ??
-                        summary?.pipeline.last_message_age_ms,
-                    )}
-                  />
-                </div>
-              </aside>
             </div>
           </div>
+
+          <aside className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2.5">
+            <div className="border-b border-white/10 pb-1.5">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="font-mono text-sm font-bold text-white">
+                  {selectedSymbol.symbol}
+                </p>
+                <StatusBadge
+                  status={toStatusTone(selectedSymbol.health?.status, "neutral")}
+                  text={selectedSymbol.health?.status ?? "Unknown"}
+                />
+              </div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Signal Snapshot
+              </p>
+              <p className="mt-0.5 text-xs font-medium text-slate-300">
+                Current summary-backed state
+              </p>
+            </div>
+            <div className="mt-2 space-y-1">
+              <SignalSnapshotMetric
+                label="Price"
+                value={formatTickerPrice(selectedSymbol.state?.last_trade_price)}
+              />
+              <SignalSnapshotMetric
+                label="Spread"
+                value={formatTickerPercent(selectedSymbol.state?.spread_pct)}
+              />
+              <SignalSnapshotMetric
+                label="Trades/min"
+                value={formatOptionalCompact(selectedSymbol.state?.trades_per_minute)}
+              />
+              <SignalSnapshotMetric
+                label="Freshness"
+                value={formatOptionalAge(
+                  selectedSymbol.state?.last_event_age_ms ??
+                    summary?.pipeline.last_message_age_ms,
+                )}
+              />
+            </div>
+          </aside>
         </div>
       )}
     </section>
-  );
-}
-
-function DashboardSignalSymbolSelector({
-  onSymbolSelect,
-  selectedSymbol,
-  symbols,
-}: {
-  onSymbolSelect: (symbol: string) => void;
-  selectedSymbol: string;
-  symbols: DashboardSymbolSummary[];
-}) {
-  const normalizedSelectedSymbol = normalizeSelectedSymbol(selectedSymbol);
-
-  return (
-    <div
-      aria-label="Signal symbol"
-      className="flex flex-wrap gap-1 rounded-full border border-white/10 bg-[#08131d] p-1"
-    >
-      {symbols.map((symbol) => {
-        const isSelected = normalizeSelectedSymbol(symbol.symbol) === normalizedSelectedSymbol;
-
-        return (
-          <button
-            key={symbol.symbol}
-            type="button"
-            aria-pressed={isSelected}
-            onClick={() => onSymbolSelect(symbol.symbol)}
-            className={[
-              "rounded-full px-2.5 py-1 text-xs font-semibold transition",
-              isSelected
-                ? "bg-cyan-400/10 text-cyan-100"
-                : "text-slate-400 hover:bg-white/[0.05] hover:text-slate-100",
-            ].join(" ")}
-          >
-            {symbol.symbol}
-          </button>
-        );
-      })}
-    </div>
   );
 }
 
@@ -1177,19 +963,6 @@ function statusLabel(value: string | null | undefined): string {
   }
 
   return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function serviceStatusMessage(value: string | null | undefined): string {
-  switch (value) {
-    case "healthy":
-      return "All systems operational";
-    case "degraded":
-      return "Some market-data signals need attention";
-    case "unhealthy":
-      return "Critical data-quality issues detected";
-    default:
-      return "Dashboard summary unavailable";
-  }
 }
 
 function buildErrorMessage(error: unknown): string {
