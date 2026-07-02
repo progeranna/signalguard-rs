@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
@@ -21,6 +22,7 @@ import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 export function SymbolDetailPage() {
   const navigate = useNavigate();
+  const selectorRef = useRef<HTMLDivElement | null>(null);
   const dashboardSummaryQuery = useDashboardSummaryQuery();
   const summary = dashboardSummaryQuery.data ?? null;
   const availableSymbols = summary?.symbols ?? [];
@@ -35,10 +37,42 @@ export function SymbolDetailPage() {
   const isKnownSymbol = selectedSummary !== null;
   const statusTone = toStatusTone(selectedSummary?.health?.status, "neutral");
   const symbolStatusText = formatStatusLabel(selectedSummary?.health?.status);
+  const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
 
   function handleSymbolChange(nextSymbol: string) {
+    setIsSymbolMenuOpen(false);
     navigate(`/symbols/${nextSymbol}`);
   }
+
+  useEffect(() => {
+    setIsSymbolMenuOpen(false);
+  }, [selectedSymbol]);
+
+  useEffect(() => {
+    if (!isSymbolMenuOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!selectorRef.current?.contains(event.target as Node)) {
+        setIsSymbolMenuOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsSymbolMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isSymbolMenuOpen]);
 
   return (
     <section className="space-y-4">
@@ -50,25 +84,62 @@ export function SymbolDetailPage() {
           <div className="flex flex-col items-stretch gap-3 sm:items-end">
             <StatusBadge status={statusTone} text={symbolStatusText} />
             {availableSymbols.length > 0 ? (
-              <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <div
+                ref={selectorRef}
+                className="relative flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400"
+              >
                 <span>Monitored symbol</span>
-                <select
-                  value={isKnownSymbol ? selectedSymbol : ""}
-                  onChange={(event) => handleSymbolChange(event.target.value)}
-                  className="min-w-[12rem] rounded-xl border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-semibold tracking-normal text-slate-100 outline-none transition focus:border-cyan-400/40"
+                <button
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded={isSymbolMenuOpen}
+                  onClick={() => setIsSymbolMenuOpen((open) => !open)}
+                  className="flex min-w-[12rem] items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-semibold tracking-normal text-slate-100 transition hover:border-white/20 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
                 >
-                  {!isKnownSymbol ? (
-                    <option value="" disabled>
-                      Choose a symbol
-                    </option>
-                  ) : null}
-                  {availableSymbols.map((entry) => (
-                    <option key={entry.symbol} value={entry.symbol}>
-                      {entry.symbol}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <span>{isKnownSymbol ? selectedSymbol : "Choose a symbol"}</span>
+                  <span
+                    aria-hidden="true"
+                    className={`text-slate-500 transition ${isSymbolMenuOpen ? "rotate-180" : ""}`}
+                  >
+                    ▾
+                  </span>
+                </button>
+                {isSymbolMenuOpen ? (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full z-20 mt-2 min-w-[12rem] overflow-hidden rounded-xl border border-white/10 bg-[var(--sg-panel-strong)] shadow-[0_18px_40px_rgba(2,6,23,0.44)]"
+                  >
+                    <div className="max-h-72 overflow-y-auto py-1">
+                      {availableSymbols.map((entry) => {
+                        const isSelected = normalizeSymbol(entry.symbol) === selectedSymbol;
+
+                        return (
+                          <button
+                            key={entry.symbol}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={isSelected}
+                            onClick={() => handleSymbolChange(entry.symbol)}
+                            className={[
+                              "flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left text-sm font-semibold tracking-normal transition",
+                              isSelected
+                                ? "bg-cyan-400/10 text-cyan-100"
+                                : "text-slate-200 hover:bg-white/[0.04] hover:text-white",
+                            ].join(" ")}
+                          >
+                            <span>{entry.symbol}</span>
+                            {isSelected ? (
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200/90">
+                                Current
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
           </div>
         }

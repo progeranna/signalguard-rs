@@ -1,5 +1,5 @@
 import type { PropsWithChildren } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 
 import { StatusBadge } from "@/shared/components/StatusBadge";
 
@@ -10,6 +10,8 @@ const navigationItems = [
 ];
 
 export function AppShell({ children }: PropsWithChildren) {
+  const location = useLocation();
+
   return (
     <div className="min-h-screen bg-[var(--sg-bg)] text-slate-100">
       <div className="flex min-h-screen w-full flex-col">
@@ -23,14 +25,24 @@ export function AppShell({ children }: PropsWithChildren) {
                 <NavLink
                   key={item.to}
                   to={item.to}
-                  className={({ isActive }) =>
-                    [
-                      "rounded-full border px-3 py-1.5 transition",
-                      isActive
-                        ? "border-cyan-400/35 bg-cyan-400/10 text-cyan-100"
-                        : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06]",
-                    ].join(" ")
-                  }
+                  className={({ isActive }) => {
+                    const matchesSymbolRoute =
+                      item.label === "Symbol" &&
+                      location.pathname.startsWith("/symbols/");
+                    const matchesDashboardRoute =
+                      item.label === "Dashboard" &&
+                      (location.pathname === "/" || location.pathname === "/dashboard");
+                    const navIsActive = matchesSymbolRoute || matchesDashboardRoute || isActive;
+
+                    return (
+                      [
+                        "rounded-full border px-3 py-1.5 transition",
+                        navIsActive
+                          ? "border-cyan-400/35 bg-cyan-400/10 text-cyan-100"
+                          : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06]",
+                      ].join(" ")
+                    );
+                  }}
                 >
                   {item.label}
                 </NavLink>
