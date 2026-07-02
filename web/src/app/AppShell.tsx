@@ -34,10 +34,15 @@ export function AppShell({ children }: PropsWithChildren) {
   const routeSymbolCandidate = location.pathname.startsWith("/symbols/")
     ? location.pathname.slice("/symbols/".length)
     : null;
-  const { selectedSymbol, setSelectedSymbol } = useSelectedSymbol(
-    availableSymbols,
-    routeSymbolCandidate,
-  );
+  const normalizedRouteSymbolCandidate = normalizeSelectedSymbol(routeSymbolCandidate);
+  const { selectedSymbol, setSelectedSymbol } = useSelectedSymbol(availableSymbols);
+  const isKnownRouteSymbol =
+    normalizedRouteSymbolCandidate !== null &&
+    availableSymbols.some(
+      (symbol) => normalizeSelectedSymbol(symbol) === normalizedRouteSymbolCandidate,
+    );
+  const displayedHeaderSymbol =
+    routeSymbolCandidate && !isKnownRouteSymbol ? "Unknown symbol" : selectedSymbol;
   const headerStatus = buildHeaderDataStatus(summary, {
     isError: dashboardSummaryQuery.isError,
     isLoading: dashboardSummaryQuery.isLoading,
@@ -133,7 +138,7 @@ export function AppShell({ children }: PropsWithChildren) {
                   onToggle={() =>
                     setActiveMenu((menu) => (menu === "symbol" ? null : "symbol"))
                   }
-                  selectedSymbol={selectedSymbol}
+                  selectedSymbol={displayedHeaderSymbol}
                   selectorRef={symbolMenuRef}
                 />
                 <HeaderModeSelector
@@ -175,6 +180,9 @@ function HeaderSymbolSelector({
   selectorRef: RefObject<HTMLDivElement>;
 }) {
   const normalizedSelectedSymbol = normalizeSelectedSymbol(selectedSymbol);
+  const hasKnownSelectedSymbol = availableSymbols.some(
+    (symbol) => normalizeSelectedSymbol(symbol) === normalizedSelectedSymbol,
+  );
 
   return (
     <div ref={selectorRef} className="relative lg:min-w-0">
@@ -204,7 +212,9 @@ function HeaderSymbolSelector({
         >
           <div className="max-h-72 overflow-y-auto py-1">
             {availableSymbols.map((symbol) => {
-              const isSelected = normalizeSelectedSymbol(symbol) === normalizedSelectedSymbol;
+              const isSelected =
+                hasKnownSelectedSymbol &&
+                normalizeSelectedSymbol(symbol) === normalizedSelectedSymbol;
 
               return (
                 <button
