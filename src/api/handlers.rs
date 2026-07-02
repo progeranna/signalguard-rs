@@ -52,7 +52,9 @@ pub async fn pipeline_health(State(state): State<AppState>) -> Json<PipelineHeal
 }
 
 pub async fn runtime_mode(State(state): State<AppState>) -> Json<RuntimeModeResponse> {
-    Json(RuntimeModeResponse::from_snapshot(&state.runtime_mode))
+    Json(RuntimeModeResponse::from_snapshot(
+        &state.runtime_mode.snapshot(),
+    ))
 }
 
 pub async fn dashboard_summary(
@@ -388,7 +390,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         };
@@ -406,7 +408,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(vec![test_market_state()]),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         };
@@ -424,7 +426,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         };
@@ -483,7 +485,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters,
             test_recent_anomalies: None,
         }))
@@ -521,7 +523,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters,
             test_recent_anomalies: None,
         }))
@@ -626,7 +628,7 @@ mod tests {
             ),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
         };
@@ -737,7 +739,7 @@ mod tests {
             redis_cache: RedisCache::in_memory_symbols_only(vec![Symbol::new("BTCUSDT").unwrap()]),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
         };
@@ -756,7 +758,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         };
@@ -839,7 +841,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         }
@@ -866,7 +868,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(states),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            runtime_mode: test_runtime_mode_snapshot(),
+            runtime_mode: test_runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(anomalies),
         }
@@ -878,6 +880,10 @@ mod tests {
             &[Symbol::new("BTCUSDT").unwrap()],
             fixed_now(),
         )
+    }
+
+    fn test_runtime_mode_handle() -> crate::runtime::RuntimeModeHandle {
+        crate::runtime::RuntimeModeHandle::new(test_runtime_mode_snapshot())
     }
 
     fn test_anomaly(symbol: &str) -> AnomalyEvent {

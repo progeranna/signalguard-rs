@@ -32,6 +32,7 @@ mod tests {
             DetectorSettings, HealthScoreSettings, HealthStatusThresholds, IngestionMode,
             SeverityPenaltySettings,
         },
+        runtime::RuntimeModeHandle,
         runtime::RuntimeModeSnapshot,
         storage::RedisCache,
         telemetry::InternalCounters,
@@ -93,7 +94,7 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
-                runtime_mode: runtime_mode_snapshot(),
+                runtime_mode: runtime_mode_handle(),
                 counters,
                 test_recent_anomalies: None,
             },
@@ -134,7 +135,7 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
-                runtime_mode: runtime_mode_snapshot(),
+                runtime_mode: runtime_mode_handle(),
                 counters,
                 test_recent_anomalies: None,
             },
@@ -233,7 +234,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
-            runtime_mode: runtime_mode_snapshot(),
+            runtime_mode: runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
         }
@@ -245,7 +246,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
-            runtime_mode: runtime_mode_snapshot(),
+            runtime_mode: runtime_mode_handle(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
         }
@@ -257,6 +258,10 @@ mod tests {
             &[crate::domain::Symbol::new("BTCUSDT").unwrap()],
             chrono::Utc.with_ymd_and_hms(2026, 7, 2, 12, 0, 0).unwrap(),
         )
+    }
+
+    fn runtime_mode_handle() -> RuntimeModeHandle {
+        RuntimeModeHandle::new(runtime_mode_snapshot())
     }
 
     fn unused_test_pool() -> sqlx::PgPool {

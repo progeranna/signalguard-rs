@@ -1,3 +1,5 @@
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
 use chrono::{DateTime, Utc};
 
 use crate::{config::IngestionMode, domain::Symbol};
@@ -34,6 +36,11 @@ pub struct RuntimeModeSnapshot {
     pub last_started_at: DateTime<Utc>,
     pub last_switched_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RuntimeModeHandle {
+    inner: Arc<RwLock<RuntimeModeSnapshot>>,
 }
 
 impl RuntimeMode {
@@ -93,6 +100,32 @@ impl RuntimeModeSnapshot {
     }
 }
 
+impl RuntimeModeHandle {
+    pub fn new(snapshot: RuntimeModeSnapshot) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(snapshot)),
+        }
+    }
+
+    pub fn snapshot(&self) -> RuntimeModeSnapshot {
+        self.read_guard().clone()
+    }
+
+    pub fn update(&self, update: impl FnOnce(&mut RuntimeModeSnapshot)) {
+        update(&mut self.write_guard());
+    }
+
+    fn read_guard(&self) -> RwLockReadGuard<'_, RuntimeModeSnapshot> {
+        self.inner.read().unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn write_guard(&self) -> RwLockWriteGuard<'_, RuntimeModeSnapshot> {
+        self.inner
+            .write()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+}
+
 impl From<IngestionMode> for RuntimeMode {
     fn from(value: IngestionMode) -> Self {
         match value {
@@ -106,7 +139,7 @@ impl From<IngestionMode> for RuntimeMode {
 mod tests {
     use chrono::TimeZone;
 
-    use super::{RuntimeModeSnapshot, RuntimeModeSource, RuntimeModeStatus};
+    use super::{RuntimeModeHandle, RuntimeModeSnapshot, RuntimeModeSource, RuntimeModeStatus};
     use crate::{config::IngestionMode, domain::Symbol};
 
     #[test]
@@ -129,5 +162,24 @@ mod tests {
         assert_eq!(snapshot.last_started_at, started_at);
         assert_eq!(snapshot.last_switched_at, None);
         assert_eq!(snapshot.last_error, None);
+    }
+
+    #[test]
+    fn runtime_mode_handle_supports_snapshot_reads_and_updates() {
+        let started_at = chrono::Utc.with_ymd_and_hms(2026, 7, 2, 12, 0, 0).unwrap();
+        let handle = RuntimeModeHandle::new(RuntimeModeSnapshot::from_startup_config(
+            IngestionMode::Replay,
+            &[Symbol::new("BTCUSDT").unwrap()],
+            started_at,
+        ));
+
+        handle.update(|snapshot| {
+            snapshot.status = RuntimeModeStatus::Completed;
+            snapshot.last_error = Some(String::from("done"));
+        });
+
+        let snapshot = handle.snapshot();
+        assert_eq!(snapshot.status, RuntimeModeStatus::Completed);
+        assert_eq!(snapshot.last_error.as_deref(), Some("done"));
     }
 }
