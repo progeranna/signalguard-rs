@@ -12,6 +12,7 @@ use crate::storage::{CacheError, StorageError};
 pub enum ApiError {
     InvalidSymbol(String),
     InvalidRequest(String),
+    Forbidden(String),
     Conflict(String),
     NotFound(String),
     CacheUnavailable,
@@ -29,6 +30,7 @@ impl IntoResponse for ApiError {
         let (status, error, message) = match self {
             Self::InvalidSymbol(message) => (StatusCode::BAD_REQUEST, "invalid_symbol", message),
             Self::InvalidRequest(message) => (StatusCode::BAD_REQUEST, "invalid_request", message),
+            Self::Forbidden(message) => (StatusCode::FORBIDDEN, "forbidden", message),
             Self::Conflict(message) => (StatusCode::CONFLICT, "conflict", message),
             Self::NotFound(message) => (StatusCode::NOT_FOUND, "not_found", message),
             Self::CacheUnavailable => (
@@ -121,5 +123,13 @@ mod tests {
         let response = ApiError::Conflict(String::from("already switching")).into_response();
 
         assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn forbidden_maps_to_forbidden() {
+        let response =
+            ApiError::Forbidden(String::from("runtime mode switching is disabled")).into_response();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }

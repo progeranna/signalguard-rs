@@ -38,6 +38,8 @@ It is not a production deployment guide.
   Replay fixture path for replay mode.
 - `SIGNALGUARD_REPLAY_RESET_STORAGE`
   `true` clears replay demo history tables before replay; `false` preserves existing PostgreSQL history.
+- `SIGNALGUARD_ENABLE_RUNTIME_SWITCH`
+  `false` by default. Keeps `POST /runtime/mode` disabled unless an operator explicitly enables runtime switching in a local or otherwise operator-controlled environment.
 - `SIGNALGUARD_EVENT_CHANNEL_CAPACITY`
   Capacity of the bounded ingestion-to-pipeline channel. Replay and live await when the channel is full.
 - `SIGNALGUARD_BINANCE_WEBSOCKET_BASE_URL`
@@ -123,6 +125,7 @@ Notes:
 
 - Replay is deterministic by default.
 - `SIGNALGUARD_REPLAY_RESET_STORAGE=true` clears `trades`, `quotes`, and `anomalies` before replay so repeated demo runs stay reproducible.
+- `POST /runtime/mode` is disabled by default. Set `SIGNALGUARD_ENABLE_RUNTIME_SWITCH=true` only in local or operator-controlled environments where runtime switching and optional reset behavior are intended.
 - Replay fixtures use historical timestamps, so `stale_data` anomalies and degraded market-health results are expected unless the fixture timestamps are near the current clock.
 
 ## Optional local app container

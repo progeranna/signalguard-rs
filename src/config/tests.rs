@@ -89,6 +89,24 @@ fn invalid_runtime_profile_is_rejected() {
     );
 }
 
+#[test]
+fn runtime_switch_defaults_to_disabled() {
+    let settings = load(local_env_with_storage()).unwrap();
+
+    assert!(!settings.enable_runtime_switch);
+}
+
+#[test]
+fn runtime_switch_can_be_enabled() {
+    let settings = load(local_env_with([(
+        "SIGNALGUARD_ENABLE_RUNTIME_SWITCH",
+        "true",
+    )]))
+    .unwrap();
+
+    assert!(settings.enable_runtime_switch);
+}
+
 // Required storage/cache URLs
 
 #[test]
@@ -421,6 +439,16 @@ fn invalid_replay_reset_storage_value_is_rejected() {
     assert_load_error_contains(
         settings,
         "SIGNALGUARD_REPLAY_RESET_STORAGE must be 'true' or 'false'",
+    );
+}
+
+#[test]
+fn invalid_runtime_switch_value_is_rejected() {
+    let settings = local_env_with([("SIGNALGUARD_ENABLE_RUNTIME_SWITCH", "maybe")]);
+
+    assert_load_error_contains(
+        settings,
+        "SIGNALGUARD_ENABLE_RUNTIME_SWITCH must be 'true' or 'false'",
     );
 }
 

@@ -90,6 +90,9 @@ mod tests {
 
     #[tokio::test]
     async fn runtime_mode_switch_route_rejects_invalid_mode() {
+        let mut state = unavailable_state();
+        state.enable_runtime_switch = true;
+
         let response = post(
             "/runtime/mode",
             serde_json::json!({
@@ -97,11 +100,64 @@ mod tests {
                 "reset_state": false,
                 "reset_storage": false
             }),
-            unavailable_state(),
+            state,
         )
         .await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn runtime_mode_switch_route_returns_forbidden_when_disabled() {
+        let response = post(
+            "/runtime/mode",
+            serde_json::json!({
+                "mode": "live",
+                "symbols": ["BTCUSDT"],
+                "reset_state": false,
+                "reset_storage": false
+            }),
+            unavailable_state(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["error"], "forbidden");
+        assert_eq!(body["message"], "runtime mode switching is disabled");
+    }
+
+    #[tokio::test]
+    async fn runtime_mode_switch_route_preserves_existing_behavior_when_enabled() {
+        let mut state = unavailable_state();
+        state.enable_runtime_switch = true;
+
+        let response = post(
+            "/runtime/mode",
+            serde_json::json!({
+                "mode": "live",
+                "symbols": ["BTCUSDT"],
+                "reset_state": false,
+                "reset_storage": false
+            }),
+            state,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["mode"], "live");
+        assert_eq!(body["symbols"], serde_json::json!(["BTCUSDT"]));
     }
 
     #[tokio::test]
@@ -117,6 +173,7 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
+                enable_runtime_switch: false,
                 runtime_mode: runtime_mode_handle(),
                 supervisor: test_supervisor(),
                 counters,
@@ -160,6 +217,7 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
+                enable_runtime_switch: false,
                 runtime_mode: runtime_mode_handle(),
                 supervisor: test_supervisor(),
                 counters,
@@ -367,6 +425,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -381,6 +440,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -395,6 +455,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),

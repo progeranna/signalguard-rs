@@ -66,6 +66,12 @@ pub async fn switch_runtime_mode(
     State(state): State<AppState>,
     Json(request): Json<RuntimeModeSwitchRequest>,
 ) -> Result<Json<RuntimeModeResponse>, ApiError> {
+    if !state.enable_runtime_switch {
+        return Err(ApiError::Forbidden(String::from(
+            "runtime mode switching is disabled",
+        )));
+    }
+
     let snapshot = state
         .supervisor
         .switch_mode(RuntimeModeSwitchCommand {
@@ -518,6 +524,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -538,6 +545,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(vec![test_market_state()]),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -558,6 +566,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -603,8 +612,11 @@ mod tests {
 
     #[tokio::test]
     async fn switch_runtime_mode_rejects_empty_live_symbols() {
+        let mut state = unavailable_state();
+        state.enable_runtime_switch = true;
+
         let error = switch_runtime_mode(
-            State(unavailable_state()),
+            State(state),
             Json(RuntimeModeSwitchRequest {
                 mode: String::from("live"),
                 symbols: Some(Vec::new()),
@@ -619,6 +631,56 @@ mod tests {
             error,
             crate::api::error::ApiError::InvalidRequest(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn switch_runtime_mode_returns_forbidden_when_disabled() {
+        let error = switch_runtime_mode(
+            State(unavailable_state()),
+            Json(RuntimeModeSwitchRequest {
+                mode: String::from("live"),
+                symbols: Some(vec![String::from("BTCUSDT")]),
+                reset_state: Some(false),
+                reset_storage: Some(false),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            crate::api::error::ApiError::Forbidden(message)
+            if message == "runtime mode switching is disabled"
+        ));
+    }
+
+    #[tokio::test]
+    async fn switch_runtime_mode_succeeds_when_enabled() {
+        let mut state = unavailable_state();
+        state.enable_runtime_switch = true;
+
+        let response = switch_runtime_mode(
+            State(state),
+            Json(RuntimeModeSwitchRequest {
+                mode: String::from("live"),
+                symbols: Some(vec![String::from("BTCUSDT")]),
+                reset_state: Some(false),
+                reset_storage: Some(false),
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["mode"], "live");
+        assert_eq!(body["symbols"], serde_json::json!(["BTCUSDT"]));
     }
 
     #[tokio::test]
@@ -639,6 +701,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters,
@@ -679,6 +742,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters,
@@ -795,6 +859,7 @@ mod tests {
             ),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -917,6 +982,7 @@ mod tests {
             redis_cache: RedisCache::in_memory_symbols_only(vec![Symbol::new("BTCUSDT").unwrap()]),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -940,6 +1006,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -1036,6 +1103,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -1127,6 +1195,7 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -1156,6 +1225,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(states),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
@@ -1170,6 +1240,7 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),

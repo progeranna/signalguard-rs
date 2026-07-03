@@ -43,6 +43,7 @@ type EnvMap = HashMap<String, String>;
 pub struct Settings {
     pub profile: RuntimeProfile,
     pub server: ServerSettings,
+    pub enable_runtime_switch: bool,
     pub database: DatabaseSettings,
     pub redis: RedisSettings,
     pub ingestion: IngestionSettings,
@@ -148,6 +149,7 @@ impl Settings {
     fn load_from_map(env_map: &EnvMap) -> Result<Self> {
         let profile = load_runtime_profile(env_map)?;
         let server = load_server_settings(env_map)?;
+        let enable_runtime_switch = load_enable_runtime_switch(env_map)?;
         let database = load_database_settings(env_map, profile)?;
         let redis = load_redis_settings(env_map, profile)?;
         let ingestion = load_ingestion_settings(env_map)?;
@@ -158,6 +160,7 @@ impl Settings {
         Ok(Self {
             profile,
             server,
+            enable_runtime_switch,
             database,
             redis,
             ingestion,
@@ -166,6 +169,10 @@ impl Settings {
             health,
         })
     }
+}
+
+fn load_enable_runtime_switch(env_map: &EnvMap) -> Result<bool> {
+    env_bool(env_map, "SIGNALGUARD_ENABLE_RUNTIME_SWITCH", false)
 }
 
 fn load_runtime_profile(env_map: &EnvMap) -> Result<RuntimeProfile> {
