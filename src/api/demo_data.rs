@@ -277,8 +277,7 @@ fn demo_anomalies() -> Vec<AnomalyEvent> {
             AnomalyType::PriceMove,
             Severity::Critical,
             "historical demo move exceeded the configured one-minute threshold",
-            Some(3.16),
-            Some(2.5),
+            (Some(3.16), Some(2.5)),
             58,
         ),
         anomaly(
@@ -287,8 +286,7 @@ fn demo_anomalies() -> Vec<AnomalyEvent> {
             AnomalyType::SpreadSpike,
             Severity::Warning,
             "historical demo spread widened during the replay snapshot",
-            Some(0.11),
-            Some(0.05),
+            (Some(0.11), Some(0.05)),
             58,
         ),
         anomaly(
@@ -297,12 +295,11 @@ fn demo_anomalies() -> Vec<AnomalyEvent> {
             AnomalyType::StaleData,
             Severity::Info,
             "historical demo feed paused long enough to mark the market state stale",
-            Some(9_000.0),
-            Some(5_000.0),
+            (Some(9_000.0), Some(5_000.0)),
             58,
         ),
     ];
-    anomalies.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    anomalies.sort_by_key(|event| std::cmp::Reverse(event.created_at));
     anomalies
 }
 
@@ -312,10 +309,11 @@ fn anomaly(
     anomaly_type: AnomalyType,
     severity: Severity,
     message: &str,
-    observed_value: Option<f64>,
-    threshold_value: Option<f64>,
+    measurement: (Option<f64>, Option<f64>),
     second: u32,
 ) -> AnomalyEvent {
+    let (observed_value, threshold_value) = measurement;
+
     AnomalyEvent {
         id: Uuid::parse_str(id).unwrap(),
         symbol: symbol(symbol_name),
