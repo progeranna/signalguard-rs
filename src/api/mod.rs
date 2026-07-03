@@ -1,3 +1,4 @@
+mod demo_data;
 mod dto;
 mod error;
 mod handlers;

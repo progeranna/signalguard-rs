@@ -206,6 +206,13 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dashboard_summary_demo_mode_does_not_require_live_storage() {
+        let response = get("/dashboard/summary?mode=demo", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn dashboard_summary_route_accepts_live_mode() {
         let response = get("/dashboard/summary?mode=live", dashboard_state()).await;
 
@@ -255,10 +262,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn market_timeline_demo_mode_does_not_require_live_storage() {
+        let response = get("/market/BTCUSDT/timeline?mode=demo", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_demo_mode_returns_eth_history() {
+        let response = get("/market/ETHUSDT/timeline?mode=demo", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["symbol"], "ETHUSDT");
+        assert!(body["points"].as_array().unwrap().len() >= 2);
+    }
+
+    #[tokio::test]
     async fn market_timeline_route_accepts_live_mode() {
         let response = get("/market/BTCUSDT/timeline?mode=live", timeline_state()).await;
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_route_returns_empty_points_for_demo_market_without_history() {
+        let response = get("/market/ADAUSDT/timeline?mode=demo", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["symbol"], "ADAUSDT");
+        assert_eq!(body["points"], serde_json::json!([]));
     }
 
     #[tokio::test]

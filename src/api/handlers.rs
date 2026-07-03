@@ -19,12 +19,13 @@ use crate::{
 };
 
 use super::{
+    demo_data,
     dto::{
         AnomaliesResponse, AnomalyResponse, DashboardHealthSummary, DashboardServiceSummary,
         DashboardStateSummary, DashboardSummaryResponse, DashboardSymbolSummary, HealthResponse,
         MarketHealthResponse, MarketStateResponse, MarketTimelinePointResponse,
-        MarketTimelineResponse, PipelineHealthResponse, PublicDataModeQuery, RuntimeModeResponse,
-        RuntimeModeSwitchRequest, SymbolsResponse,
+        MarketTimelineResponse, PipelineHealthResponse, PublicDataMode, PublicDataModeQuery,
+        RuntimeModeResponse, RuntimeModeSwitchRequest, SymbolsResponse,
     },
     error::ApiError,
     state::AppState,
@@ -83,23 +84,34 @@ pub async fn dashboard_summary(
     State(state): State<AppState>,
     Query(query): Query<PublicDataModeQuery>,
 ) -> Result<Json<DashboardSummaryResponse>, ApiError> {
-    let _mode = query.resolved_mode();
+    let mode = query.resolved_mode();
+    if mode == PublicDataMode::Demo {
+        return Ok(Json(demo_data::dashboard_summary(
+            &state.health_settings,
+            &state.detector_settings,
+        )));
+    }
+
+    live_dashboard_summary(&state).await.map(Json)
+}
+
+async fn live_dashboard_summary(state: &AppState) -> Result<DashboardSummaryResponse, ApiError> {
     let symbols = state
         .redis_cache
         .list_symbols()
         .await
-        .map_err(|error| map_cache_error(&state, error))?;
-    let recent_anomalies = load_dashboard_recent_anomalies(&state).await?;
+        .map_err(|error| map_cache_error(state, error))?;
+    let recent_anomalies = load_dashboard_recent_anomalies(state).await?;
     let now = state::snapshot_now();
     let symbol_summaries =
-        load_dashboard_symbol_summaries(&state, symbols, &recent_anomalies, now).await?;
+        load_dashboard_symbol_summaries(state, symbols, &recent_anomalies, now).await?;
 
-    Ok(Json(build_dashboard_summary_response(
-        &state,
+    Ok(build_dashboard_summary_response(
+        state,
         symbol_summaries,
         recent_anomalies,
         now,
-    )))
+    ))
 }
 
 pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
@@ -170,18 +182,29 @@ pub async fn market_timeline(
     Path(symbol): Path<String>,
     Query(query): Query<PublicDataModeQuery>,
 ) -> Result<Json<MarketTimelineResponse>, ApiError> {
-    let _mode = query.resolved_mode();
+    let mode = query.resolved_mode();
     let symbol = parse_market_symbol(symbol)?;
+    if mode == PublicDataMode::Demo {
+        return Ok(Json(demo_data::market_timeline(&symbol)));
+    }
+
+    Ok(Json(live_market_timeline(&state, &symbol).await?))
+}
+
+async fn live_market_timeline(
+    state: &AppState,
+    symbol: &Symbol,
+) -> Result<MarketTimelineResponse, ApiError> {
     let now = state::snapshot_now();
-    let trades = load_market_timeline_trades(&state, &symbol).await?;
-    let mut anomalies = load_market_timeline_anomalies(&state, &symbol).await?;
+    let trades = load_market_timeline_trades(state, symbol).await?;
+    let mut anomalies = load_market_timeline_anomalies(state, symbol).await?;
     anomalies.sort_by(|left, right| {
         left.event_time
             .cmp(&right.event_time)
             .then_with(|| left.created_at.cmp(&right.created_at))
     });
 
-    Ok(Json(MarketTimelineResponse {
+    Ok(MarketTimelineResponse {
         symbol: symbol.as_str().to_owned(),
         points: trades
             .iter()
@@ -191,7 +214,7 @@ pub async fn market_timeline(
             .into_iter()
             .map(AnomalyResponse::from_anomaly)
             .collect(),
-    }))
+    })
 }
 
 pub async fn anomalies(
@@ -682,7 +705,7 @@ mod tests {
     async fn dashboard_summary_handler_returns_empty_arrays_for_empty_sources() {
         let response = dashboard_summary(
             State(dashboard_state(Vec::new(), Vec::new())),
-            Query(default_public_data_mode_query()),
+            Query(live_public_data_mode_query()),
         )
         .await
         .unwrap()
@@ -711,7 +734,7 @@ mod tests {
                 vec![test_market_state(), test_market_state_for("ETHUSDT")],
                 Vec::new(),
             )),
-            Query(default_public_data_mode_query()),
+            Query(live_public_data_mode_query()),
         )
         .await
         .unwrap()
@@ -739,7 +762,7 @@ mod tests {
         state.depth_sequence_gap_count = 2;
         let response = dashboard_summary(
             State(dashboard_state(vec![state], Vec::new())),
-            Query(default_public_data_mode_query()),
+            Query(live_public_data_mode_query()),
         )
         .await
         .unwrap()
@@ -778,7 +801,7 @@ mod tests {
             test_recent_anomalies: Some(Vec::new()),
             test_recent_trades: None,
         };
-        let response = dashboard_summary(State(state), Query(default_public_data_mode_query()))
+        let response = dashboard_summary(State(state), Query(live_public_data_mode_query()))
             .await
             .unwrap()
             .into_response();
@@ -798,7 +821,7 @@ mod tests {
     async fn dashboard_summary_handler_includes_health_summary_for_symbol_state() {
         let response = dashboard_summary(
             State(dashboard_state(vec![test_market_state()], Vec::new())),
-            Query(default_public_data_mode_query()),
+            Query(live_public_data_mode_query()),
         )
         .await
         .unwrap()
@@ -823,7 +846,7 @@ mod tests {
                 vec![test_market_state(), test_market_state_for("ETHUSDT")],
                 vec![test_recent_anomaly("BTCUSDT")],
             )),
-            Query(default_public_data_mode_query()),
+            Query(live_public_data_mode_query()),
         )
         .await
         .unwrap()
@@ -848,7 +871,7 @@ mod tests {
         let anomaly = test_anomaly("BTCUSDT");
         let response = dashboard_summary(
             State(dashboard_state(Vec::new(), vec![anomaly])),
-            Query(default_public_data_mode_query()),
+            Query(live_public_data_mode_query()),
         )
         .await
         .unwrap()
@@ -876,7 +899,7 @@ mod tests {
     async fn dashboard_summary_handler_returns_cache_errors() {
         let error = dashboard_summary(
             State(unavailable_state()),
-            Query(default_public_data_mode_query()),
+            Query(live_public_data_mode_query()),
         )
         .await
         .unwrap_err();
@@ -900,7 +923,7 @@ mod tests {
             test_recent_anomalies: Some(Vec::new()),
             test_recent_trades: None,
         };
-        let error = dashboard_summary(State(state), Query(default_public_data_mode_query()))
+        let error = dashboard_summary(State(state), Query(live_public_data_mode_query()))
             .await
             .unwrap_err();
 
@@ -923,7 +946,7 @@ mod tests {
             test_recent_anomalies: None,
             test_recent_trades: None,
         };
-        let error = dashboard_summary(State(state), Query(default_public_data_mode_query()))
+        let error = dashboard_summary(State(state), Query(live_public_data_mode_query()))
             .await
             .unwrap_err();
 
@@ -1022,7 +1045,7 @@ mod tests {
         let error = market_timeline(
             State(state),
             Path(String::from("BTCUSDT")),
-            Query(default_public_data_mode_query()),
+            Query(live_public_data_mode_query()),
         )
         .await
         .unwrap_err();
@@ -1236,6 +1259,12 @@ mod tests {
 
     fn default_public_data_mode_query() -> PublicDataModeQuery {
         PublicDataModeQuery::default()
+    }
+
+    fn live_public_data_mode_query() -> PublicDataModeQuery {
+        PublicDataModeQuery {
+            mode: Some(PublicDataMode::Live),
+        }
     }
 
     fn test_detector_settings() -> DetectorSettings {
