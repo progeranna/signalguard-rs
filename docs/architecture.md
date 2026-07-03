@@ -179,14 +179,26 @@ It is infrastructure monitoring, not trading advice.
 Current HTTP endpoints:
 
 - `GET /health`
+- `GET /runtime/mode`
+- `POST /runtime/mode`
+- `GET /dashboard/summary?mode=demo|live`
 - `GET /pipeline/health`
 - `GET /metrics`
 - `GET /symbols`
 - `GET /market/{symbol}/state`
+- `GET /market/{symbol}/timeline?mode=demo|live`
 - `GET /anomalies`
 - `GET /market/{symbol}/health`
 
 Response examples live in [docs/api-examples.md](docs/api-examples.md).
+
+Public read-mode behavior:
+
+- missing `mode` defaults to `demo`
+- `mode=demo` uses deterministic read-only in-memory demo data
+- `mode=live` uses the existing storage/cache-backed live read path
+- the public Demo/Live selector is per browser session and does not mutate backend runtime state
+- `POST /runtime/mode` is disabled by default and returns `403 Forbidden` unless `SIGNALGUARD_ENABLE_RUNTIME_SWITCH=true`
 
 ## Metrics
 

@@ -1,6 +1,6 @@
 # Web Console Scope
 
-SignalGuard RS v0.5.0 introduces a public read-only web console for exploring market-data quality signals from the existing backend. The console is intended to make the service easier to understand in a browser without changing the backend's monitoring focus: public market data in, explainable health and anomaly views out.
+SignalGuard RS includes a public read-only web console for exploring market-data quality signals from the existing backend. The console is intended to make the service easier to understand in a browser without changing the backend's monitoring focus: public market data in, explainable health and anomaly views out.
 
 ## MVP Sitemap
 
@@ -42,7 +42,7 @@ Recommended content:
 
 - same content as `/`
 
-The MVP can use `GET /dashboard/summary` as the primary dashboard bootstrap endpoint. It is a compact read-only response intended for the future web console and reduces the need to assemble the first dashboard view from multiple separate API calls.
+The dashboard uses `GET /dashboard/summary?mode=demo|live` as its primary bootstrap endpoint. This compact read-only response reduces the need to assemble the first dashboard view from multiple separate API calls.
 
 ### `/symbols/:symbol`
 
@@ -81,7 +81,7 @@ Recommended content:
 
 ## Frontend Location
 
-The future frontend should live under:
+The frontend lives under:
 
 ```text
 web/
@@ -93,9 +93,9 @@ It should not use:
 frontend/
 ```
 
-## Recommended Future `web/` Structure
+## `web/` Structure
 
-This structure is recommended for the first implementation pass, but should not be created until frontend work begins:
+The implemented frontend structure is:
 
 ```text
 web/
@@ -128,17 +128,21 @@ The console should present current state, recent anomalies, health signals, and 
 
 | Page | Purpose | Backend endpoints |
 | --- | --- | --- |
-| `/` | Cross-symbol dashboard entry | `GET /dashboard/summary` |
-| `/dashboard` | Dashboard alias | `GET /dashboard/summary` |
-| `/symbols/:symbol` | Symbol detail | `GET /market/{symbol}/state`, `GET /market/{symbol}/health`, `GET /anomalies?symbol={symbol}&limit={n}` |
-| `/anomalies` | Global anomaly explorer | `GET /anomalies`, `GET /symbols` |
+| `/` | Cross-symbol dashboard entry | `GET /dashboard/summary?mode={demo|live}`, `GET /market/{symbol}/timeline?mode={demo|live}`, `GET /runtime/mode` |
+| `/dashboard` | Dashboard alias | `GET /dashboard/summary?mode={demo|live}`, `GET /market/{symbol}/timeline?mode={demo|live}`, `GET /runtime/mode` |
+| `/symbols/:symbol` | Symbol detail | `GET /dashboard/summary?mode={demo|live}` |
+| `/anomalies` | Global anomaly explorer | Not implemented in W09 |
 
 Notes:
 
-- `GET /dashboard/summary` is the intended primary dashboard bootstrap endpoint for the web console.
+- `GET /dashboard/summary?mode=demo|live` is the primary dashboard bootstrap endpoint for the web console.
 - It is read-only and frontend-friendly, combining service metadata, pipeline health, tracked symbols, compact per-symbol state and health summaries when available, and recent anomalies.
+- Missing `mode` defaults to `demo`.
+- `mode=demo` uses deterministic read-only demo data.
+- `mode=live` reads the existing storage/cache-backed live path and freshness depends on backend ingestion being active.
 - If a tracked symbol has no latest market state in Redis, the symbol still appears in the response while `state` and `health` remain `null`.
-- `GET /metrics` is useful for observability context, but it is Prometheus-style text rather than a dashboard-specific JSON payload.
+- `GET /runtime/mode` is read-only status only.
+- `POST /runtime/mode` is not used by the public UI and is disabled by default unless an operator explicitly enables it with `SIGNALGUARD_ENABLE_RUNTIME_SWITCH=true`.
 
 ## Frontend Stack Recommendation
 
@@ -154,7 +158,7 @@ Recommended stack for the first web implementation:
 Guidance:
 
 - keep the frontend static-first and read-only
-- prefer `GET /dashboard/summary` for the initial dashboard load and existing symbol/anomaly endpoints for drill-down views
+- prefer `GET /dashboard/summary?mode=demo|live` for the initial dashboard load and existing read-only drill-down endpoints for deeper views
 - avoid introducing a frontend-specific server for the MVP
 - keep styling simple, clear, and easy to host on a VPS later
 
@@ -162,11 +166,11 @@ Guidance:
 
 The first web-console milestone should target local development before deployment work:
 
-1. Build the frontend under `web/` and run it locally against the existing Axum API.
-2. Use replay mode as the default development path so the UI has deterministic demo data.
-3. Keep API integration limited to existing read-only endpoints.
-4. Use `GET /dashboard/summary` as the first dashboard data load, then use symbol and anomaly endpoints for deeper views.
-5. Keep the dashboard summary contract read-only and stable so the web console can reuse the same response locally and later on a VPS.
+1. Run the frontend under `web/` locally against the existing Axum API.
+2. Use replay mode as the default development path when you want deterministic backend data for the console.
+3. Keep public API integration limited to existing read-only endpoints.
+4. Use `GET /dashboard/summary?mode=demo|live` as the first dashboard data load, then use the timeline and summary-backed symbol views for deeper inspection.
+5. Keep the read-only mode-aware contracts stable so the web console can reuse the same behavior locally and later on a VPS.
 
 This keeps the MVP small and aligned with the current backend contract.
 

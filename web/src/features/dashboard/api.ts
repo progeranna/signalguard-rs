@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import { fetchJson } from "@/shared/api/client";
 
@@ -9,7 +9,6 @@ import {
   type DashboardSummary,
   type MarketTimeline,
   type RuntimeModeResponse,
-  type RuntimeModeSwitchRequest,
   type UiMode,
 } from "./types";
 
@@ -55,21 +54,6 @@ export function fetchRuntimeMode(): Promise<RuntimeModeResponse> {
   });
 }
 
-export function switchRuntimeMode(
-  request: RuntimeModeSwitchRequest,
-): Promise<RuntimeModeResponse> {
-  return fetchJson("/runtime/mode", {
-    schema: runtimeModeResponseSchema,
-    init: {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(request),
-    },
-  });
-}
-
 export function useDashboardSummaryQuery(mode: UiMode) {
   return useQuery({
     queryKey: dashboardSummaryQueryKeyForMode(mode),
@@ -91,11 +75,5 @@ export function useRuntimeModeQuery() {
   return useQuery({
     queryKey: runtimeModeQueryKey,
     queryFn: fetchRuntimeMode,
-  });
-}
-
-export function useSwitchRuntimeModeMutation() {
-  return useMutation({
-    mutationFn: switchRuntimeMode,
   });
 }

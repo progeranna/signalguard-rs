@@ -123,10 +123,3 @@ export type RuntimeMode = z.infer<typeof runtimeModeSchema>;
 export type RuntimeModeStatus = z.infer<typeof runtimeModeStatusSchema>;
 export type RuntimeModeSource = z.infer<typeof runtimeModeSourceSchema>;
 export type RuntimeModeResponse = z.infer<typeof runtimeModeResponseSchema>;
-
-export interface RuntimeModeSwitchRequest {
-  mode: RuntimeMode;
-  symbols?: string[];
-  reset_state?: boolean;
-  reset_storage?: boolean;
-}

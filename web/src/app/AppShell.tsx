@@ -336,8 +336,8 @@ function HeaderModeSelector({
           <div className="border-b border-white/10 px-3 py-2">
             <p className="text-sm font-semibold text-slate-100">This browser session</p>
             <p className="mt-1 text-xs leading-5 text-slate-300">
-              Demo Mode shows historical/demo data. Live Mode shows public live market data when
-              available.
+              Demo Mode shows deterministic read-only demo data. Live Mode reads the live backend
+              view when ingestion is active.
             </p>
           </div>
           <div className="py-1">
