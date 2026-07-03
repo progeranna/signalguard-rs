@@ -1,9 +1,12 @@
 import type { PropsWithChildren, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
 import {
+  dashboardSummaryQueryKey,
+  marketTimelineQueryKeyRoot,
   useDashboardSummaryQuery,
   useRuntimeModeQuery,
 } from "@/features/dashboard/api";
@@ -16,10 +19,7 @@ import type {
   UiMode,
   DashboardSummary,
 } from "@/features/dashboard/types";
-import {
-  DEFAULT_UI_MODE,
-  parseUiMode,
-} from "@/features/dashboard/types";
+import { useUiModeController } from "@/features/dashboard/uiMode";
 import { statusToneMap, toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 type HeaderMenu = "mode" | "symbol" | null;
@@ -27,18 +27,16 @@ type HeaderMenu = "mode" | "symbol" | null;
 const headerControlClassName =
   "flex min-w-[11rem] items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40";
 
-const UI_MODE_STORAGE_KEY = "signalguard:ui-mode";
-
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const symbolMenuRef = useRef<HTMLDivElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
+  const previousUiModeRef = useRef<UiMode | null>(null);
   const [activeMenu, setActiveMenu] = useState<HeaderMenu>(null);
-  const [selectedUiMode, setSelectedUiMode] = useState<UiMode>(() =>
-    resolveUiMode(location.search),
-  );
-  const dashboardSummaryQuery = useDashboardSummaryQuery();
+  const { selectedUiMode, setSelectedUiMode } = useUiModeController();
+  const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
   const runtimeModeQuery = useRuntimeModeQuery();
   const summary = dashboardSummaryQuery.data ?? null;
   const runtimeMode = runtimeModeQuery.data ?? null;
@@ -69,18 +67,8 @@ export function AppShell({ children }: PropsWithChildren) {
   });
 
   function handleModeSelect(nextMode: UiMode) {
-    const resolvedMode = storeUiMode(nextMode);
-    const search = buildModeSearch(location.search, resolvedMode);
-
-    setSelectedUiMode(resolvedMode);
+    void setSelectedUiMode(nextMode);
     setActiveMenu(null);
-    navigate(
-      {
-        pathname: location.pathname,
-        search,
-      },
-      { replace: true },
-    );
   }
 
   useEffect(() => {
@@ -88,8 +76,16 @@ export function AppShell({ children }: PropsWithChildren) {
   }, [location.pathname, selectedSymbol]);
 
   useEffect(() => {
-    setSelectedUiMode(resolveUiMode(location.search));
-  }, [location.search]);
+    const previousMode = previousUiModeRef.current;
+    previousUiModeRef.current = selectedUiMode;
+
+    if (previousMode === null || previousMode === selectedUiMode) {
+      return;
+    }
+
+    void queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey });
+    void queryClient.invalidateQueries({ queryKey: marketTimelineQueryKeyRoot });
+  }, [queryClient, selectedUiMode]);
 
   useEffect(() => {
     if (!activeMenu) {
@@ -398,50 +394,6 @@ function HeaderModeSelector({
       ) : null}
     </div>
   );
-}
-
-function resolveUiMode(
-  locationSearch: string,
-  storedMode: UiMode | null = getStoredUiMode(),
-): UiMode {
-  const modeFromUrl = parseUiMode(new URLSearchParams(locationSearch).get("mode"));
-
-  return modeFromUrl ?? storedMode ?? DEFAULT_UI_MODE;
-}
-
-function getStoredUiMode(): UiMode | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    return parseUiMode(window.localStorage.getItem(UI_MODE_STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
-
-function storeUiMode(mode: UiMode): UiMode {
-  if (typeof window === "undefined") {
-    return mode;
-  }
-
-  try {
-    window.localStorage.setItem(UI_MODE_STORAGE_KEY, mode);
-  } catch {
-    return mode;
-  }
-
-  return mode;
-}
-
-function buildModeSearch(locationSearch: string, mode: UiMode): string {
-  const params = new URLSearchParams(locationSearch);
-  params.set("mode", mode);
-
-  const search = params.toString();
-
-  return search ? `?${search}` : "";
 }
 
 function modeOptionLabel(mode: UiMode): string {
