@@ -78,6 +78,7 @@ export const marketTimelineSchema = z.object({
   anomalies: z.array(anomalySchema),
 });
 
+export const uiModeSchema = z.enum(["demo", "live"]);
 export const runtimeModeSchema = z.enum(["replay", "live"]);
 export const runtimeModeStatusSchema = z.enum([
   "starting",
@@ -101,6 +102,14 @@ export const runtimeModeResponseSchema = z.object({
   last_error: z.string().nullable(),
 });
 
+export const DEFAULT_UI_MODE = "demo" satisfies UiMode;
+
+export function parseUiMode(value: string | null | undefined): UiMode | null {
+  const parsed = uiModeSchema.safeParse(value);
+
+  return parsed.success ? parsed.data : null;
+}
+
 export type PipelineHealth = z.infer<typeof pipelineHealthSchema>;
 export type DashboardStateSummary = z.infer<typeof dashboardStateSummarySchema>;
 export type DashboardHealthSummary = z.infer<typeof dashboardHealthSummarySchema>;
@@ -109,6 +118,7 @@ export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
 export type DashboardAnomaly = z.infer<typeof anomalySchema>;
 export type MarketTimelinePoint = z.infer<typeof marketTimelinePointSchema>;
 export type MarketTimeline = z.infer<typeof marketTimelineSchema>;
+export type UiMode = z.infer<typeof uiModeSchema>;
 export type RuntimeMode = z.infer<typeof runtimeModeSchema>;
 export type RuntimeModeStatus = z.infer<typeof runtimeModeStatusSchema>;
 export type RuntimeModeSource = z.infer<typeof runtimeModeSourceSchema>;
