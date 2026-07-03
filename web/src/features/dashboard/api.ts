@@ -31,8 +31,16 @@ export function fetchDashboardSummary(mode: UiMode): Promise<DashboardSummary> {
   });
 }
 
-export function marketTimelineQueryKey(symbol: string) {
-  return [...marketTimelineQueryKeyRoot, symbol] as const;
+export function dashboardSummaryQueryKeyForMode(mode: UiMode) {
+  return [...dashboardSummaryQueryKey, mode] as const;
+}
+
+export function marketTimelineQueryKeyRootForMode(mode: UiMode) {
+  return [...marketTimelineQueryKeyRoot, mode] as const;
+}
+
+export function marketTimelineQueryKey(symbol: string, mode: UiMode) {
+  return [...marketTimelineQueryKeyRootForMode(mode), symbol] as const;
 }
 
 export function fetchMarketTimeline(symbol: string, mode: UiMode): Promise<MarketTimeline> {
@@ -64,7 +72,7 @@ export function switchRuntimeMode(
 
 export function useDashboardSummaryQuery(mode: UiMode) {
   return useQuery({
-    queryKey: dashboardSummaryQueryKey,
+    queryKey: dashboardSummaryQueryKeyForMode(mode),
     queryFn: () => fetchDashboardSummary(mode),
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
@@ -72,7 +80,7 @@ export function useDashboardSummaryQuery(mode: UiMode) {
 
 export function useMarketTimelineQuery(symbol: string | null | undefined, mode: UiMode) {
   return useQuery({
-    queryKey: marketTimelineQueryKey(symbol ?? ""),
+    queryKey: marketTimelineQueryKey(symbol ?? "", mode),
     queryFn: () => fetchMarketTimeline(symbol ?? "", mode),
     enabled: Boolean(symbol),
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,

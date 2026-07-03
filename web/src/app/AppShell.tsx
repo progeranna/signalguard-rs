@@ -1,12 +1,9 @@
 import type { PropsWithChildren, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
 import {
-  dashboardSummaryQueryKey,
-  marketTimelineQueryKeyRoot,
   useDashboardSummaryQuery,
   useRuntimeModeQuery,
 } from "@/features/dashboard/api";
@@ -30,10 +27,8 @@ const headerControlClassName =
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const symbolMenuRef = useRef<HTMLDivElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
-  const previousUiModeRef = useRef<UiMode | null>(null);
   const [activeMenu, setActiveMenu] = useState<HeaderMenu>(null);
   const { selectedUiMode, setSelectedUiMode } = useUiModeController();
   const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
@@ -74,18 +69,6 @@ export function AppShell({ children }: PropsWithChildren) {
   useEffect(() => {
     setActiveMenu(null);
   }, [location.pathname, selectedSymbol]);
-
-  useEffect(() => {
-    const previousMode = previousUiModeRef.current;
-    previousUiModeRef.current = selectedUiMode;
-
-    if (previousMode === null || previousMode === selectedUiMode) {
-      return;
-    }
-
-    void queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey });
-    void queryClient.invalidateQueries({ queryKey: marketTimelineQueryKeyRoot });
-  }, [queryClient, selectedUiMode]);
 
   useEffect(() => {
     if (!activeMenu) {
