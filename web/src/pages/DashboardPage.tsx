@@ -29,7 +29,9 @@ import type {
   DashboardSummary,
   DashboardSymbolSummary,
   MarketTimelinePoint,
+  UiMode,
 } from "@/features/dashboard/types";
+import { useResolvedUiMode } from "@/features/dashboard/uiMode";
 import { ErrorPanel } from "@/shared/components/ErrorPanel";
 import { LoadingSkeleton } from "@/shared/components/LoadingSkeleton";
 import { StatusBadge } from "@/shared/components/StatusBadge";
@@ -49,7 +51,8 @@ type DashboardModalState =
   | null;
 
 export function DashboardPage() {
-  const dashboardSummaryQuery = useDashboardSummaryQuery();
+  const selectedUiMode = useResolvedUiMode();
+  const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
   const summary = dashboardSummaryQuery.data ?? null;
   const availableSymbols = buildCoveredDashboardSymbols(summary?.symbols ?? []).map(
     (symbol) => symbol.symbol,
@@ -67,6 +70,7 @@ export function DashboardPage() {
       ) : null}
 
       <MarketTimelineShell
+        selectedUiMode={selectedUiMode}
         selectedSignalSymbol={selectedSymbol}
         summary={summary}
         isLoading={dashboardSummaryQuery.isLoading}
@@ -93,17 +97,19 @@ function formatTickerPercent(value: number | null | undefined): string {
 }
 
 function MarketTimelineShell({
+  selectedUiMode,
   selectedSignalSymbol,
   summary,
   isLoading,
 }: {
+  selectedUiMode: UiMode;
   selectedSignalSymbol: string;
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
   const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
   const selectedSymbol = selectSignalSymbol(symbols, selectedSignalSymbol);
-  const timelineQuery = useMarketTimelineQuery(selectedSymbol?.symbol ?? null);
+  const timelineQuery = useMarketTimelineQuery(selectedSymbol?.symbol ?? null, selectedUiMode);
   const timelinePoints = buildTimelineChartPoints(timelineQuery.data?.points ?? []);
   const timelinePriceDomain = buildTimelinePriceDomain(timelinePoints);
   const timelineTimeDomain = buildTimelineTimeDomain(timelinePoints);

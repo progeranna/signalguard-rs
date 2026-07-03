@@ -1,5 +1,6 @@
 import { useDashboardSummaryQuery } from "@/features/dashboard/api";
 import { orderMarketEntries } from "@/features/dashboard/marketOrder";
+import { useResolvedUiMode } from "@/features/dashboard/uiMode";
 import type {
   DashboardAnomaly,
   DashboardSymbolSummary,
@@ -8,7 +9,8 @@ import { LoadingSkeleton } from "@/shared/components/LoadingSkeleton";
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 export function GlobalMarketTicker() {
-  const dashboardSummaryQuery = useDashboardSummaryQuery();
+  const selectedUiMode = useResolvedUiMode();
+  const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
   const summary = dashboardSummaryQuery.data ?? null;
   const symbols = orderMarketEntries(summary?.symbols ?? [], (symbol) => symbol.symbol);
   const anomalies = summary?.recent_anomalies ?? [];

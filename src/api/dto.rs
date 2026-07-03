@@ -43,6 +43,19 @@ pub struct RuntimeModeSwitchRequest {
     pub reset_storage: Option<bool>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PublicDataMode {
+    #[default]
+    Demo,
+    Live,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct PublicDataModeQuery {
+    pub mode: Option<PublicDataMode>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineHealthStatus {
@@ -262,6 +275,21 @@ impl PipelineHealthResponse {
     }
 }
 
+impl PublicDataMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Demo => "demo",
+            Self::Live => "live",
+        }
+    }
+}
+
+impl PublicDataModeQuery {
+    pub fn resolved_mode(self) -> PublicDataMode {
+        self.mode.unwrap_or_default()
+    }
+}
+
 impl AnomalyResponse {
     pub fn from_anomaly(anomaly: AnomalyEvent) -> Self {
         Self {
@@ -331,6 +359,7 @@ mod tests {
 
     use super::{
         AnomalyResponse, MarketStateResponse, PipelineHealthResponse, PipelineHealthStatus,
+        PublicDataMode, PublicDataModeQuery,
     };
     use crate::domain::{
         AnomalyEvent, AnomalyMeasurement, AnomalyType, MarketState, Severity, Symbol,
@@ -446,6 +475,41 @@ mod tests {
 
         assert_eq!(response.anomaly_type, "depth_sequence_gap");
         assert_eq!(response.severity, "warning");
+    }
+
+    #[test]
+    fn public_data_mode_query_accepts_demo_mode() {
+        let query: PublicDataModeQuery = serde_json::from_str(r#"{"mode":"demo"}"#).unwrap();
+
+        assert_eq!(query.mode, Some(PublicDataMode::Demo));
+        assert_eq!(query.resolved_mode(), PublicDataMode::Demo);
+        assert_eq!(query.resolved_mode().as_str(), "demo");
+    }
+
+    #[test]
+    fn public_data_mode_query_accepts_live_mode() {
+        let query: PublicDataModeQuery = serde_json::from_str(r#"{"mode":"live"}"#).unwrap();
+
+        assert_eq!(query.mode, Some(PublicDataMode::Live));
+        assert_eq!(query.resolved_mode(), PublicDataMode::Live);
+        assert_eq!(query.resolved_mode().as_str(), "live");
+    }
+
+    #[test]
+    fn public_data_mode_query_defaults_to_demo_when_missing() {
+        let query: PublicDataModeQuery = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(query.mode, None);
+        assert_eq!(query.resolved_mode(), PublicDataMode::Demo);
+    }
+
+    #[test]
+    fn public_data_mode_query_rejects_invalid_mode() {
+        let error = serde_json::from_str::<PublicDataModeQuery>(r#"{"mode":"replay"}"#)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("unknown variant"));
     }
 
     fn snapshot(

@@ -84,6 +84,7 @@ VITE_SIGNALGUARD_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 ```
 
 The frontend uses existing read-only backend endpoints only, with `GET /dashboard/summary` as the primary dashboard bootstrap contract.
+The public Demo/Live selector is per browser session. It updates read requests with `?mode=demo` or `?mode=live`, does not call `POST /runtime/mode`, and does not switch backend ingestion for other visitors.
 
 ## Configuration Profiles
 
@@ -97,12 +98,15 @@ Endpoints:
 
 - `GET /health`
 - `GET /pipeline/health`
-- `GET /dashboard/summary`
+- `GET /runtime/mode`
+- `POST /runtime/mode`
+- `GET /dashboard/summary?mode=demo|live`
 - `GET /metrics`
 - `GET /symbols`
 - `GET /market/{symbol}/state`
 - `GET /anomalies`
 - `GET /market/{symbol}/health`
+- `GET /market/{symbol}/timeline?mode=demo|live`
 
 Compact `GET /market/BTCUSDT/state` example:
 
@@ -121,7 +125,9 @@ Compact `GET /market/BTCUSDT/state` example:
 
 Full endpoint examples live in [docs/api-examples.md](docs/api-examples.md).
 
-`GET /dashboard/summary` is the compact read-only dashboard bootstrap endpoint for the future public web console. It combines service metadata, pipeline health, tracked symbols, compact per-symbol state and health summaries when available, and recent anomalies into one frontend-friendly response.
+`GET /dashboard/summary?mode=demo|live` is the compact read-only dashboard bootstrap endpoint for the public web console. Missing `mode` defaults to `demo`. `mode=demo` returns deterministic read-only demo data, while `mode=live` reads the existing storage/cache-backed live path and may be stale if backend ingestion is not active.
+
+`GET /runtime/mode` remains a read-only runtime status endpoint. `POST /runtime/mode` is disabled by default and returns `403 Forbidden` unless `SIGNALGUARD_ENABLE_RUNTIME_SWITCH=true` is set in an operator-controlled environment.
 
 ## Architecture
 
@@ -131,7 +137,7 @@ Full endpoint examples live in [docs/api-examples.md](docs/api-examples.md).
 - Storage/cache: PostgreSQL stores historical events and anomalies, while Redis stores latest-state snapshots
 - Detectors: anomaly rules are deterministic, explainable, and configuration-driven
 - API: Axum exposes service health, pipeline health, state, anomalies, and market health
-- Dashboard bootstrap: `GET /dashboard/summary` provides a compact read-only summary for the dashboard view
+- Dashboard bootstrap: `GET /dashboard/summary?mode=demo|live` provides a compact read-only summary for the dashboard view
 
 Deeper architecture notes: [docs/architecture.md](docs/architecture.md)
 

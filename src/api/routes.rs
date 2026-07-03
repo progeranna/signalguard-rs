@@ -90,6 +90,9 @@ mod tests {
 
     #[tokio::test]
     async fn runtime_mode_switch_route_rejects_invalid_mode() {
+        let mut state = unavailable_state();
+        state.enable_runtime_switch = true;
+
         let response = post(
             "/runtime/mode",
             serde_json::json!({
@@ -97,11 +100,64 @@ mod tests {
                 "reset_state": false,
                 "reset_storage": false
             }),
-            unavailable_state(),
+            state,
         )
         .await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn runtime_mode_switch_route_returns_forbidden_when_disabled() {
+        let response = post(
+            "/runtime/mode",
+            serde_json::json!({
+                "mode": "live",
+                "symbols": ["BTCUSDT"],
+                "reset_state": false,
+                "reset_storage": false
+            }),
+            unavailable_state(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["error"], "forbidden");
+        assert_eq!(body["message"], "runtime mode switching is disabled");
+    }
+
+    #[tokio::test]
+    async fn runtime_mode_switch_route_preserves_existing_behavior_when_enabled() {
+        let mut state = unavailable_state();
+        state.enable_runtime_switch = true;
+
+        let response = post(
+            "/runtime/mode",
+            serde_json::json!({
+                "mode": "live",
+                "symbols": ["BTCUSDT"],
+                "reset_state": false,
+                "reset_storage": false
+            }),
+            state,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["mode"], "live");
+        assert_eq!(body["symbols"], serde_json::json!(["BTCUSDT"]));
     }
 
     #[tokio::test]
@@ -117,10 +173,12 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
+                enable_runtime_switch: false,
                 runtime_mode: runtime_mode_handle(),
                 supervisor: test_supervisor(),
                 counters,
                 test_recent_anomalies: None,
+                test_recent_trades: None,
             },
         )
         .await;
@@ -159,10 +217,12 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
+                enable_runtime_switch: false,
                 runtime_mode: runtime_mode_handle(),
                 supervisor: test_supervisor(),
                 counters,
                 test_recent_anomalies: None,
+                test_recent_trades: None,
             },
         )
         .await;
@@ -197,6 +257,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dashboard_summary_route_accepts_demo_mode() {
+        let response = get("/dashboard/summary?mode=demo", dashboard_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_demo_mode_does_not_require_live_storage() {
+        let response = get("/dashboard/summary?mode=demo", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_route_accepts_live_mode() {
+        let response = get("/dashboard/summary?mode=live", dashboard_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_route_rejects_invalid_mode() {
+        let response = get("/dashboard/summary?mode=prod", dashboard_state()).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn symbols_route_reports_unavailable_cache() {
         let response = get("/symbols", unavailable_state()).await;
 
@@ -220,6 +308,64 @@ mod tests {
     #[tokio::test]
     async fn market_timeline_route_rejects_invalid_symbol() {
         let response = get("/market/BTC-USDT/timeline", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_route_accepts_demo_mode() {
+        let response = get("/market/BTCUSDT/timeline?mode=demo", timeline_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_demo_mode_does_not_require_live_storage() {
+        let response = get("/market/BTCUSDT/timeline?mode=demo", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_demo_mode_returns_eth_history() {
+        let response = get("/market/ETHUSDT/timeline?mode=demo", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["symbol"], "ETHUSDT");
+        assert!(body["points"].as_array().unwrap().len() >= 2);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_route_accepts_live_mode() {
+        let response = get("/market/BTCUSDT/timeline?mode=live", timeline_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_route_returns_empty_points_for_demo_market_without_history() {
+        let response = get("/market/ADAUSDT/timeline?mode=demo", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["symbol"], "ADAUSDT");
+        assert_eq!(body["points"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn market_timeline_route_rejects_invalid_mode() {
+        let response = get("/market/BTCUSDT/timeline?mode=prod", timeline_state()).await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
@@ -279,10 +425,12 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
+            test_recent_trades: None,
         }
     }
 
@@ -292,10 +440,38 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
+            enable_runtime_switch: false,
             runtime_mode: runtime_mode_handle(),
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
+            test_recent_trades: None,
+        }
+    }
+
+    fn timeline_state() -> AppState {
+        AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::in_memory(Vec::new()),
+            detector_settings: detector_settings(),
+            health_settings: health_settings(),
+            enable_runtime_switch: false,
+            runtime_mode: runtime_mode_handle(),
+            supervisor: test_supervisor(),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: Some(Vec::new()),
+            test_recent_trades: Some(vec![
+                crate::domain::TradeEvent::new(
+                    crate::domain::Symbol::new("BTCUSDT").unwrap(),
+                    crate::domain::Exchange::Binance,
+                    Some(1),
+                    Decimal::new(100, 0),
+                    Decimal::new(1, 0),
+                    chrono::Utc.with_ymd_and_hms(2026, 7, 2, 12, 0, 0).unwrap(),
+                    chrono::Utc.with_ymd_and_hms(2026, 7, 2, 12, 0, 1).unwrap(),
+                )
+                .unwrap(),
+            ]),
         }
     }
 

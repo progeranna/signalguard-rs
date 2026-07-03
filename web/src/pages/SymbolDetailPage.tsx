@@ -7,6 +7,7 @@ import {
   isDashboardSymbolPlaceholder,
 } from "@/features/dashboard/marketOrder";
 import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
+import { useResolvedUiMode } from "@/features/dashboard/uiMode";
 import type {
   DashboardAnomaly,
   DashboardSymbolSummary,
@@ -24,7 +25,8 @@ import {
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 export function SymbolDetailPage() {
-  const dashboardSummaryQuery = useDashboardSummaryQuery();
+  const selectedUiMode = useResolvedUiMode();
+  const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
   const summary = dashboardSummaryQuery.data ?? null;
   const availableSymbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
   const recentAnomalies = summary?.recent_anomalies ?? [];

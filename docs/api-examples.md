@@ -7,11 +7,14 @@ The default fast-demo path uses `examples/replay/sample.jsonl`, which contains n
 ## Endpoints
 
 - `GET /health`
+- `GET /runtime/mode`
+- `POST /runtime/mode`
 - `GET /pipeline/health`
-- `GET /dashboard/summary`
+- `GET /dashboard/summary?mode=demo|live`
 - `GET /metrics`
 - `GET /symbols`
 - `GET /market/{symbol}/state`
+- `GET /market/{symbol}/timeline?mode=demo|live`
 - `GET /market/{symbol}/health`
 - `GET /anomalies`
 
@@ -47,13 +50,18 @@ curl --fail --silent --show-error http://127.0.0.1:8080/pipeline/health
 
 This endpoint reports ingestion and storage/cache counter health. It is separate from `GET /market/{symbol}/health`, which evaluates one symbol's latest market state and recent anomalies.
 
-## `GET /dashboard/summary`
+## `GET /dashboard/summary?mode=demo|live`
 
 ```bash
-curl --fail --silent --show-error http://127.0.0.1:8080/dashboard/summary
+curl --fail --silent --show-error "http://127.0.0.1:8080/dashboard/summary?mode=demo"
 ```
 
-This is the compact read-only dashboard bootstrap endpoint for the future web console. It combines:
+This is the compact read-only dashboard bootstrap endpoint for the public web console. Missing `mode` defaults to `demo`.
+
+- `mode=demo` returns deterministic read-only demo data from the in-memory demo source
+- `mode=live` reads the existing storage/cache-backed live path and can be stale if backend ingestion is not active
+
+It combines:
 
 - service metadata
 - pipeline counter health
@@ -64,7 +72,7 @@ This is the compact read-only dashboard bootstrap endpoint for the future web co
 
 If a symbol is present in the tracked-symbol set but no latest market state is available, the symbol remains in the response while `state` and `health` are `null`.
 
-Example replay response:
+Example `mode=demo` response:
 
 ```json
 {
