@@ -121,6 +121,7 @@ mod tests {
                 supervisor: test_supervisor(),
                 counters,
                 test_recent_anomalies: None,
+                test_recent_trades: None,
             },
         )
         .await;
@@ -163,6 +164,7 @@ mod tests {
                 supervisor: test_supervisor(),
                 counters,
                 test_recent_anomalies: None,
+                test_recent_trades: None,
             },
         )
         .await;
@@ -197,6 +199,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dashboard_summary_route_accepts_demo_mode() {
+        let response = get("/dashboard/summary?mode=demo", dashboard_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_route_accepts_live_mode() {
+        let response = get("/dashboard/summary?mode=live", dashboard_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_route_rejects_invalid_mode() {
+        let response = get("/dashboard/summary?mode=prod", dashboard_state()).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn symbols_route_reports_unavailable_cache() {
         let response = get("/symbols", unavailable_state()).await;
 
@@ -220,6 +243,27 @@ mod tests {
     #[tokio::test]
     async fn market_timeline_route_rejects_invalid_symbol() {
         let response = get("/market/BTC-USDT/timeline", unavailable_state()).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_route_accepts_demo_mode() {
+        let response = get("/market/BTCUSDT/timeline?mode=demo", timeline_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_route_accepts_live_mode() {
+        let response = get("/market/BTCUSDT/timeline?mode=live", timeline_state()).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_route_rejects_invalid_mode() {
+        let response = get("/market/BTCUSDT/timeline?mode=prod", timeline_state()).await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
@@ -283,6 +327,7 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
+            test_recent_trades: None,
         }
     }
 
@@ -296,6 +341,32 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
+            test_recent_trades: None,
+        }
+    }
+
+    fn timeline_state() -> AppState {
+        AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::in_memory(Vec::new()),
+            detector_settings: detector_settings(),
+            health_settings: health_settings(),
+            runtime_mode: runtime_mode_handle(),
+            supervisor: test_supervisor(),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: Some(Vec::new()),
+            test_recent_trades: Some(vec![
+                crate::domain::TradeEvent::new(
+                    crate::domain::Symbol::new("BTCUSDT").unwrap(),
+                    crate::domain::Exchange::Binance,
+                    Some(1),
+                    Decimal::new(100, 0),
+                    Decimal::new(1, 0),
+                    chrono::Utc.with_ymd_and_hms(2026, 7, 2, 12, 0, 0).unwrap(),
+                    chrono::Utc.with_ymd_and_hms(2026, 7, 2, 12, 0, 1).unwrap(),
+                )
+                .unwrap(),
+            ]),
         }
     }
 

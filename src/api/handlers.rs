@@ -23,7 +23,7 @@ use super::{
         AnomaliesResponse, AnomalyResponse, DashboardHealthSummary, DashboardServiceSummary,
         DashboardStateSummary, DashboardSummaryResponse, DashboardSymbolSummary, HealthResponse,
         MarketHealthResponse, MarketStateResponse, MarketTimelinePointResponse,
-        MarketTimelineResponse, PipelineHealthResponse, RuntimeModeResponse,
+        MarketTimelineResponse, PipelineHealthResponse, PublicDataModeQuery, RuntimeModeResponse,
         RuntimeModeSwitchRequest, SymbolsResponse,
     },
     error::ApiError,
@@ -81,7 +81,9 @@ pub async fn switch_runtime_mode(
 
 pub async fn dashboard_summary(
     State(state): State<AppState>,
+    Query(query): Query<PublicDataModeQuery>,
 ) -> Result<Json<DashboardSummaryResponse>, ApiError> {
+    let _mode = query.resolved_mode();
     let symbols = state
         .redis_cache
         .list_symbols()
@@ -166,16 +168,13 @@ pub async fn market_health(
 pub async fn market_timeline(
     State(state): State<AppState>,
     Path(symbol): Path<String>,
+    Query(query): Query<PublicDataModeQuery>,
 ) -> Result<Json<MarketTimelineResponse>, ApiError> {
+    let _mode = query.resolved_mode();
     let symbol = parse_market_symbol(symbol)?;
     let now = state::snapshot_now();
-    let trades = get_recent_trades_for_symbol(&state.pg_pool, &symbol, MARKET_TIMELINE_POINT_LIMIT)
-        .await
-        .map_err(|error| map_storage_error(&state, error))?;
-    let mut anomalies =
-        get_recent_anomalies(&state.pg_pool, Some(&symbol), MARKET_TIMELINE_ANOMALY_LIMIT)
-            .await
-            .map_err(|error| map_storage_error(&state, error))?;
+    let trades = load_market_timeline_trades(&state, &symbol).await?;
+    let mut anomalies = load_market_timeline_anomalies(&state, &symbol).await?;
     anomalies.sort_by(|left, right| {
         left.event_time
             .cmp(&right.event_time)
@@ -264,6 +263,38 @@ async fn load_dashboard_recent_anomalies(state: &AppState) -> Result<Vec<Anomaly
     }
 
     get_recent_anomalies(&state.pg_pool, None, DEFAULT_ANOMALY_LIMIT)
+        .await
+        .map_err(|error| map_storage_error(state, error))
+}
+
+async fn load_market_timeline_trades(
+    state: &AppState,
+    symbol: &Symbol,
+) -> Result<Vec<crate::domain::TradeEvent>, ApiError> {
+    #[cfg(test)]
+    if let Some(trades) = &state.test_recent_trades {
+        return Ok(trades.clone());
+    }
+
+    get_recent_trades_for_symbol(&state.pg_pool, symbol, MARKET_TIMELINE_POINT_LIMIT)
+        .await
+        .map_err(|error| map_storage_error(state, error))
+}
+
+async fn load_market_timeline_anomalies(
+    state: &AppState,
+    symbol: &Symbol,
+) -> Result<Vec<AnomalyEvent>, ApiError> {
+    #[cfg(test)]
+    if let Some(anomalies) = &state.test_recent_anomalies {
+        return Ok(anomalies
+            .iter()
+            .filter(|anomaly| anomaly.symbol == *symbol)
+            .cloned()
+            .collect());
+    }
+
+    get_recent_anomalies(&state.pg_pool, Some(symbol), MARKET_TIMELINE_ANOMALY_LIMIT)
         .await
         .map_err(|error| map_storage_error(state, error))
 }
@@ -380,23 +411,25 @@ fn parse_anomaly_limit(value: &str) -> Result<u32, ApiError> {
 mod tests {
     use std::sync::Arc;
 
-    use axum::extract::{Path, State};
+    use axum::extract::{Path, Query, State};
     use axum::response::IntoResponse;
     use chrono::{Duration, TimeZone, Utc};
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
     use super::{
-        AnomaliesQuery, anomalies, dashboard_summary, market_health, market_state, metrics,
-        parse_anomalies_query, pipeline_health, runtime_mode, switch_runtime_mode, symbols,
+        AnomaliesQuery, anomalies, dashboard_summary, market_health, market_state, market_timeline,
+        metrics, parse_anomalies_query, pipeline_health, runtime_mode, switch_runtime_mode,
+        symbols,
     };
     use crate::api::AppState;
-    use crate::api::dto::RuntimeModeSwitchRequest;
+    use crate::api::dto::{PublicDataMode, PublicDataModeQuery, RuntimeModeSwitchRequest};
     use crate::config::{
         BinanceSettings, DetectorSettings, HealthScoreSettings, HealthStatusThresholds,
         IngestionMode, IngestionSettings, SeverityPenaltySettings,
     };
     use crate::domain::{
-        AnomalyEvent, AnomalyMeasurement, AnomalyType, MarketSignals, MarketState, Severity, Symbol,
+        AnomalyEvent, AnomalyMeasurement, AnomalyType, Exchange, MarketSignals, MarketState,
+        Severity, Symbol, TradeEvent,
     };
     use crate::runtime::RuntimeModeSnapshot;
     use crate::runtime_supervisor::IngestionSupervisor;
@@ -466,6 +499,7 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
+            test_recent_trades: None,
         };
         let error = market_health(State(state), Path(String::from("BTCUSDT")))
             .await
@@ -485,6 +519,7 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
+            test_recent_trades: None,
         };
         let error = market_health(State(state), Path(String::from("BTCUSDT")))
             .await
@@ -504,6 +539,7 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
+            test_recent_trades: None,
         };
         let error = anomalies(
             State(state),
@@ -584,6 +620,7 @@ mod tests {
             supervisor: test_supervisor(),
             counters,
             test_recent_anomalies: None,
+            test_recent_trades: None,
         }))
         .await
         .into_response();
@@ -623,6 +660,7 @@ mod tests {
             supervisor: test_supervisor(),
             counters,
             test_recent_anomalies: None,
+            test_recent_trades: None,
         }))
         .await
         .into_response();
@@ -642,10 +680,13 @@ mod tests {
 
     #[tokio::test]
     async fn dashboard_summary_handler_returns_empty_arrays_for_empty_sources() {
-        let response = dashboard_summary(State(dashboard_state(Vec::new(), Vec::new())))
-            .await
-            .unwrap()
-            .into_response();
+        let response = dashboard_summary(
+            State(dashboard_state(Vec::new(), Vec::new())),
+            Query(default_public_data_mode_query()),
+        )
+        .await
+        .unwrap()
+        .into_response();
 
         assert_eq!(response.status(), axum::http::StatusCode::OK);
 
@@ -665,10 +706,13 @@ mod tests {
 
     #[tokio::test]
     async fn dashboard_summary_handler_includes_tracked_symbols() {
-        let response = dashboard_summary(State(dashboard_state(
-            vec![test_market_state(), test_market_state_for("ETHUSDT")],
-            Vec::new(),
-        )))
+        let response = dashboard_summary(
+            State(dashboard_state(
+                vec![test_market_state(), test_market_state_for("ETHUSDT")],
+                Vec::new(),
+            )),
+            Query(default_public_data_mode_query()),
+        )
         .await
         .unwrap()
         .into_response();
@@ -693,10 +737,13 @@ mod tests {
         state.best_bid_price = Some(Decimal::new(6504800, 2));
         state.best_ask_price = Some(Decimal::new(6505500, 2));
         state.depth_sequence_gap_count = 2;
-        let response = dashboard_summary(State(dashboard_state(vec![state], Vec::new())))
-            .await
-            .unwrap()
-            .into_response();
+        let response = dashboard_summary(
+            State(dashboard_state(vec![state], Vec::new())),
+            Query(default_public_data_mode_query()),
+        )
+        .await
+        .unwrap()
+        .into_response();
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -729,8 +776,9 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
+            test_recent_trades: None,
         };
-        let response = dashboard_summary(State(state))
+        let response = dashboard_summary(State(state), Query(default_public_data_mode_query()))
             .await
             .unwrap()
             .into_response();
@@ -748,10 +796,10 @@ mod tests {
 
     #[tokio::test]
     async fn dashboard_summary_handler_includes_health_summary_for_symbol_state() {
-        let response = dashboard_summary(State(dashboard_state(
-            vec![test_market_state()],
-            Vec::new(),
-        )))
+        let response = dashboard_summary(
+            State(dashboard_state(vec![test_market_state()], Vec::new())),
+            Query(default_public_data_mode_query()),
+        )
         .await
         .unwrap()
         .into_response();
@@ -770,10 +818,13 @@ mod tests {
 
     #[tokio::test]
     async fn dashboard_summary_handler_health_summary_uses_relevant_recent_anomalies() {
-        let response = dashboard_summary(State(dashboard_state(
-            vec![test_market_state(), test_market_state_for("ETHUSDT")],
-            vec![test_recent_anomaly("BTCUSDT")],
-        )))
+        let response = dashboard_summary(
+            State(dashboard_state(
+                vec![test_market_state(), test_market_state_for("ETHUSDT")],
+                vec![test_recent_anomaly("BTCUSDT")],
+            )),
+            Query(default_public_data_mode_query()),
+        )
         .await
         .unwrap()
         .into_response();
@@ -795,10 +846,13 @@ mod tests {
     #[tokio::test]
     async fn dashboard_summary_handler_includes_recent_anomalies() {
         let anomaly = test_anomaly("BTCUSDT");
-        let response = dashboard_summary(State(dashboard_state(Vec::new(), vec![anomaly])))
-            .await
-            .unwrap()
-            .into_response();
+        let response = dashboard_summary(
+            State(dashboard_state(Vec::new(), vec![anomaly])),
+            Query(default_public_data_mode_query()),
+        )
+        .await
+        .unwrap()
+        .into_response();
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -820,9 +874,12 @@ mod tests {
 
     #[tokio::test]
     async fn dashboard_summary_handler_returns_cache_errors() {
-        let error = dashboard_summary(State(unavailable_state()))
-            .await
-            .unwrap_err();
+        let error = dashboard_summary(
+            State(unavailable_state()),
+            Query(default_public_data_mode_query()),
+        )
+        .await
+        .unwrap_err();
 
         assert!(matches!(
             error,
@@ -841,8 +898,11 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
+            test_recent_trades: None,
         };
-        let error = dashboard_summary(State(state)).await.unwrap_err();
+        let error = dashboard_summary(State(state), Query(default_public_data_mode_query()))
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             error,
@@ -861,8 +921,111 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
+            test_recent_trades: None,
         };
-        let error = dashboard_summary(State(state)).await.unwrap_err();
+        let error = dashboard_summary(State(state), Query(default_public_data_mode_query()))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, crate::api::error::ApiError::Internal(_)));
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_accepts_demo_mode_query() {
+        let response = dashboard_summary(
+            State(dashboard_state(Vec::new(), Vec::new())),
+            Query(PublicDataModeQuery {
+                mode: Some(PublicDataMode::Demo),
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_accepts_live_mode_query() {
+        let response = dashboard_summary(
+            State(dashboard_state(Vec::new(), Vec::new())),
+            Query(PublicDataModeQuery {
+                mode: Some(PublicDataMode::Live),
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_accepts_demo_mode_query() {
+        let response = market_timeline(
+            State(timeline_state(vec![test_trade("BTCUSDT")])),
+            Path(String::from("BTCUSDT")),
+            Query(PublicDataModeQuery {
+                mode: Some(PublicDataMode::Demo),
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_accepts_live_mode_query() {
+        let response = market_timeline(
+            State(timeline_state(vec![test_trade("BTCUSDT")])),
+            Path(String::from("BTCUSDT")),
+            Query(PublicDataModeQuery {
+                mode: Some(PublicDataMode::Live),
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_missing_mode_defaults_to_demo() {
+        let response = market_timeline(
+            State(timeline_state(vec![test_trade("BTCUSDT")])),
+            Path(String::from("BTCUSDT")),
+            Query(default_public_data_mode_query()),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn market_timeline_returns_storage_errors_as_internal() {
+        let state = AppState {
+            pg_pool: failing_storage_pool(),
+            redis_cache: RedisCache::in_memory(Vec::new()),
+            detector_settings: test_detector_settings(),
+            health_settings: test_health_settings(),
+            runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: None,
+            test_recent_trades: None,
+        };
+        let error = market_timeline(
+            State(state),
+            Path(String::from("BTCUSDT")),
+            Query(default_public_data_mode_query()),
+        )
+        .await
+        .unwrap_err();
 
         assert!(matches!(error, crate::api::error::ApiError::Internal(_)));
     }
@@ -945,6 +1108,7 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
+            test_recent_trades: None,
         }
     }
 
@@ -973,6 +1137,21 @@ mod tests {
             supervisor: test_supervisor(),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(anomalies),
+            test_recent_trades: None,
+        }
+    }
+
+    fn timeline_state(trades: Vec<TradeEvent>) -> AppState {
+        AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::in_memory(Vec::new()),
+            detector_settings: test_detector_settings(),
+            health_settings: test_health_settings(),
+            runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: Some(Vec::new()),
+            test_recent_trades: Some(trades),
         }
     }
 
@@ -1040,6 +1219,23 @@ mod tests {
             now,
             now,
         )
+    }
+
+    fn test_trade(symbol: &str) -> TradeEvent {
+        TradeEvent::new(
+            Symbol::new(symbol).unwrap(),
+            Exchange::Binance,
+            Some(1),
+            Decimal::new(6505425, 2),
+            Decimal::new(15, 2),
+            fixed_now(),
+            fixed_now(),
+        )
+        .unwrap()
+    }
+
+    fn default_public_data_mode_query() -> PublicDataModeQuery {
+        PublicDataModeQuery::default()
     }
 
     fn test_detector_settings() -> DetectorSettings {

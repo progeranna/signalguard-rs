@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[cfg(test)]
-use crate::domain::AnomalyEvent;
+use crate::domain::{AnomalyEvent, TradeEvent};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -24,4 +24,6 @@ pub struct AppState {
     pub counters: InternalCounters,
     #[cfg(test)]
     pub test_recent_anomalies: Option<Vec<AnomalyEvent>>,
+    #[cfg(test)]
+    pub test_recent_trades: Option<Vec<TradeEvent>>,
 }
