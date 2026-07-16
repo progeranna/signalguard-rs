@@ -386,7 +386,7 @@ function DashboardTablesGrid({
 
   return (
     <>
-      <section className="grid gap-4 xl:grid-cols-2">
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <SymbolHealthShell
           onOpenAll={() => setModalState({ type: "symbols" })}
           onOpenSymbolDetail={(symbol) => openSymbolDetail(symbol)}
@@ -454,7 +454,7 @@ function SymbolHealthShell({
   const previewSymbols = symbols.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
 
   return (
-    <section className="space-y-3">
+    <section className="min-w-0 overflow-hidden space-y-3">
       <SectionTitle
         title="Market Health"
         subtitle="Current health signals for monitored markets."
@@ -474,15 +474,23 @@ function SymbolHealthShell({
         <LoadingSkeleton className="h-44" />
       ) : symbols.length > 0 ? (
         <>
-          <div className="hidden border-y border-white/10 lg:block">
-            <table className="w-full border-collapse text-left">
+          <div className="hidden w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain border-y border-white/10 lg:block">
+            <table aria-label="Market health" className="w-full table-fixed border-collapse text-left">
+              <colgroup>
+                <col className="w-[18%]" />
+                <col className="w-[22%]" />
+                <col className="w-[16%]" />
+                <col className="w-[11%]" />
+                <col className="w-[14%]" />
+                <col className="w-[19%]" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-4">Market</th>
-                  <th className="px-2 py-3 pr-4">Health Score</th>
-                  <th className="px-2 py-3 pr-4">Last Price</th>
-                  <th className="px-2 py-3 pr-4">Spread</th>
-                  <th className="px-2 py-3 pr-4">Trades/min</th>
+                  <th className="px-2 py-3 pr-2">Market</th>
+                  <th className="px-2 py-3 pr-2">Health Score</th>
+                  <th className="px-2 py-3 pr-2">Last Price</th>
+                  <th className="px-2 py-3 pr-2">Spread</th>
+                  <th className="px-2 py-3 pr-2">Trades/min</th>
                   <th className="px-2 py-3 text-right">Status</th>
                 </tr>
               </thead>
@@ -545,33 +553,32 @@ function SymbolHealthTableRow({
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
     >
-      <td className="px-2 py-3 pr-4">
-        <div className="inline-flex items-center gap-3">
-          <span className="font-mono text-base font-bold text-slate-50">
+      <td className="min-w-0 px-2 py-3 pr-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 truncate font-mono text-sm font-bold text-slate-50">
             {symbol.symbol}
           </span>
-          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <span className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 2xl:inline">
             View
           </span>
         </div>
       </td>
       <td className="px-2 py-3 pr-4">
-        <HealthScore score={score} status={symbol.health?.status} />
+        <HealthScore compact score={score} status={symbol.health?.status} />
       </td>
-      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-100">
+      <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-100 2xl:text-sm">
         {formatTickerPrice(symbol.state?.last_trade_price)}
       </td>
-      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
+      <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
         {formatTickerPercent(symbol.state?.spread_pct)}
       </td>
-      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
+      <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
         {formatOptionalCompact(symbol.state?.trades_per_minute)}
       </td>
       <td className="px-2 py-3 text-right">
-        <StatusBadge
-          status={statusTone}
-          text={statusText}
-        />
+        <div className="flex min-w-0 justify-end overflow-hidden">
+          <StatusBadge status={statusTone} text={statusText} />
+        </div>
       </td>
     </tr>
   );
@@ -641,9 +648,11 @@ function SymbolHealthCard({
 }
 
 function HealthScore({
+  compact = false,
   score,
   status,
 }: {
+  compact?: boolean;
   score: number | null;
   status: string | null | undefined;
 }) {
@@ -651,12 +660,18 @@ function HealthScore({
   const width = score === null ? 0 : Math.max(score, 4);
 
   return (
-    <div className="min-w-28">
-      <div className="flex items-center gap-3">
+    <div className={compact ? "min-w-0" : "min-w-28"}>
+      <div className={compact ? "flex min-w-0 items-center gap-2" : "flex items-center gap-3"}>
         <span className={`text-lg font-extrabold ${healthScoreTextClass(tone)}`}>
           {score ?? "—"}
         </span>
-        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/70">
+        <div
+          className={
+            compact
+              ? "h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-700/70"
+              : "h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/70"
+          }
+        >
           <div
             className={`h-full rounded-full ${healthScoreBarClass(tone)}`}
             style={{ width: `${width}%` }}
@@ -693,7 +708,7 @@ function RecentAnomaliesShell({
   const previewAnomalies = anomalies.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
 
   return (
-    <section className="space-y-3">
+    <section className="min-w-0 overflow-hidden space-y-3">
       <SectionTitle
         title="Recent Anomalies"
         subtitle="Latest data-quality events across monitored markets."
@@ -713,15 +728,23 @@ function RecentAnomaliesShell({
         <LoadingSkeleton className="h-44" />
       ) : anomalies.length > 0 ? (
         <>
-          <div className="hidden border-y border-white/10 lg:block">
-            <table className="w-full border-collapse text-left">
+          <div className="hidden w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain border-y border-white/10 lg:block">
+            <table aria-label="Recent anomalies" className="w-full table-fixed border-collapse text-left">
+              <colgroup>
+                <col className="w-[15%]" />
+                <col className="w-[16%]" />
+                <col className="w-[20%]" />
+                <col className="w-[19%]" />
+                <col className="w-[15%]" />
+                <col className="w-[15%]" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-4">Time</th>
-                  <th className="px-2 py-3 pr-4">Market</th>
-                  <th className="px-2 py-3 pr-4">Type</th>
-                  <th className="px-2 py-3 pr-4">Severity</th>
-                  <th className="px-2 py-3 pr-4">Observed</th>
+                  <th className="px-2 py-3 pr-2">Time</th>
+                  <th className="px-2 py-3 pr-2">Market</th>
+                  <th className="px-2 py-3 pr-2">Type</th>
+                  <th className="px-2 py-3 pr-2">Severity</th>
+                  <th className="px-2 py-3 pr-2">Observed</th>
                   <th className="px-2 py-3">Threshold</th>
                 </tr>
               </thead>
@@ -782,24 +805,24 @@ function AnomalyTableRow({
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
     >
-      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
+      <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
         {formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
       </td>
-      <td className="px-2 py-3 pr-4">
-        <span className="font-mono text-sm font-bold text-slate-50">
+      <td className="min-w-0 px-2 py-3 pr-2">
+        <span className="block min-w-0 truncate font-mono text-xs font-bold text-slate-50 2xl:text-sm">
           {anomaly.symbol}
         </span>
       </td>
-      <td className="px-2 py-3 pr-4 text-sm font-bold text-slate-100">
+      <td className="min-w-0 break-words px-2 py-3 pr-2 text-xs font-bold leading-4 text-slate-100 2xl:text-sm">
         {formatAnomalyType(anomaly.anomaly_type)}
       </td>
-      <td className="px-2 py-3 pr-4">
-        <SeverityBadge severity={anomaly.severity} />
+      <td className="min-w-0 px-2 py-3 pr-2">
+        <SeverityBadge compact severity={anomaly.severity} />
       </td>
-      <td className={`px-2 py-3 pr-4 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
+      <td className={`whitespace-nowrap px-2 py-3 pr-2 text-xs font-bold 2xl:text-sm ${anomalyValueClass(severityTone)}`}>
         {formatAnomalyValue(anomaly.anomaly_type, anomaly.observed_value, "observed")}
       </td>
-      <td className="px-2 py-3 text-sm font-semibold text-slate-300">
+      <td className="whitespace-nowrap px-2 py-3 text-xs font-semibold text-slate-300 2xl:text-sm">
         {formatAnomalyValue(anomaly.anomaly_type, anomaly.threshold_value, "threshold")}
       </td>
     </tr>
@@ -1659,12 +1682,20 @@ function anomalyMarkerBadgeClass(severity: DashboardAnomaly["severity"]): string
   }
 }
 
-function SeverityBadge({ severity }: { severity: DashboardAnomaly["severity"] }) {
+function SeverityBadge({
+  compact = false,
+  severity,
+}: {
+  compact?: boolean;
+  severity: DashboardAnomaly["severity"];
+}) {
   return (
     <span
-      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold uppercase tracking-[0.12em] ${severityBadgeClass(
-        severity,
-      )}`}
+      className={`inline-flex max-w-full whitespace-nowrap rounded-full border font-bold uppercase ${
+        compact
+          ? "px-2 py-1 text-[10px] tracking-[0.08em] 2xl:px-2.5 2xl:text-xs 2xl:tracking-[0.12em]"
+          : "px-2.5 py-1 text-xs tracking-[0.12em]"
+      } ${severityBadgeClass(severity)}`}
     >
       {statusLabel(severity)}
     </span>
