@@ -5,7 +5,7 @@ import { AnomaliesPage } from "@/pages/AnomaliesPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { SymbolDetailPage } from "@/pages/SymbolDetailPage";
 
-export const router = createBrowserRouter([
+export const appRoutes = [
   {
     path: "/",
     element: <ConsoleLayout />,
@@ -28,4 +28,6 @@ export const router = createBrowserRouter([
       },
     ],
   },
-]);
+];
+
+export const router = createBrowserRouter(appRoutes);
