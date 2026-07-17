@@ -97,6 +97,27 @@ describe("market timeline query keys", () => {
     );
   });
 
+  it("canonicalizes equivalent symbol spellings into one cache identity", () => {
+    expect(marketTimelineQueryKey(" btcusdt ", "demo")).toEqual(
+      marketTimelineQueryKey("BTCUSDT", "demo"),
+    );
+    expect(marketTimelineQueryKey("eThUsDt", "live")).toEqual(
+      marketTimelineQueryKey("ETHUSDT", "live"),
+    );
+  });
+
+  it.each(["", "   ", "BTC-USDT", "BTC/USDT"])(
+    "maps invalid symbol %s to the disabled identity",
+    (symbol) => {
+      expect(marketTimelineQueryKey(symbol, "demo")).toEqual([
+        "market",
+        "timeline",
+        "demo",
+        null,
+      ]);
+    },
+  );
+
   it("does not share mutable generated arrays", () => {
     const first = marketTimelineQueryKey("BTCUSDT", "demo");
     const second = marketTimelineQueryKey("BTCUSDT", "demo");

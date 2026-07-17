@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { DEFAULT_SYMBOL_ID, parseSymbolId, type SymbolId } from "./symbolId";
+
+export { parseSymbolId as normalizeSelectedSymbol } from "./symbolId";
+
 export const SELECTED_SYMBOL_STORAGE_KEY = "signalguard:selected-symbol";
-export const DEFAULT_SELECTED_SYMBOL = "BTCUSDT";
+export const DEFAULT_SELECTED_SYMBOL = DEFAULT_SYMBOL_ID;
 
 const selectedSymbolChangeEvent = "signalguard:selected-symbol-change";
-
-export function normalizeSelectedSymbol(value: string | null | undefined): string | null {
-  const normalized = value?.trim().toUpperCase();
-
-  return normalized ? normalized : null;
-}
 
 export function getStoredSelectedSymbol(): string | null {
   if (typeof window === "undefined") {
@@ -17,14 +15,14 @@ export function getStoredSelectedSymbol(): string | null {
   }
 
   try {
-    return normalizeSelectedSymbol(window.localStorage.getItem(SELECTED_SYMBOL_STORAGE_KEY));
+    return parseSymbolId(window.localStorage.getItem(SELECTED_SYMBOL_STORAGE_KEY));
   } catch {
     return null;
   }
 }
 
 export function storeSelectedSymbol(symbol: string): string | null {
-  const normalized = normalizeSelectedSymbol(symbol);
+  const normalized = parseSymbolId(symbol);
 
   if (!normalized || typeof window === "undefined") {
     return normalized;
@@ -46,13 +44,13 @@ export function resolveSelectedSymbol(
   availableSymbols: string[],
   candidate?: string | null,
   storedSymbol: string | null = getStoredSelectedSymbol(),
-): string {
+): SymbolId {
   const normalizedAvailable = availableSymbols
-    .map((symbol) => normalizeSelectedSymbol(symbol))
-    .filter((symbol): symbol is string => symbol !== null);
+    .map((symbol) => parseSymbolId(symbol))
+    .filter((symbol): symbol is SymbolId => symbol !== null);
   const availableSet = new Set(normalizedAvailable);
-  const normalizedCandidate = normalizeSelectedSymbol(candidate);
-  const normalizedStoredSymbol = normalizeSelectedSymbol(storedSymbol);
+  const normalizedCandidate = parseSymbolId(candidate);
+  const normalizedStoredSymbol = parseSymbolId(storedSymbol);
 
   if (normalizedCandidate && availableSet.has(normalizedCandidate)) {
     return normalizedCandidate;
@@ -82,13 +80,13 @@ export function useSelectedSymbol(
 
     function handleStorage(event: StorageEvent) {
       if (event.key === SELECTED_SYMBOL_STORAGE_KEY) {
-        setStoredSymbol(normalizeSelectedSymbol(event.newValue));
+        setStoredSymbol(parseSymbolId(event.newValue));
       }
     }
 
     function handleSelectedSymbolChange(event: Event) {
       const nextSymbol =
-        event instanceof CustomEvent ? normalizeSelectedSymbol(event.detail) : null;
+        event instanceof CustomEvent ? parseSymbolId(event.detail) : null;
 
       setStoredSymbol(nextSymbol ?? getStoredSelectedSymbol());
     }

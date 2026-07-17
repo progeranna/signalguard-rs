@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { fetchJson } from "@/shared/api/client";
 
+import { parseSymbolId, requireSymbolId } from "./symbolId";
+
 import {
   dashboardSummarySchema,
   marketTimelineSchema,
@@ -38,14 +40,25 @@ export function marketTimelineQueryKeyRootForMode(mode: UiMode) {
   return [...marketTimelineQueryKeyRoot, mode] as const;
 }
 
-export function marketTimelineQueryKey(symbol: string, mode: UiMode) {
-  return [...marketTimelineQueryKeyRootForMode(mode), symbol] as const;
+export function marketTimelineQueryKey(
+  symbol: string | null | undefined,
+  mode: UiMode,
+) {
+  return [
+    ...marketTimelineQueryKeyRootForMode(mode),
+    parseSymbolId(symbol),
+  ] as const;
 }
 
 export function fetchMarketTimeline(symbol: string, mode: UiMode): Promise<MarketTimeline> {
-  return fetchJson(withMode(`/market/${encodeURIComponent(symbol)}/timeline`, mode), {
-    schema: marketTimelineSchema,
-  });
+  const symbolId = requireSymbolId(symbol);
+
+  return fetchJson(
+    withMode(`/market/${encodeURIComponent(symbolId)}/timeline`, mode),
+    {
+      schema: marketTimelineSchema,
+    },
+  );
 }
 
 export function fetchRuntimeMode(): Promise<RuntimeModeResponse> {
@@ -63,10 +76,12 @@ export function useDashboardSummaryQuery(mode: UiMode) {
 }
 
 export function useMarketTimelineQuery(symbol: string | null | undefined, mode: UiMode) {
+  const symbolId = parseSymbolId(symbol);
+
   return useQuery({
-    queryKey: marketTimelineQueryKey(symbol ?? "", mode),
-    queryFn: () => fetchMarketTimeline(symbol ?? "", mode),
-    enabled: Boolean(symbol),
+    queryKey: marketTimelineQueryKey(symbolId, mode),
+    queryFn: () => fetchMarketTimeline(symbolId ?? "", mode),
+    enabled: symbolId !== null,
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
 }
