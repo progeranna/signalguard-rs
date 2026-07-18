@@ -3,14 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
-import {
-  useDashboardSummaryQuery,
-  useRuntimeModeQuery,
-} from "@/features/dashboard/api";
-import {
-  DEMO_MARKETS,
-  orderMarkets,
-} from "@/features/dashboard/marketOrder";
+import { useCatalogDashboardSummaryQuery } from "@/features/dashboard/api";
 import { normalizeSelectedSymbol, useSelectedSymbol } from "@/features/dashboard/selectedSymbol";
 import type {
   UiMode,
@@ -31,19 +24,9 @@ export function AppShell({ children }: PropsWithChildren) {
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const [activeMenu, setActiveMenu] = useState<HeaderMenu>(null);
   const { selectedUiMode, setSelectedUiMode } = useUiModeController();
-  const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
-  const runtimeModeQuery = useRuntimeModeQuery();
+  const dashboardSummaryQuery = useCatalogDashboardSummaryQuery(selectedUiMode);
   const summary = dashboardSummaryQuery.data ?? null;
-  const runtimeMode = runtimeModeQuery.data ?? null;
-  const availableSymbols = orderMarkets(
-    Array.from(
-      new Set([
-        ...DEMO_MARKETS,
-        ...(runtimeMode?.symbols ?? []),
-        ...(summary?.symbols.map((symbol) => symbol.symbol) ?? []),
-      ]),
-    ),
-  );
+  const availableSymbols = summary?.symbols.map((symbol) => symbol.symbol) ?? [];
   const routeSymbolCandidate = location.pathname.startsWith("/symbols/")
     ? location.pathname.slice("/symbols/".length)
     : null;

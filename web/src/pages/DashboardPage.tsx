@@ -12,13 +12,10 @@ import {
 } from "recharts";
 
 import {
-  useDashboardSummaryQuery,
+  useCatalogDashboardSummaryQuery,
   useMarketTimelineQuery,
 } from "@/features/dashboard/api";
-import {
-  buildCoveredDashboardSymbols,
-  isDashboardSymbolPlaceholder,
-} from "@/features/dashboard/marketOrder";
+import { isDashboardSymbolPlaceholder } from "@/features/dashboard/marketOrder";
 import {
   normalizeSelectedSymbol,
   storeSelectedSymbol,
@@ -52,9 +49,9 @@ type DashboardModalState =
 
 export function DashboardPage() {
   const selectedUiMode = useResolvedUiMode();
-  const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
+  const dashboardSummaryQuery = useCatalogDashboardSummaryQuery(selectedUiMode);
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = buildCoveredDashboardSymbols(summary?.symbols ?? []).map(
+  const availableSymbols = (summary?.symbols ?? []).map(
     (symbol) => symbol.symbol,
   );
   const { selectedSymbol } = useSelectedSymbol(availableSymbols);
@@ -107,7 +104,7 @@ function MarketTimelineShell({
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
+  const symbols = summary?.symbols ?? [];
   const selectedSymbol = selectSignalSymbol(symbols, selectedSignalSymbol);
   const timelineQuery = useMarketTimelineQuery(selectedSymbol?.symbol ?? null, selectedUiMode);
   const timelinePoints = buildTimelineChartPoints(timelineQuery.data?.points ?? []);
@@ -364,7 +361,7 @@ function DashboardTablesGrid({
   isLoading: boolean;
 }) {
   const [modalState, setModalState] = useState<DashboardModalState>(null);
-  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
+  const symbols = summary?.symbols ?? [];
   const anomalies = summary?.recent_anomalies ?? [];
 
   function isKnownSummarySymbol(symbol: string): boolean {
@@ -450,7 +447,7 @@ function SymbolHealthShell({
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
+  const symbols = summary?.symbols ?? [];
   const previewSymbols = symbols.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
 
   return (

@@ -1,15 +1,11 @@
+import {
+  DEMO_MARKETS,
+  getMarketCatalogAvailability,
+} from "./marketCatalog";
 import { parseSymbolId } from "./symbolId";
 import type { DashboardSymbolSummary } from "./types";
 
-export const DEMO_MARKETS = [
-  "BTCUSDT",
-  "ETHUSDT",
-  "SOLUSDT",
-  "XRPUSDT",
-  "BNBUSDT",
-  "ADAUSDT",
-  "DOGEUSDT",
-] as const;
+export { DEMO_MARKETS } from "./marketCatalog";
 
 const demoMarketIndex = new Map(
   DEMO_MARKETS.map((market, index) => [parseSymbolId(market) ?? market, index]),
@@ -79,6 +75,16 @@ export function buildCoveredDashboardSymbols(
 export function isDashboardSymbolPlaceholder(
   symbol: DashboardSymbolSummary,
 ): boolean {
+  const availability = getMarketCatalogAvailability(symbol);
+
+  if (availability === "observed") {
+    return false;
+  }
+
+  if (availability === "configured-unobserved") {
+    return true;
+  }
+
   return symbol.state === null && symbol.health === null;
 }
 

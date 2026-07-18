@@ -2,6 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 
 import { fetchJson } from "@/shared/api/client";
 
+import {
+  buildMarketCatalog,
+  marketCatalogDashboardSymbols,
+} from "./marketCatalog";
 import { parseSymbolId, requireSymbolId } from "./symbolId";
 
 import {
@@ -75,6 +79,28 @@ export function useDashboardSummaryQuery(mode: UiMode) {
   });
 }
 
+export function useCatalogDashboardSummaryQuery(mode: UiMode) {
+  const dashboardSummaryQuery = useDashboardSummaryQuery(mode);
+  const runtimeModeQuery = useRuntimeModeQuery(mode === "live");
+  const summary = dashboardSummaryQuery.data;
+
+  return {
+    ...dashboardSummaryQuery,
+    data: summary
+      ? {
+          ...summary,
+          symbols: marketCatalogDashboardSymbols(
+            buildMarketCatalog({
+              configuredSymbols: runtimeModeQuery.data?.symbols ?? [],
+              mode,
+              observedSymbols: summary.symbols,
+            }),
+          ),
+        }
+      : summary,
+  };
+}
+
 export function useMarketTimelineQuery(symbol: string | null | undefined, mode: UiMode) {
   const symbolId = parseSymbolId(symbol);
 
@@ -86,9 +112,10 @@ export function useMarketTimelineQuery(symbol: string | null | undefined, mode: 
   });
 }
 
-export function useRuntimeModeQuery() {
+export function useRuntimeModeQuery(enabled = true) {
   return useQuery({
     queryKey: runtimeModeQueryKey,
     queryFn: fetchRuntimeMode,
+    enabled,
   });
 }

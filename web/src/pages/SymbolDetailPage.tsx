@@ -1,11 +1,8 @@
 import { useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { useDashboardSummaryQuery } from "@/features/dashboard/api";
-import {
-  buildCoveredDashboardSymbols,
-  isDashboardSymbolPlaceholder,
-} from "@/features/dashboard/marketOrder";
+import { useCatalogDashboardSummaryQuery } from "@/features/dashboard/api";
+import { isDashboardSymbolPlaceholder } from "@/features/dashboard/marketOrder";
 import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
 import { useResolvedUiMode } from "@/features/dashboard/uiMode";
 import type {
@@ -26,9 +23,9 @@ import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 export function SymbolDetailPage() {
   const selectedUiMode = useResolvedUiMode();
-  const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
+  const dashboardSummaryQuery = useCatalogDashboardSummaryQuery(selectedUiMode);
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
+  const availableSymbols = summary?.symbols ?? [];
   const recentAnomalies = summary?.recent_anomalies ?? [];
   const routeSymbol = useParams().symbol ?? "";
   const selectedSymbol = normalizeSymbol(routeSymbol);
