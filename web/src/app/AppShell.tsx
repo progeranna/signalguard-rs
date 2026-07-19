@@ -31,14 +31,19 @@ export function AppShell({ children }: PropsWithChildren) {
     ? location.pathname.slice("/symbols/".length)
     : null;
   const normalizedRouteSymbolCandidate = normalizeSelectedSymbol(routeSymbolCandidate);
-  const { selectedSymbol, setSelectedSymbol } = useSelectedSymbol(availableSymbols);
+  const { selectedSymbol, setSelectedSymbol } = useSelectedSymbol(
+    selectedUiMode,
+    availableSymbols,
+  );
   const isKnownRouteSymbol =
     normalizedRouteSymbolCandidate !== null &&
     availableSymbols.some(
       (symbol) => normalizeSelectedSymbol(symbol) === normalizedRouteSymbolCandidate,
     );
   const displayedHeaderSymbol =
-    routeSymbolCandidate && !isKnownRouteSymbol ? "Unknown market" : selectedSymbol;
+    routeSymbolCandidate && !isKnownRouteSymbol
+      ? "Unknown market"
+      : selectedSymbol ?? "No market";
   const headerStatus = buildHeaderDataStatus(summary, {
     isError: dashboardSummaryQuery.isError,
     isLoading: dashboardSummaryQuery.isLoading,

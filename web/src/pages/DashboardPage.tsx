@@ -54,7 +54,10 @@ export function DashboardPage() {
   const availableSymbols = (summary?.symbols ?? []).map(
     (symbol) => symbol.symbol,
   );
-  const { selectedSymbol } = useSelectedSymbol(availableSymbols);
+  const { selectedSymbol } = useSelectedSymbol(
+    selectedUiMode,
+    availableSymbols,
+  );
 
   return (
     <section className="space-y-3">
@@ -72,7 +75,11 @@ export function DashboardPage() {
         summary={summary}
         isLoading={dashboardSummaryQuery.isLoading}
       />
-      <DashboardTablesGrid summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
+      <DashboardTablesGrid
+        summary={summary}
+        isLoading={dashboardSummaryQuery.isLoading}
+        selectedUiMode={selectedUiMode}
+      />
     </section>
   );
 }
@@ -100,7 +107,7 @@ function MarketTimelineShell({
   isLoading,
 }: {
   selectedUiMode: UiMode;
-  selectedSignalSymbol: string;
+  selectedSignalSymbol: string | null;
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
@@ -356,9 +363,11 @@ function SignalSnapshotMetric({ label, value }: { label: string; value: string }
 function DashboardTablesGrid({
   summary,
   isLoading,
+  selectedUiMode,
 }: {
   summary: DashboardSummary | null;
   isLoading: boolean;
+  selectedUiMode: UiMode;
 }) {
   const [modalState, setModalState] = useState<DashboardModalState>(null);
   const symbols = summary?.symbols ?? [];
@@ -375,7 +384,7 @@ function DashboardTablesGrid({
 
   function openSymbolDetail(symbol: string, returnTo?: "anomalies" | "symbols") {
     if (isKnownSummarySymbol(symbol)) {
-      storeSelectedSymbol(symbol);
+      storeSelectedSymbol(selectedUiMode, symbol);
     }
 
     setModalState({ type: "symbolDetail", symbol, returnTo });
@@ -1514,21 +1523,18 @@ function EmptyBlock({ message }: { message: string }) {
 
 function selectSignalSymbol(
   symbols: DashboardSymbolSummary[],
-  preferredSymbol: string,
+  preferredSymbol: string | null,
 ): DashboardSymbolSummary | null {
   const normalizedPreferredSymbol = normalizeSelectedSymbol(preferredSymbol);
+
+  if (!normalizedPreferredSymbol) {
+    return null;
+  }
 
   return (
     symbols.find(
       (symbol) => normalizeSelectedSymbol(symbol.symbol) === normalizedPreferredSymbol,
-    ) ??
-    symbols.find(
-      (symbol) =>
-        normalizeSelectedSymbol(symbol.symbol) === "BTCUSDT" &&
-        !isDashboardSymbolPlaceholder(symbol),
-    ) ??
-    symbols[0] ??
-    null
+    ) ?? null
   );
 }
 
