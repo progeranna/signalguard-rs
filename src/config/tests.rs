@@ -274,6 +274,7 @@ fn replay_defaults_are_loaded() {
         "examples/replay/sample.jsonl"
     );
     assert_eq!(settings.ingestion.replay_delay_ms, 0);
+    assert!(settings.ingestion.replay_reset_state);
     assert!(settings.ingestion.replay_reset_storage);
 }
 
@@ -281,12 +282,32 @@ fn replay_defaults_are_loaded() {
 fn replay_overrides_are_loaded() {
     let loaded = load(local_env_with([
         ("SIGNALGUARD_INGESTION_REPLAY_DELAY_MS", "25"),
+        ("SIGNALGUARD_REPLAY_RESET_STATE", "false"),
         ("SIGNALGUARD_REPLAY_RESET_STORAGE", "false"),
     ]))
     .unwrap();
 
     assert_eq!(loaded.ingestion.replay_delay_ms, 25);
+    assert!(!loaded.ingestion.replay_reset_state);
     assert!(!loaded.ingestion.replay_reset_storage);
+}
+
+#[test]
+fn replay_reset_state_defaults_to_true() {
+    let settings = load(local_env_with_storage()).unwrap();
+
+    assert!(settings.ingestion.replay_reset_state);
+}
+
+#[test]
+fn replay_reset_state_can_be_disabled() {
+    let loaded = load(local_env_with([(
+        "SIGNALGUARD_REPLAY_RESET_STATE",
+        "false",
+    )]))
+    .unwrap();
+
+    assert!(!loaded.ingestion.replay_reset_state);
 }
 
 #[test]
@@ -429,6 +450,16 @@ fn oversized_event_channel_capacity_is_rejected() {
     assert_load_error_contains(
         settings,
         "SIGNALGUARD_EVENT_CHANNEL_CAPACITY must be less than or equal to 1000000",
+    );
+}
+
+#[test]
+fn invalid_replay_reset_state_value_is_rejected() {
+    let settings = local_env_with([("SIGNALGUARD_REPLAY_RESET_STATE", "maybe")]);
+
+    assert_load_error_contains(
+        settings,
+        "SIGNALGUARD_REPLAY_RESET_STATE must be 'true' or 'false'",
     );
 }
 

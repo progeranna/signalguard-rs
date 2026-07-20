@@ -36,8 +36,10 @@ It is not a production deployment guide.
   Comma-separated symbol list for live mode.
 - `SIGNALGUARD_INGESTION_REPLAY_PATH`
   Replay fixture path for replay mode.
+- `SIGNALGUARD_REPLAY_RESET_STATE`
+  `true` clears SignalGuard Redis latest-state keys before Replay startup; `false` preserves and validates them. Defaults to `true`. Live startup always preserves and validates Redis state regardless of this Replay-only setting.
 - `SIGNALGUARD_REPLAY_RESET_STORAGE`
-  `true` clears replay demo history tables before replay; `false` preserves existing PostgreSQL history.
+  `true` clears PostgreSQL replay history tables before replay; `false` preserves existing PostgreSQL history. This setting does not control Redis.
 - `SIGNALGUARD_ENABLE_RUNTIME_SWITCH`
   `false` by default. Keeps `POST /runtime/mode` disabled unless an operator explicitly enables runtime switching in a local or otherwise operator-controlled environment.
 - `SIGNALGUARD_EVENT_CHANNEL_CAPACITY`
@@ -124,7 +126,9 @@ docker compose down
 Notes:
 
 - Replay is deterministic by default.
-- `SIGNALGUARD_REPLAY_RESET_STORAGE=true` clears `trades`, `quotes`, and `anomalies` before replay so repeated demo runs stay reproducible.
+- `SIGNALGUARD_REPLAY_RESET_STATE=true` clears only SignalGuard Redis latest-state keys before Replay ingestion.
+- `SIGNALGUARD_REPLAY_RESET_STORAGE=true` independently clears PostgreSQL `trades`, `quotes`, and `anomalies` before replay.
+- Set either flag to `false` only when preserving that specific store is intentional.
 - `POST /runtime/mode` is disabled by default. Set `SIGNALGUARD_ENABLE_RUNTIME_SWITCH=true` only in local or operator-controlled environments where runtime switching and optional reset behavior are intended.
 - Replay fixtures use historical timestamps, so `stale_data` anomalies and degraded market-health results are expected unless the fixture timestamps are near the current clock.
 
@@ -175,7 +179,52 @@ Notes:
 - The service does not submit, cancel, or route exchange orders.
 - Internet access is required.
 - Live mode does not reset PostgreSQL history automatically.
+- Ordinary Live startup and restart preserve and validate existing SignalGuard latest-state Redis entries before ingestion resumes.
+- An empty latest-state cache is valid. Missing, malformed, non-canonical, or symbol-mismatched preserved entries cause explicit degraded cache operation; startup does not silently trust, repair, or delete them.
+- `SIGNALGUARD_REPLAY_RESET_STATE` is Replay-only and cannot make Live startup destructive.
 - The local depth view is still a simplified top-N runtime book without REST snapshot bootstrap or resync.
+
+## Manual Live restart cache-preservation smoke
+
+Use only a local or otherwise controlled Redis instance. This smoke seeds one SignalGuard-owned state, starts Live twice, and verifies startup does not erase it before newer events arrive.
+
+```bash
+docker compose up -d postgres redis
+export DATABASE_URL="postgres://signalguard:signalguard@localhost:5432/signalguard"
+export REDIS_URL="redis://127.0.0.1:6379"
+export SIGNALGUARD_PROFILE=local
+export SIGNALGUARD_DATABASE_URL="${DATABASE_URL}"
+export SIGNALGUARD_REDIS_URL="${REDIS_URL}"
+export SIGNALGUARD_INGESTION_MODE=live
+export SIGNALGUARD_INGESTION_SYMBOLS=BTCUSDT
+sqlx migrate run
+
+# Seed through a replay or controlled Redis fixture first, then verify:
+redis-cli -u "${REDIS_URL}" SISMEMBER signalguard:symbols BTCUSDT
+redis-cli -u "${REDIS_URL}" GET signalguard:market_state:BTCUSDT
+
+cargo run 2>&1 | tee /tmp/signalguard-live-first.log
+# Stop with Ctrl-C after startup, without clearing Redis.
+redis-cli -u "${REDIS_URL}" GET signalguard:market_state:BTCUSDT
+
+cargo run 2>&1 | tee /tmp/signalguard-live-second.log
+# Stop with Ctrl-C after startup.
+redis-cli -u "${REDIS_URL}" GET signalguard:market_state:BTCUSDT
+rg "preserve_and_validate|preserved and validated" /tmp/signalguard-live-first.log /tmp/signalguard-live-second.log
+```
+
+The state should remain present across both startups until Live ingestion replaces it with a newer valid value. When Binance access is unavailable, perform the same check with a deterministic seeded state and stop immediately after the preserve/validate startup log.
+
+Intentional cleanup remains explicit:
+
+```bash
+SIGNALGUARD_INGESTION_MODE=replay \
+SIGNALGUARD_REPLAY_RESET_STATE=true \
+SIGNALGUARD_REPLAY_RESET_STORAGE=false \
+cargo run
+```
+
+This targeted Replay reset removes only `signalguard:market_state:*` and `signalguard:symbols`. It does not use `FLUSHDB` or delete unrelated Redis keys.
 
 ## Reading `/metrics`
 
@@ -271,8 +320,10 @@ Replay historical timestamps can trigger `stale_data` and `event_lag_spike` anom
   replay mode can produce `stale_data` anomalies and degraded market health by design.
 - Port already in use:
   the HTTP server fails to bind `SIGNALGUARD_HOST:SIGNALGUARD_PORT`.
-- Redis stale cache cleanup or startup cache failure:
-  service degrades instead of trusting potentially stale latest-state keys.
+- Invalid preserved Redis latest-state cache:
+  service increments the cache-error counter once, logs validation context, degrades the runtime cache handle, and leaves invalid data untouched for operator inspection. Use an explicit Replay state reset or targeted operator cleanup when deletion is intended.
+- Redis reset failure:
+  service logs reset-specific context and degrades without broad database cleanup.
 - Event channel backpressure:
   if the pipeline or downstream storage/cache is slow, replay and live await on the bounded channel instead of dropping events.
 

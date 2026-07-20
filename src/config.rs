@@ -13,6 +13,7 @@ const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_RUNTIME_PROFILE: RuntimeProfile = RuntimeProfile::Local;
 const DEFAULT_REPLAY_PATH: &str = "examples/replay/sample.jsonl";
+const DEFAULT_REPLAY_RESET_STATE: bool = true;
 const DEFAULT_REPLAY_RESET_STORAGE: bool = true;
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 1_024;
 const MAX_EVENT_CHANNEL_CAPACITY: usize = 1_000_000;
@@ -86,6 +87,7 @@ pub struct IngestionSettings {
     pub symbols: Vec<Symbol>,
     pub replay_path: PathBuf,
     pub replay_delay_ms: u64,
+    pub replay_reset_state: bool,
     pub replay_reset_storage: bool,
     pub event_channel_capacity: usize,
 }
@@ -94,6 +96,7 @@ pub struct IngestionSettings {
 struct ReplaySettings {
     path: PathBuf,
     delay_ms: u64,
+    reset_state: bool,
     reset_storage: bool,
 }
 
@@ -221,6 +224,7 @@ fn load_ingestion_settings(env_map: &EnvMap) -> Result<IngestionSettings> {
         symbols,
         replay_path: replay.path,
         replay_delay_ms: replay.delay_ms,
+        replay_reset_state: replay.reset_state,
         replay_reset_storage: replay.reset_storage,
         event_channel_capacity,
     };
@@ -235,6 +239,11 @@ fn load_replay_settings(env_map: &EnvMap) -> Result<ReplaySettings> {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_REPLAY_PATH)),
         delay_ms: env_u64(env_map, "SIGNALGUARD_INGESTION_REPLAY_DELAY_MS", 0)?,
+        reset_state: env_bool(
+            env_map,
+            "SIGNALGUARD_REPLAY_RESET_STATE",
+            DEFAULT_REPLAY_RESET_STATE,
+        )?,
         reset_storage: env_bool(
             env_map,
             "SIGNALGUARD_REPLAY_RESET_STORAGE",

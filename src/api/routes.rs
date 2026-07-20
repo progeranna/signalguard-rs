@@ -494,6 +494,7 @@ mod tests {
                 symbols: vec![crate::domain::Symbol::new("BTCUSDT").unwrap()],
                 replay_path: std::path::PathBuf::from("examples/replay/sample.jsonl"),
                 replay_delay_ms: 0,
+                replay_reset_state: true,
                 replay_reset_storage: false,
                 event_channel_capacity: 16,
             },

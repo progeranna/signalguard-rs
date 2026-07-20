@@ -284,6 +284,7 @@ fn replay_settings(path: &str, symbols: &[&str]) -> IngestionSettings {
             .collect(),
         replay_path: PathBuf::from(path),
         replay_delay_ms: 0,
+        replay_reset_state: true,
         replay_reset_storage: true,
         event_channel_capacity: 1_024,
     }

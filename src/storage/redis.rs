@@ -20,6 +20,8 @@ pub struct RedisCache {
     in_memory_states: Option<Arc<Mutex<HashMap<Symbol, MarketState>>>>,
     #[cfg(test)]
     in_memory_symbols: Option<Arc<Mutex<Vec<Symbol>>>>,
+    #[cfg(test)]
+    forced_failure: Option<&'static str>,
 }
 
 #[derive(Debug, Error)]
@@ -59,6 +61,8 @@ impl RedisCache {
             in_memory_states: None,
             #[cfg(test)]
             in_memory_symbols: None,
+            #[cfg(test)]
+            forced_failure: None,
         })
     }
 
@@ -69,6 +73,8 @@ impl RedisCache {
             in_memory_states: None,
             #[cfg(test)]
             in_memory_symbols: None,
+            #[cfg(test)]
+            forced_failure: None,
         }
     }
 
@@ -168,8 +174,61 @@ impl RedisCache {
         Ok(symbols)
     }
 
+    pub async fn validate_market_state_cache(&self) -> Result<usize, CacheError> {
+        let operation = "validate_market_state_cache";
+        self.fail_if_forced(operation)?;
+
+        let raw_symbols = self.registered_symbol_values(operation).await?;
+        let mut symbols = raw_symbols
+            .into_iter()
+            .map(|raw_symbol| {
+                let symbol =
+                    Symbol::new(raw_symbol.clone()).map_err(|error| CacheError::InvalidData {
+                        operation,
+                        message: format!("registered symbol `{raw_symbol}` is invalid: {error}"),
+                    })?;
+                if raw_symbol != symbol.as_str() {
+                    return Err(CacheError::InvalidData {
+                        operation,
+                        message: format!(
+                            "registered symbol `{raw_symbol}` is not canonical; expected `{symbol}`"
+                        ),
+                    });
+                }
+
+                Ok(symbol)
+            })
+            .collect::<Result<Vec<_>, CacheError>>()?;
+        symbols.sort();
+
+        for symbol in &symbols {
+            let payload = self
+                .market_state_payload(symbol, operation)
+                .await?
+                .ok_or_else(|| CacheError::InvalidData {
+                    operation,
+                    message: format!(
+                        "registered symbol `{symbol}` has no corresponding market-state value"
+                    ),
+                })?;
+            let state = deserialize_market_state_for_validation(operation, symbol, &payload)?;
+            if state.symbol.as_str() != symbol.as_str() {
+                return Err(CacheError::InvalidData {
+                    operation,
+                    message: format!(
+                        "market-state key for `{symbol}` contains embedded symbol `{}`",
+                        state.symbol
+                    ),
+                });
+            }
+        }
+
+        Ok(symbols.len())
+    }
+
     pub async fn clear_market_state_cache(&self) -> Result<usize, CacheError> {
         let operation = "clear_market_state_cache";
+        self.fail_if_forced(operation)?;
         #[cfg(test)]
         if let Some(symbols) = &self.in_memory_symbols {
             lock_in_memory_symbols(symbols, operation)?.clear();
@@ -249,6 +308,17 @@ fn deserialize<T: DeserializeOwned>(operation: &'static str, value: &str) -> Res
     })
 }
 
+fn deserialize_market_state_for_validation(
+    operation: &'static str,
+    symbol: &Symbol,
+    value: &str,
+) -> Result<MarketState, CacheError> {
+    serde_json::from_str(value).map_err(|error| CacheError::InvalidData {
+        operation,
+        message: format!("market state for `{symbol}` is malformed: {error}"),
+    })
+}
+
 fn lock_in_memory_states<'a>(
     states: &'a Arc<Mutex<HashMap<Symbol, MarketState>>>,
     operation: &'static str,
@@ -281,6 +351,7 @@ impl RedisCache {
             connection: None,
             in_memory_states: Some(Arc::new(Mutex::new(states))),
             in_memory_symbols: None,
+            forced_failure: None,
         }
     }
 
@@ -296,6 +367,7 @@ impl RedisCache {
             connection: None,
             in_memory_states: Some(Arc::new(Mutex::new(states))),
             in_memory_symbols: Some(Arc::new(Mutex::new(symbols))),
+            forced_failure: None,
         }
     }
 
@@ -306,7 +378,95 @@ impl RedisCache {
             connection: None,
             in_memory_states: None,
             in_memory_symbols: Some(Arc::new(Mutex::new(symbols))),
+            forced_failure: None,
         }
+    }
+
+    async fn registered_symbol_values(
+        &self,
+        operation: &'static str,
+    ) -> Result<Vec<String>, CacheError> {
+        #[cfg(test)]
+        if let Some(symbols) = &self.in_memory_symbols {
+            return Ok(lock_in_memory_symbols(symbols, operation)?
+                .iter()
+                .map(|symbol| symbol.as_str().to_owned())
+                .collect());
+        }
+
+        if let Some(states) = &self.in_memory_states {
+            return Ok(lock_in_memory_states(states, operation)?
+                .keys()
+                .map(|symbol| symbol.as_str().to_owned())
+                .collect());
+        }
+
+        let mut connection = self.connection_for(operation).await?;
+        connection
+            .smembers(SYMBOL_SET_KEY)
+            .await
+            .map_err(redis_error(operation))
+    }
+
+    async fn market_state_payload(
+        &self,
+        symbol: &Symbol,
+        operation: &'static str,
+    ) -> Result<Option<String>, CacheError> {
+        if let Some(states) = &self.in_memory_states {
+            return lock_in_memory_states(states, operation)?
+                .get(symbol)
+                .map(|state| serialize(operation, state))
+                .transpose();
+        }
+
+        #[cfg(test)]
+        if self.in_memory_symbols.is_some() {
+            return Ok(None);
+        }
+
+        let mut connection = self.connection_for(operation).await?;
+        connection
+            .get(market_state_key(symbol))
+            .await
+            .map_err(redis_error(operation))
+    }
+
+    #[cfg(test)]
+    fn fail_if_forced(&self, operation: &'static str) -> Result<(), CacheError> {
+        if self.forced_failure == Some(operation) {
+            return Err(CacheError::InvalidData {
+                operation,
+                message: String::from("forced test failure"),
+            });
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(test))]
+    fn fail_if_forced(&self, _operation: &'static str) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn in_memory_with_entries(
+        symbols: Vec<Symbol>,
+        entries: Vec<(Symbol, MarketState)>,
+    ) -> Self {
+        Self {
+            client: None,
+            connection: None,
+            in_memory_states: Some(Arc::new(Mutex::new(entries.into_iter().collect()))),
+            in_memory_symbols: Some(Arc::new(Mutex::new(symbols))),
+            forced_failure: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_forced_failure(mut self, operation: &'static str) -> Self {
+        self.forced_failure = Some(operation);
+        self
     }
 
     fn client(&self) -> Result<&redis::Client, CacheError> {
@@ -333,7 +493,8 @@ mod tests {
     use rust_decimal::Decimal;
 
     use super::{
-        CacheError, RedisCache, deserialize, market_state_pattern, serialize, symbol_set_key,
+        CacheError, RedisCache, deserialize, deserialize_market_state_for_validation,
+        market_state_pattern, serialize, symbol_set_key,
     };
     use crate::domain::{MarketState, Symbol};
 
@@ -409,6 +570,66 @@ mod tests {
 
         assert_eq!(symbols[0].as_str(), "BTCUSDT");
         assert!(matches!(error, CacheError::Unavailable));
+    }
+
+    #[tokio::test]
+    async fn validation_accepts_empty_in_memory_cache() {
+        let cache = RedisCache::in_memory(Vec::new());
+
+        let validated_symbols = cache.validate_market_state_cache().await.unwrap();
+
+        assert_eq!(validated_symbols, 0);
+    }
+
+    #[tokio::test]
+    async fn validation_rejects_registered_symbol_without_state() {
+        let cache =
+            RedisCache::in_memory_with_symbols(vec![Symbol::new("BTCUSDT").unwrap()], Vec::new());
+
+        let error = cache.validate_market_state_cache().await.unwrap_err();
+
+        assert!(matches!(error, CacheError::InvalidData { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("has no corresponding market-state value")
+        );
+    }
+
+    #[tokio::test]
+    async fn validation_rejects_embedded_symbol_mismatch() {
+        let key_symbol = Symbol::new("BTCUSDT").unwrap();
+        let state = MarketState::new(Symbol::new("ETHUSDT").unwrap());
+        let cache =
+            RedisCache::in_memory_with_entries(vec![key_symbol.clone()], vec![(key_symbol, state)]);
+
+        let error = cache.validate_market_state_cache().await.unwrap_err();
+
+        assert!(matches!(error, CacheError::InvalidData { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("contains embedded symbol `ETHUSDT`")
+        );
+    }
+
+    #[test]
+    fn validation_rejects_malformed_market_state_payload() {
+        let symbol = Symbol::new("BTCUSDT").unwrap();
+
+        let error = deserialize_market_state_for_validation(
+            "validate_market_state_cache",
+            &symbol,
+            "{not-json",
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, CacheError::InvalidData { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("market state for `BTCUSDT` is malformed")
+        );
     }
 
     #[test]
