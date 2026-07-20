@@ -25,7 +25,7 @@ describe("mode-scoped selected-symbol consumer wiring", () => {
 
   it("scopes dashboard popup and table writes to the active mode", () => {
     expect(dashboardSource).toContain(
-      "storeSelectedSymbol(selectedUiMode, symbol)",
+      "storeSelectedSymbol(identity.mode, identity.symbol)",
     );
     expect(dashboardSource).not.toMatch(/storeSelectedSymbol\(symbol\)/);
   });
