@@ -30,9 +30,13 @@ function withMode(path: string, mode: UiMode): string {
   return search ? `${path}?${search}` : path;
 }
 
-export function fetchDashboardSummary(mode: UiMode): Promise<DashboardSummary> {
+export function fetchDashboardSummary(
+  mode: UiMode,
+  signal?: AbortSignal,
+): Promise<DashboardSummary> {
   return fetchJson(withMode("/dashboard/summary", mode), {
     schema: dashboardSummarySchema,
+    signal,
   });
 }
 
@@ -54,27 +58,33 @@ export function marketTimelineQueryKey(
   ] as const;
 }
 
-export function fetchMarketTimeline(symbol: string, mode: UiMode): Promise<MarketTimeline> {
+export function fetchMarketTimeline(
+  symbol: string,
+  mode: UiMode,
+  signal?: AbortSignal,
+): Promise<MarketTimeline> {
   const symbolId = requireSymbolId(symbol);
 
   return fetchJson(
     withMode(`/market/${encodeURIComponent(symbolId)}/timeline`, mode),
     {
       schema: marketTimelineSchema,
+      signal,
     },
   );
 }
 
-export function fetchRuntimeMode(): Promise<RuntimeModeResponse> {
+export function fetchRuntimeMode(signal?: AbortSignal): Promise<RuntimeModeResponse> {
   return fetchJson("/runtime/mode", {
     schema: runtimeModeResponseSchema,
+    signal,
   });
 }
 
 export function useDashboardSummaryQuery(mode: UiMode) {
   return useQuery({
     queryKey: dashboardSummaryQueryKeyForMode(mode),
-    queryFn: () => fetchDashboardSummary(mode),
+    queryFn: ({ signal }) => fetchDashboardSummary(mode, signal),
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
 }
@@ -106,7 +116,7 @@ export function useMarketTimelineQuery(symbol: string | null | undefined, mode: 
 
   return useQuery({
     queryKey: marketTimelineQueryKey(symbolId, mode),
-    queryFn: () => fetchMarketTimeline(symbolId ?? "", mode),
+    queryFn: ({ signal }) => fetchMarketTimeline(symbolId ?? "", mode, signal),
     enabled: symbolId !== null,
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
@@ -115,7 +125,7 @@ export function useMarketTimelineQuery(symbol: string | null | undefined, mode: 
 export function useRuntimeModeQuery(enabled = true) {
   return useQuery({
     queryKey: runtimeModeQueryKey,
-    queryFn: fetchRuntimeMode,
+    queryFn: ({ signal }) => fetchRuntimeMode(signal),
     enabled,
   });
 }

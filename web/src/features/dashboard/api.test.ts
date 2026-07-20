@@ -6,6 +6,7 @@ import {
   marketTimelineQueryKey,
   marketTimelineQueryKeyRoot,
   marketTimelineQueryKeyRootForMode,
+  runtimeModeQueryKey,
 } from "./api";
 
 describe("dashboard summary query keys", () => {
@@ -126,5 +127,11 @@ describe("market timeline query keys", () => {
 
     expect(second).toEqual(["market", "timeline", "demo", "BTCUSDT"]);
     expect(marketTimelineQueryKeyRoot).toEqual(["market", "timeline"]);
+  });
+});
+
+describe("runtime mode query key", () => {
+  it("uses one stable global runtime identity", () => {
+    expect(runtimeModeQueryKey).toEqual(["runtime", "mode"]);
   });
 });
