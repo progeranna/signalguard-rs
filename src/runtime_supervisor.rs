@@ -78,6 +78,7 @@ impl IngestionSupervisor {
         ingestion_settings: &IngestionSettings,
         binance_settings: &BinanceSettings,
         detector_settings: &DetectorSettings,
+        switching_supported: bool,
         pg_pool: PgPool,
         redis_cache: RedisCache,
         counters: InternalCounters,
@@ -89,6 +90,7 @@ impl IngestionSupervisor {
                 ingestion_settings.mode,
                 &ingestion_settings.symbols,
                 started_at,
+                switching_supported,
             )),
             active_task: Mutex::new(None),
             switch_guard: Mutex::new(()),
@@ -147,7 +149,6 @@ impl IngestionSupervisor {
             snapshot.mode = RuntimeMode::from(request.mode);
             snapshot.status = RuntimeModeStatus::Switching;
             snapshot.symbols = request.symbols.clone();
-            snapshot.switching_supported = true;
             snapshot.source = RuntimeModeSource::Runtime;
             snapshot.last_error = None;
         });
@@ -184,7 +185,6 @@ impl IngestionSupervisor {
             |snapshot| {
                 snapshot.mode = RuntimeMode::from(request.mode);
                 snapshot.symbols = request.symbols.clone();
-                snapshot.switching_supported = true;
                 snapshot.source = RuntimeModeSource::Runtime;
                 snapshot.last_switched_at = Some(switched_at);
                 snapshot.last_error = None;
@@ -418,10 +418,10 @@ impl IngestionSupervisor {
         Ok(ResolvedSwitchRequest {
             mode,
             symbols,
-            reset_policy: RuntimeResetPolicy {
-                reset_state: command.reset_state.unwrap_or(true),
-                reset_storage: command.reset_storage.unwrap_or(true),
-            },
+            reset_policy: RuntimeResetPolicy::from_optional_flags(
+                command.reset_state,
+                command.reset_storage,
+            ),
         })
     }
 
@@ -564,19 +564,24 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn supervisor_initializes_runtime_snapshot_from_config() {
-        let supervisor = test_supervisor(IngestionMode::Replay);
-        let snapshot = supervisor.runtime_mode_handle().snapshot();
+    async fn supervisor_initializes_runtime_snapshot_from_operator_gate() {
+        let disabled = test_supervisor(IngestionMode::Replay, false)
+            .runtime_mode_handle()
+            .snapshot();
+        let enabled = test_supervisor(IngestionMode::Replay, true)
+            .runtime_mode_handle()
+            .snapshot();
 
-        assert_eq!(snapshot.mode.as_str(), "replay");
-        assert_eq!(snapshot.status, RuntimeModeStatus::Running);
-        assert_eq!(snapshot.symbols.len(), 1);
-        assert!(snapshot.switching_supported);
+        assert_eq!(disabled.mode.as_str(), "replay");
+        assert_eq!(disabled.status, RuntimeModeStatus::Running);
+        assert_eq!(disabled.symbols.len(), 1);
+        assert!(!disabled.switching_supported);
+        assert!(enabled.switching_supported);
     }
 
     #[tokio::test]
     async fn replay_completion_sets_runtime_status_to_completed() {
-        let supervisor = test_supervisor(IngestionMode::Replay);
+        let supervisor = test_supervisor(IngestionMode::Replay, true);
 
         supervisor.start_initial().await.unwrap();
         supervisor.shutdown_active_ingestion().await.unwrap();
@@ -589,7 +594,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_active_ingestion_is_safe_when_nothing_is_running() {
-        let supervisor = test_supervisor(IngestionMode::Replay);
+        let supervisor = test_supervisor(IngestionMode::Replay, true);
 
         supervisor.shutdown_active_ingestion().await.unwrap();
 
@@ -601,7 +606,7 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_switch_attempt_returns_conflict() {
-        let supervisor = test_supervisor(IngestionMode::Replay);
+        let supervisor = test_supervisor(IngestionMode::Replay, true);
         let _guard = supervisor.switch_guard.lock().await;
 
         let error = supervisor
@@ -619,7 +624,7 @@ mod tests {
 
     #[tokio::test]
     async fn switch_mode_updates_snapshot_to_runtime_source() {
-        let supervisor = test_supervisor(IngestionMode::Replay);
+        let supervisor = test_supervisor(IngestionMode::Replay, true);
 
         let snapshot = supervisor
             .switch_mode(RuntimeModeSwitchCommand {
@@ -648,6 +653,67 @@ mod tests {
         ));
         assert!(snapshot.last_switched_at.is_some());
         assert_eq!(snapshot.last_error, None);
+    }
+
+    #[tokio::test]
+    async fn successful_switch_preserves_disabled_operator_gate() {
+        let supervisor = test_supervisor(IngestionMode::Replay, false);
+
+        let snapshot = supervisor
+            .switch_mode(RuntimeModeSwitchCommand {
+                mode: String::from("replay"),
+                symbols: Some(vec![String::from("BTCUSDT")]),
+                reset_state: None,
+                reset_storage: None,
+            })
+            .await
+            .unwrap();
+        supervisor.shutdown_active_ingestion().await.unwrap();
+
+        assert!(!snapshot.switching_supported);
+        assert!(
+            !supervisor
+                .runtime_mode_handle()
+                .snapshot()
+                .switching_supported
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_switch_preserves_disabled_operator_gate() {
+        let supervisor = test_supervisor(IngestionMode::Replay, false);
+
+        let error = supervisor
+            .switch_mode(RuntimeModeSwitchCommand {
+                mode: String::from("replay"),
+                symbols: Some(vec![String::from("BTCUSDT")]),
+                reset_state: None,
+                reset_storage: Some(true),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, SwitchModeError::Execution(_)));
+        let snapshot = supervisor.runtime_mode_handle().snapshot();
+        assert_eq!(snapshot.status, RuntimeModeStatus::Failed);
+        assert!(!snapshot.switching_supported);
+    }
+
+    #[tokio::test]
+    async fn no_op_reset_policy_preserves_cache_and_runtime_status() {
+        let symbol = Symbol::new("BTCUSDT").unwrap();
+        let cache = RedisCache::in_memory(vec![crate::domain::MarketState::new(symbol.clone())]);
+        let supervisor = test_supervisor_with_cache(IngestionMode::Replay, false, cache.clone());
+
+        supervisor
+            .reset_runtime_state(RuntimeResetPolicy::non_destructive())
+            .await
+            .unwrap();
+
+        assert!(cache.get_market_state(&symbol).await.unwrap().is_some());
+        let snapshot = supervisor.runtime_mode_handle().snapshot();
+        assert_eq!(snapshot.status, RuntimeModeStatus::Running);
+        assert!(!snapshot.switching_supported);
     }
 
     #[tokio::test]
@@ -680,6 +746,7 @@ mod tests {
                 event_lag_spike_ms_threshold: 3_000,
                 depth_sequence_gap_min_increment: 1,
             },
+            false,
             unused_test_pool(),
             cache.clone(),
             InternalCounters::default(),
@@ -702,7 +769,7 @@ mod tests {
 
     #[tokio::test]
     async fn reset_runtime_state_marks_runtime_failed_when_storage_reset_fails() {
-        let supervisor = test_supervisor(IngestionMode::Replay);
+        let supervisor = test_supervisor(IngestionMode::Replay, true);
 
         let error = supervisor
             .reset_runtime_state(RuntimeResetPolicy {
@@ -723,7 +790,15 @@ mod tests {
         );
     }
 
-    fn test_supervisor(mode: IngestionMode) -> IngestionSupervisor {
+    fn test_supervisor(mode: IngestionMode, switching_supported: bool) -> IngestionSupervisor {
+        test_supervisor_with_cache(mode, switching_supported, RedisCache::in_memory(Vec::new()))
+    }
+
+    fn test_supervisor_with_cache(
+        mode: IngestionMode,
+        switching_supported: bool,
+        redis_cache: RedisCache,
+    ) -> IngestionSupervisor {
         IngestionSupervisor::new(
             &IngestionSettings {
                 mode,
@@ -749,8 +824,9 @@ mod tests {
                 event_lag_spike_ms_threshold: 3_000,
                 depth_sequence_gap_min_increment: 1,
             },
+            switching_supported,
             unused_test_pool(),
-            RedisCache::in_memory(Vec::new()),
+            redis_cache,
             InternalCounters::default(),
         )
     }

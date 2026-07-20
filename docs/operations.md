@@ -347,3 +347,43 @@ zip -r signalguard-rs-v0.4.zip signalguard-rs-v0.4 \
   -x "__MACOSX/*" \
   -x "*/__MACOSX/*"
 ```
+
+## Runtime mode operator control
+
+Runtime switching remains disabled by default. `SIGNALGUARD_ENABLE_RUNTIME_SWITCH=false` makes `GET /runtime/mode` report `switching_supported: false`, and `POST /runtime/mode` returns `403 Forbidden`. Public deployments should keep this gate disabled unless an operator-controlled environment intentionally enables runtime changes. Moving this route to a private listener is outside this release checkpoint.
+
+When the gate is enabled, reset flags are independent and non-destructive when omitted:
+
+- omitted `reset_state` resolves to `false`;
+- omitted `reset_storage` resolves to `false`;
+- Redis latest-state reset requires `"reset_state": true`;
+- PostgreSQL Replay-history reset requires `"reset_storage": true`.
+
+Ordinary non-destructive switch:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request POST http://127.0.0.1:8080/runtime/mode \
+  --header 'content-type: application/json' \
+  --data '{"mode":"live","symbols":["BTCUSDT","ETHUSDT"]}'
+```
+
+Explicit Redis latest-state reset only:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request POST http://127.0.0.1:8080/runtime/mode \
+  --header 'content-type: application/json' \
+  --data '{"mode":"replay","reset_state":true}'
+```
+
+Explicit PostgreSQL Replay-history reset only:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request POST http://127.0.0.1:8080/runtime/mode \
+  --header 'content-type: application/json' \
+  --data '{"mode":"replay","reset_storage":true}'
+```
+
+Omitting both flags preserves both stores. Explicit `false` is equivalent to omission for that flag. These runtime-control semantics do not change the P1-MP06 startup cache policy or Replay startup reset settings.

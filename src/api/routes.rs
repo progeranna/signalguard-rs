@@ -81,7 +81,7 @@ mod tests {
         assert_eq!(body["mode_label"], "Replay Demo");
         assert_eq!(body["status"], "running");
         assert_eq!(body["symbols"], serde_json::json!(["BTCUSDT"]));
-        assert_eq!(body["switching_supported"], true);
+        assert_eq!(body["switching_supported"], false);
         assert_eq!(body["source"], "config");
         assert!(body["last_started_at"].is_string());
         assert!(body["last_switched_at"].is_null());
@@ -89,9 +89,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_mode_route_reports_enabled_operator_gate() {
+        let response = get("/runtime/mode", unavailable_state_with_switching(true)).await;
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["switching_supported"], true);
+    }
+
+    #[tokio::test]
     async fn runtime_mode_switch_route_rejects_invalid_mode() {
-        let mut state = unavailable_state();
-        state.enable_runtime_switch = true;
+        let state = unavailable_state_with_switching(true);
 
         let response = post(
             "/runtime/mode",
@@ -113,9 +123,7 @@ mod tests {
             "/runtime/mode",
             serde_json::json!({
                 "mode": "live",
-                "symbols": ["BTCUSDT"],
-                "reset_state": false,
-                "reset_storage": false
+                "symbols": ["BTCUSDT"]
             }),
             unavailable_state(),
         )
@@ -133,17 +141,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disabled_runtime_mode_route_rejects_explicit_destructive_flags() {
+        let response = post(
+            "/runtime/mode",
+            serde_json::json!({
+                "mode": "replay",
+                "reset_state": true,
+                "reset_storage": true
+            }),
+            unavailable_state(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
     async fn runtime_mode_switch_route_preserves_existing_behavior_when_enabled() {
-        let mut state = unavailable_state();
-        state.enable_runtime_switch = true;
+        let state = unavailable_state_with_switching(true);
 
         let response = post(
             "/runtime/mode",
             serde_json::json!({
                 "mode": "live",
-                "symbols": ["BTCUSDT"],
-                "reset_state": false,
-                "reset_storage": false
+                "symbols": ["BTCUSDT"]
             }),
             state,
         )
@@ -158,6 +179,7 @@ mod tests {
 
         assert_eq!(body["mode"], "live");
         assert_eq!(body["symbols"], serde_json::json!(["BTCUSDT"]));
+        assert_eq!(body["switching_supported"], true);
     }
 
     #[tokio::test]
@@ -173,9 +195,8 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
-                enable_runtime_switch: false,
                 runtime_mode: runtime_mode_handle(),
-                supervisor: test_supervisor(),
+                supervisor: test_supervisor(false),
                 counters,
                 test_recent_anomalies: None,
                 test_recent_trades: None,
@@ -217,9 +238,8 @@ mod tests {
                 redis_cache: RedisCache::unavailable(),
                 detector_settings: detector_settings(),
                 health_settings: health_settings(),
-                enable_runtime_switch: false,
                 runtime_mode: runtime_mode_handle(),
-                supervisor: test_supervisor(),
+                supervisor: test_supervisor(false),
                 counters,
                 test_recent_anomalies: None,
                 test_recent_trades: None,
@@ -420,14 +440,18 @@ mod tests {
     }
 
     fn unavailable_state() -> AppState {
+        unavailable_state_with_switching(false)
+    }
+
+    fn unavailable_state_with_switching(switching_supported: bool) -> AppState {
+        let supervisor = test_supervisor(switching_supported);
         AppState {
             pg_pool: unused_test_pool(),
             redis_cache: RedisCache::unavailable(),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
-            enable_runtime_switch: false,
-            runtime_mode: runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            runtime_mode: supervisor.runtime_mode_handle(),
+            supervisor,
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
             test_recent_trades: None,
@@ -440,9 +464,8 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
             test_recent_trades: None,
@@ -455,9 +478,8 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: detector_settings(),
             health_settings: health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
             test_recent_trades: Some(vec![
@@ -480,6 +502,7 @@ mod tests {
             IngestionMode::Replay,
             &[crate::domain::Symbol::new("BTCUSDT").unwrap()],
             chrono::Utc.with_ymd_and_hms(2026, 7, 2, 12, 0, 0).unwrap(),
+            false,
         )
     }
 
@@ -487,7 +510,7 @@ mod tests {
         RuntimeModeHandle::new(runtime_mode_snapshot())
     }
 
-    fn test_supervisor() -> Arc<IngestionSupervisor> {
+    fn test_supervisor(switching_supported: bool) -> Arc<IngestionSupervisor> {
         Arc::new(IngestionSupervisor::new(
             &IngestionSettings {
                 mode: IngestionMode::Replay,
@@ -504,6 +527,7 @@ mod tests {
                 reconnect_max_backoff_ms: 5_000,
             },
             &detector_settings(),
+            switching_supported,
             unused_test_pool(),
             RedisCache::in_memory(Vec::new()),
             InternalCounters::default(),

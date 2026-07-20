@@ -66,7 +66,7 @@ pub async fn switch_runtime_mode(
     State(state): State<AppState>,
     Json(request): Json<RuntimeModeSwitchRequest>,
 ) -> Result<Json<RuntimeModeResponse>, ApiError> {
-    if !state.enable_runtime_switch {
+    if !state.runtime_mode.snapshot().switching_supported {
         return Err(ApiError::Forbidden(String::from(
             "runtime mode switching is disabled",
         )));
@@ -524,9 +524,8 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
             test_recent_trades: None,
@@ -545,9 +544,8 @@ mod tests {
             redis_cache: RedisCache::in_memory(vec![test_market_state()]),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
             test_recent_trades: None,
@@ -566,9 +564,8 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
             test_recent_trades: None,
@@ -603,7 +600,7 @@ mod tests {
         assert_eq!(body["mode_label"], "Replay Demo");
         assert_eq!(body["status"], "running");
         assert_eq!(body["symbols"], serde_json::json!(["BTCUSDT"]));
-        assert_eq!(body["switching_supported"], true);
+        assert_eq!(body["switching_supported"], false);
         assert_eq!(body["source"], "config");
         assert!(body["last_started_at"].is_string());
         assert!(body["last_switched_at"].is_null());
@@ -611,17 +608,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_mode_handler_reports_enabled_operator_gate() {
+        let response = runtime_mode(State(unavailable_state_with_switching(true)))
+            .await
+            .into_response();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["switching_supported"], true);
+    }
+
+    #[tokio::test]
     async fn switch_runtime_mode_rejects_empty_live_symbols() {
-        let mut state = unavailable_state();
-        state.enable_runtime_switch = true;
+        let state = unavailable_state_with_switching(true);
 
         let error = switch_runtime_mode(
             State(state),
             Json(RuntimeModeSwitchRequest {
                 mode: String::from("live"),
                 symbols: Some(Vec::new()),
-                reset_state: Some(false),
-                reset_storage: Some(false),
+                reset_state: None,
+                reset_storage: None,
             }),
         )
         .await
@@ -634,14 +643,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn switch_runtime_mode_returns_forbidden_when_disabled() {
+    async fn switch_runtime_mode_returns_forbidden_when_disabled_with_omitted_flags() {
         let error = switch_runtime_mode(
             State(unavailable_state()),
             Json(RuntimeModeSwitchRequest {
                 mode: String::from("live"),
                 symbols: Some(vec![String::from("BTCUSDT")]),
-                reset_state: Some(false),
-                reset_storage: Some(false),
+                reset_state: None,
+                reset_storage: None,
             }),
         )
         .await
@@ -655,17 +664,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn switch_runtime_mode_checks_disabled_gate_before_explicit_resets() {
+        let error = switch_runtime_mode(
+            State(unavailable_state()),
+            Json(RuntimeModeSwitchRequest {
+                mode: String::from("replay"),
+                symbols: None,
+                reset_state: Some(true),
+                reset_storage: Some(true),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, crate::api::error::ApiError::Forbidden(_)));
+    }
+
+    #[tokio::test]
     async fn switch_runtime_mode_succeeds_when_enabled() {
-        let mut state = unavailable_state();
-        state.enable_runtime_switch = true;
+        let state = unavailable_state_with_switching(true);
 
         let response = switch_runtime_mode(
             State(state),
             Json(RuntimeModeSwitchRequest {
                 mode: String::from("live"),
                 symbols: Some(vec![String::from("BTCUSDT")]),
-                reset_state: Some(false),
-                reset_storage: Some(false),
+                reset_state: None,
+                reset_storage: None,
             }),
         )
         .await
@@ -681,6 +706,7 @@ mod tests {
 
         assert_eq!(body["mode"], "live");
         assert_eq!(body["symbols"], serde_json::json!(["BTCUSDT"]));
+        assert_eq!(body["switching_supported"], true);
     }
 
     #[tokio::test]
@@ -701,9 +727,8 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters,
             test_recent_anomalies: None,
             test_recent_trades: None,
@@ -742,9 +767,8 @@ mod tests {
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters,
             test_recent_anomalies: None,
             test_recent_trades: None,
@@ -859,9 +883,8 @@ mod tests {
             ),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
             test_recent_trades: None,
@@ -982,9 +1005,8 @@ mod tests {
             redis_cache: RedisCache::in_memory_symbols_only(vec![Symbol::new("BTCUSDT").unwrap()]),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
             test_recent_trades: None,
@@ -1006,9 +1028,8 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
             test_recent_trades: None,
@@ -1103,9 +1124,8 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
             test_recent_trades: None,
@@ -1190,14 +1210,18 @@ mod tests {
     }
 
     fn unavailable_state() -> AppState {
+        unavailable_state_with_switching(false)
+    }
+
+    fn unavailable_state_with_switching(switching_supported: bool) -> AppState {
+        let supervisor = test_supervisor(switching_supported);
         AppState {
             pg_pool: unused_test_pool(),
             redis_cache: RedisCache::unavailable(),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
-            runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            runtime_mode: supervisor.runtime_mode_handle(),
+            supervisor,
             counters: InternalCounters::default(),
             test_recent_anomalies: None,
             test_recent_trades: None,
@@ -1225,9 +1249,8 @@ mod tests {
             redis_cache: RedisCache::in_memory(states),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(anomalies),
             test_recent_trades: None,
@@ -1240,9 +1263,8 @@ mod tests {
             redis_cache: RedisCache::in_memory(Vec::new()),
             detector_settings: test_detector_settings(),
             health_settings: test_health_settings(),
-            enable_runtime_switch: false,
             runtime_mode: test_runtime_mode_handle(),
-            supervisor: test_supervisor(),
+            supervisor: test_supervisor(false),
             counters: InternalCounters::default(),
             test_recent_anomalies: Some(Vec::new()),
             test_recent_trades: Some(trades),
@@ -1254,6 +1276,7 @@ mod tests {
             IngestionMode::Replay,
             &[Symbol::new("BTCUSDT").unwrap()],
             fixed_now(),
+            false,
         )
     }
 
@@ -1261,7 +1284,7 @@ mod tests {
         crate::runtime::RuntimeModeHandle::new(test_runtime_mode_snapshot())
     }
 
-    fn test_supervisor() -> Arc<IngestionSupervisor> {
+    fn test_supervisor(switching_supported: bool) -> Arc<IngestionSupervisor> {
         Arc::new(IngestionSupervisor::new(
             &IngestionSettings {
                 mode: IngestionMode::Replay,
@@ -1278,6 +1301,7 @@ mod tests {
                 reconnect_max_backoff_ms: 5_000,
             },
             &test_detector_settings(),
+            switching_supported,
             unused_test_pool(),
             RedisCache::in_memory(Vec::new()),
             InternalCounters::default(),
