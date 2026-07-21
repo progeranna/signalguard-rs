@@ -1,9 +1,9 @@
 import { createBrowserRouter } from "react-router-dom";
 
+import { CanonicalSymbolRoute } from "@/app/CanonicalSymbolRoute";
 import { ConsoleLayout } from "@/app/ConsoleLayout";
 import { AnomaliesPage } from "@/pages/AnomaliesPage";
 import { DashboardPage } from "@/pages/DashboardPage";
-import { SymbolDetailPage } from "@/pages/SymbolDetailPage";
 
 export const appRoutes = [
   {
@@ -20,7 +20,7 @@ export const appRoutes = [
       },
       {
         path: "symbols/:symbol",
-        element: <SymbolDetailPage />,
+        element: <CanonicalSymbolRoute />,
       },
       {
         path: "anomalies",

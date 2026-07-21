@@ -1,39 +1,58 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-export const SELECTED_SYMBOL_STORAGE_KEY = "signalguard:selected-symbol";
-export const DEFAULT_SELECTED_SYMBOL = "BTCUSDT";
+import { DEFAULT_SYMBOL_ID, parseSymbolId, type SymbolId } from "./symbolId";
+import type { UiMode } from "./types";
 
+export { parseSymbolId as normalizeSelectedSymbol } from "./symbolId";
+
+export const DEFAULT_SELECTED_SYMBOL = DEFAULT_SYMBOL_ID;
+
+const LEGACY_SELECTED_SYMBOL_STORAGE_KEY = "signalguard:selected-symbol";
+const SELECTED_SYMBOL_STORAGE_KEY_ROOT = LEGACY_SELECTED_SYMBOL_STORAGE_KEY;
 const selectedSymbolChangeEvent = "signalguard:selected-symbol-change";
 
-export function normalizeSelectedSymbol(value: string | null | undefined): string | null {
-  const normalized = value?.trim().toUpperCase();
+type SelectedSymbolChangeDetail = {
+  mode: UiMode;
+  symbol: SymbolId;
+};
 
-  return normalized ? normalized : null;
+type StoredSelectionState = {
+  mode: UiMode;
+  symbol: SymbolId | null;
+};
+
+export function selectedSymbolStorageKey(mode: UiMode): string {
+  return `${SELECTED_SYMBOL_STORAGE_KEY_ROOT}:${mode}`;
 }
 
-export function getStoredSelectedSymbol(): string | null {
+export function getStoredSelectedSymbol(mode: UiMode): SymbolId | null {
   if (typeof window === "undefined") {
     return null;
   }
 
   try {
-    return normalizeSelectedSymbol(window.localStorage.getItem(SELECTED_SYMBOL_STORAGE_KEY));
+    return parseSymbolId(window.localStorage.getItem(selectedSymbolStorageKey(mode)));
   } catch {
     return null;
   }
 }
 
-export function storeSelectedSymbol(symbol: string): string | null {
-  const normalized = normalizeSelectedSymbol(symbol);
+export function storeSelectedSymbol(
+  mode: UiMode,
+  symbol: string,
+): SymbolId | null {
+  const normalized = parseSymbolId(symbol);
 
   if (!normalized || typeof window === "undefined") {
     return normalized;
   }
 
   try {
-    window.localStorage.setItem(SELECTED_SYMBOL_STORAGE_KEY, normalized);
+    window.localStorage.setItem(selectedSymbolStorageKey(mode), normalized);
     window.dispatchEvent(
-      new CustomEvent(selectedSymbolChangeEvent, { detail: normalized }),
+      new CustomEvent<SelectedSymbolChangeDetail>(selectedSymbolChangeEvent, {
+        detail: { mode, symbol: normalized },
+      }),
     );
   } catch {
     return normalized;
@@ -43,16 +62,26 @@ export function storeSelectedSymbol(symbol: string): string | null {
 }
 
 export function resolveSelectedSymbol(
-  availableSymbols: string[],
+  availableSymbols: readonly string[],
   candidate?: string | null,
-  storedSymbol: string | null = getStoredSelectedSymbol(),
-): string {
-  const normalizedAvailable = availableSymbols
-    .map((symbol) => normalizeSelectedSymbol(symbol))
-    .filter((symbol): symbol is string => symbol !== null);
-  const availableSet = new Set(normalizedAvailable);
-  const normalizedCandidate = normalizeSelectedSymbol(candidate);
-  const normalizedStoredSymbol = normalizeSelectedSymbol(storedSymbol);
+  storedSymbol: string | null = null,
+): SymbolId | null {
+  const normalizedAvailable: SymbolId[] = [];
+  const availableSet = new Set<SymbolId>();
+
+  for (const symbol of availableSymbols) {
+    const normalized = parseSymbolId(symbol);
+
+    if (!normalized || availableSet.has(normalized)) {
+      continue;
+    }
+
+    availableSet.add(normalized);
+    normalizedAvailable.push(normalized);
+  }
+
+  const normalizedCandidate = parseSymbolId(candidate);
+  const normalizedStoredSymbol = parseSymbolId(storedSymbol);
 
   if (normalizedCandidate && availableSet.has(normalizedCandidate)) {
     return normalizedCandidate;
@@ -66,31 +95,55 @@ export function resolveSelectedSymbol(
     return DEFAULT_SELECTED_SYMBOL;
   }
 
-  return normalizedAvailable[0] ?? DEFAULT_SELECTED_SYMBOL;
+  return normalizedAvailable[0] ?? null;
 }
 
 export function useSelectedSymbol(
-  availableSymbols: string[] = [],
+  mode: UiMode,
+  availableSymbols: readonly string[] = [],
   candidate?: string | null,
 ) {
-  const [storedSymbol, setStoredSymbol] = useState(getStoredSelectedSymbol);
+  const [storedSelection, setStoredSelection] = useState<StoredSelectionState>(
+    () => ({ mode, symbol: getStoredSelectedSymbol(mode) }),
+  );
+  const storedSymbol =
+    storedSelection.mode === mode
+      ? storedSelection.symbol
+      : getStoredSelectedSymbol(mode);
+
+  useEffect(() => {
+    setStoredSelection({ mode, symbol: getStoredSelectedSymbol(mode) });
+  }, [mode]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return undefined;
     }
 
+    const storageKey = selectedSymbolStorageKey(mode);
+
     function handleStorage(event: StorageEvent) {
-      if (event.key === SELECTED_SYMBOL_STORAGE_KEY) {
-        setStoredSymbol(normalizeSelectedSymbol(event.newValue));
+      if (event.key === storageKey) {
+        setStoredSelection({ mode, symbol: parseSymbolId(event.newValue) });
       }
     }
 
     function handleSelectedSymbolChange(event: Event) {
-      const nextSymbol =
-        event instanceof CustomEvent ? normalizeSelectedSymbol(event.detail) : null;
+      if (!(event instanceof CustomEvent)) {
+        return;
+      }
 
-      setStoredSymbol(nextSymbol ?? getStoredSelectedSymbol());
+      const detail = event.detail as Partial<SelectedSymbolChangeDetail> | null;
+
+      if (detail?.mode !== mode) {
+        return;
+      }
+
+      const nextSymbol = parseSymbolId(detail.symbol);
+      setStoredSelection({
+        mode,
+        symbol: nextSymbol ?? getStoredSelectedSymbol(mode),
+      });
     }
 
     window.addEventListener("storage", handleStorage);
@@ -100,16 +153,21 @@ export function useSelectedSymbol(
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener(selectedSymbolChangeEvent, handleSelectedSymbolChange);
     };
-  }, []);
+  }, [mode]);
 
   const selectedSymbol = useMemo(
     () => resolveSelectedSymbol(availableSymbols, candidate, storedSymbol),
     [availableSymbols, candidate, storedSymbol],
   );
-  const setSelectedSymbol = useCallback((symbol: string) => {
-    const nextSymbol = storeSelectedSymbol(symbol);
-    setStoredSymbol(nextSymbol);
-  }, []);
+  const setSelectedSymbol = useCallback(
+    (symbol: string) => {
+      const nextSymbol = storeSelectedSymbol(mode, symbol);
+      setStoredSelection({ mode, symbol: nextSymbol });
+
+      return nextSymbol;
+    },
+    [mode],
+  );
 
   return { selectedSymbol, setSelectedSymbol };
 }

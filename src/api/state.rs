@@ -19,7 +19,6 @@ pub struct AppState {
     pub redis_cache: RedisCache,
     pub detector_settings: DetectorSettings,
     pub health_settings: HealthScoreSettings,
-    pub enable_runtime_switch: bool,
     pub runtime_mode: RuntimeModeHandle,
     pub supervisor: Arc<IngestionSupervisor>,
     pub counters: InternalCounters,

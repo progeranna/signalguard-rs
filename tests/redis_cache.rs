@@ -8,7 +8,9 @@ use redis::AsyncCommands;
 use rust_decimal::Decimal;
 use signalguard_rs::{
     domain::{MarketSignals, MarketState, Symbol},
+    startup::{MarketStateStartupPolicy, prepare_market_state_cache},
     storage::RedisCache,
+    telemetry::InternalCounters,
 };
 use tokio::sync::Mutex;
 
@@ -57,6 +59,122 @@ async fn missing_symbol_returns_none() {
     let loaded = cache.get_market_state(&missing_symbol).await.unwrap();
 
     assert!(loaded.is_none());
+
+    cache.clear_market_state_cache().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires local Redis via docker compose and REDIS_URL"]
+async fn preserve_startup_policy_keeps_registered_market_state() {
+    let _guard = redis_test_lock().lock().await;
+    let (cache, _redis_url) = test_cache().await;
+    cache.clear_market_state_cache().await.unwrap();
+
+    let state = test_market_state(test_symbol("PRES1"));
+    cache.set_market_state(&state).await.unwrap();
+
+    let counters = InternalCounters::default();
+    let prepared = prepare_market_state_cache(
+        Some(cache.clone()),
+        MarketStateStartupPolicy::PreserveAndValidate,
+        &counters,
+    )
+    .await;
+
+    assert!(prepared.is_available());
+    assert!(
+        prepared
+            .list_symbols()
+            .await
+            .unwrap()
+            .contains(&state.symbol)
+    );
+    assert_eq!(
+        prepared.get_market_state(&state.symbol).await.unwrap(),
+        Some(state.clone())
+    );
+
+    cache.clear_market_state_cache().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires local Redis via docker compose and REDIS_URL"]
+async fn reset_startup_policy_removes_signalguard_state_but_preserves_unrelated_key() {
+    let _guard = redis_test_lock().lock().await;
+    let (cache, redis_url) = test_cache().await;
+    cache.clear_market_state_cache().await.unwrap();
+
+    let state = test_market_state(test_symbol("RSET1"));
+    cache.set_market_state(&state).await.unwrap();
+
+    let client = redis::Client::open(redis_url.as_str()).unwrap();
+    let mut connection = client.get_multiplexed_async_connection().await.unwrap();
+    let unrelated_key = unrelated_key();
+    let (): () = connection.set(&unrelated_key, "keep-me").await.unwrap();
+
+    let counters = InternalCounters::default();
+    let prepared = prepare_market_state_cache(
+        Some(cache.clone()),
+        MarketStateStartupPolicy::Reset,
+        &counters,
+    )
+    .await;
+
+    assert!(prepared.is_available());
+    assert!(prepared.list_symbols().await.unwrap().is_empty());
+    assert!(
+        prepared
+            .get_market_state(&state.symbol)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        connection
+            .get::<_, Option<String>>(&unrelated_key)
+            .await
+            .unwrap(),
+        Some(String::from("keep-me"))
+    );
+
+    let deleted_count: usize = connection.del(&unrelated_key).await.unwrap();
+    assert_eq!(deleted_count, 1);
+    cache.clear_market_state_cache().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires local Redis via docker compose and REDIS_URL"]
+async fn invalid_preserved_cache_is_rejected_without_implicit_deletion() {
+    let _guard = redis_test_lock().lock().await;
+    let (cache, redis_url) = test_cache().await;
+    cache.clear_market_state_cache().await.unwrap();
+
+    let symbol = test_symbol("BADJ1");
+    let state_key = format!("signalguard:market_state:{}", symbol.as_str());
+    let malformed_payload = "{not-json";
+    let client = redis::Client::open(redis_url.as_str()).unwrap();
+    let mut connection = client.get_multiplexed_async_connection().await.unwrap();
+    let (): () = connection
+        .sadd("signalguard:symbols", symbol.as_str())
+        .await
+        .unwrap();
+    let (): () = connection.set(&state_key, malformed_payload).await.unwrap();
+
+    let error = cache.validate_market_state_cache().await.unwrap_err();
+
+    assert!(error.to_string().contains("is malformed"));
+    assert_eq!(
+        connection
+            .get::<_, Option<String>>(&state_key)
+            .await
+            .unwrap(),
+        Some(String::from(malformed_payload))
+    );
+    let registered: bool = connection
+        .sismember("signalguard:symbols", symbol.as_str())
+        .await
+        .unwrap();
+    assert!(registered);
 
     cache.clear_market_state_cache().await.unwrap();
 }

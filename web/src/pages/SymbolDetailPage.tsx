@@ -1,16 +1,14 @@
 import { useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { useDashboardSummaryQuery } from "@/features/dashboard/api";
-import {
-  buildCoveredDashboardSymbols,
-  isDashboardSymbolPlaceholder,
-} from "@/features/dashboard/marketOrder";
+import { useCatalogDashboardSummaryQuery } from "@/features/dashboard/api";
+import { isDashboardSymbolPlaceholder } from "@/features/dashboard/marketOrder";
 import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
 import { useResolvedUiMode } from "@/features/dashboard/uiMode";
 import type {
   DashboardAnomaly,
   DashboardSymbolSummary,
+  UiMode,
 } from "@/features/dashboard/types";
 import { ErrorPanel } from "@/shared/components/ErrorPanel";
 import { LoadingSkeleton } from "@/shared/components/LoadingSkeleton";
@@ -26,9 +24,9 @@ import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 export function SymbolDetailPage() {
   const selectedUiMode = useResolvedUiMode();
-  const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
+  const dashboardSummaryQuery = useCatalogDashboardSummaryQuery(selectedUiMode);
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
+  const availableSymbols = summary?.symbols ?? [];
   const recentAnomalies = summary?.recent_anomalies ?? [];
   const routeSymbol = useParams().symbol ?? "";
   const selectedSymbol = normalizeSymbol(routeSymbol);
@@ -43,9 +41,9 @@ export function SymbolDetailPage() {
 
   useEffect(() => {
     if (isKnownSymbol && selectedSummary) {
-      storeSelectedSymbol(selectedSummary.symbol);
+      storeSelectedSymbol(selectedUiMode, selectedSummary.symbol);
     }
-  }, [isKnownSymbol, selectedSummary]);
+  }, [isKnownSymbol, selectedSummary, selectedUiMode]);
 
   return (
     <section className="space-y-4">
@@ -92,7 +90,11 @@ export function SymbolDetailPage() {
       ) : null}
 
       {!dashboardSummaryQuery.isLoading && !isKnownSymbol ? (
-        <SymbolNotFoundState selectedSymbol={selectedSymbol} availableSymbols={availableSymbols} />
+        <SymbolNotFoundState
+          selectedSymbol={selectedSymbol}
+          availableSymbols={availableSymbols}
+          selectedUiMode={selectedUiMode}
+        />
       ) : null}
 
       {dashboardSummaryQuery.isLoading || isKnownSymbol ? (
@@ -235,9 +237,11 @@ export function SymbolDetailPage() {
 function SymbolNotFoundState({
   selectedSymbol,
   availableSymbols,
+  selectedUiMode,
 }: {
   selectedSymbol: string;
   availableSymbols: DashboardSymbolSummary[];
+  selectedUiMode: UiMode;
 }) {
   return (
     <section className="sg-panel border-amber-400/20 bg-amber-950/10 px-5 py-5">
@@ -252,7 +256,7 @@ function SymbolNotFoundState({
             <Link
               key={entry.symbol}
               to={`/symbols/${entry.symbol}`}
-              onClick={() => storeSelectedSymbol(entry.symbol)}
+              onClick={() => storeSelectedSymbol(selectedUiMode, entry.symbol)}
               className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:border-cyan-400/25 hover:bg-cyan-400/10 hover:text-cyan-100"
             >
               {entry.symbol}

@@ -12,18 +12,23 @@ import {
 } from "recharts";
 
 import {
-  useDashboardSummaryQuery,
+  useCatalogDashboardSummaryQuery,
   useMarketTimelineQuery,
 } from "@/features/dashboard/api";
-import {
-  buildCoveredDashboardSymbols,
-  isDashboardSymbolPlaceholder,
-} from "@/features/dashboard/marketOrder";
+import { isDashboardSymbolPlaceholder } from "@/features/dashboard/marketOrder";
 import {
   normalizeSelectedSymbol,
   storeSelectedSymbol,
   useSelectedSymbol,
 } from "@/features/dashboard/selectedSymbol";
+import {
+  createSymbolPopupIdentity,
+  replaceSymbolPopupMode,
+  symbolPopupIdentityKey,
+  type SymbolPopupIdentity,
+  type SymbolPopupReturnContext,
+} from "@/features/dashboard/symbolPopup";
+import { useSymbolPopupResource } from "@/features/dashboard/symbolPopupResource";
 import type {
   DashboardAnomaly,
   DashboardSummary,
@@ -46,18 +51,21 @@ const DASHBOARD_TABLE_PREVIEW_LIMIT = 7;
 
 type DashboardModalState =
   | { type: "anomalies" }
-  | { type: "symbolDetail"; returnTo?: "anomalies" | "symbols"; symbol: string }
+  | { type: "symbolDetail"; identity: SymbolPopupIdentity }
   | { type: "symbols" }
   | null;
 
 export function DashboardPage() {
   const selectedUiMode = useResolvedUiMode();
-  const dashboardSummaryQuery = useDashboardSummaryQuery(selectedUiMode);
+  const dashboardSummaryQuery = useCatalogDashboardSummaryQuery(selectedUiMode);
   const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = buildCoveredDashboardSymbols(summary?.symbols ?? []).map(
+  const availableSymbols = (summary?.symbols ?? []).map(
     (symbol) => symbol.symbol,
   );
-  const { selectedSymbol } = useSelectedSymbol(availableSymbols);
+  const { selectedSymbol } = useSelectedSymbol(
+    selectedUiMode,
+    availableSymbols,
+  );
 
   return (
     <section className="space-y-3">
@@ -75,7 +83,11 @@ export function DashboardPage() {
         summary={summary}
         isLoading={dashboardSummaryQuery.isLoading}
       />
-      <DashboardTablesGrid summary={summary} isLoading={dashboardSummaryQuery.isLoading} />
+      <DashboardTablesGrid
+        summary={summary}
+        isLoading={dashboardSummaryQuery.isLoading}
+        selectedUiMode={selectedUiMode}
+      />
     </section>
   );
 }
@@ -103,11 +115,11 @@ function MarketTimelineShell({
   isLoading,
 }: {
   selectedUiMode: UiMode;
-  selectedSignalSymbol: string;
+  selectedSignalSymbol: string | null;
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
+  const symbols = summary?.symbols ?? [];
   const selectedSymbol = selectSignalSymbol(symbols, selectedSignalSymbol);
   const timelineQuery = useMarketTimelineQuery(selectedSymbol?.symbol ?? null, selectedUiMode);
   const timelinePoints = buildTimelineChartPoints(timelineQuery.data?.points ?? []);
@@ -359,13 +371,40 @@ function SignalSnapshotMetric({ label, value }: { label: string; value: string }
 function DashboardTablesGrid({
   summary,
   isLoading,
+  selectedUiMode,
 }: {
   summary: DashboardSummary | null;
   isLoading: boolean;
+  selectedUiMode: UiMode;
 }) {
   const [modalState, setModalState] = useState<DashboardModalState>(null);
-  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
+  const symbols = summary?.symbols ?? [];
   const anomalies = summary?.recent_anomalies ?? [];
+  const activePopupIdentity =
+    modalState?.type === "symbolDetail"
+      ? modalState.identity.mode === selectedUiMode
+        ? modalState.identity
+        : replaceSymbolPopupMode(modalState.identity, selectedUiMode)
+      : null;
+
+  useEffect(() => {
+    setModalState((currentState) => {
+      if (
+        currentState?.type !== "symbolDetail" ||
+        currentState.identity.mode === selectedUiMode
+      ) {
+        return currentState;
+      }
+
+      return {
+        type: "symbolDetail",
+        identity: replaceSymbolPopupMode(
+          currentState.identity,
+          selectedUiMode,
+        ),
+      };
+    });
+  }, [selectedUiMode]);
 
   function isKnownSummarySymbol(symbol: string): boolean {
     const normalizedSymbol = normalizeSelectedSymbol(symbol);
@@ -376,12 +415,25 @@ function DashboardTablesGrid({
     );
   }
 
-  function openSymbolDetail(symbol: string, returnTo?: "anomalies" | "symbols") {
-    if (isKnownSummarySymbol(symbol)) {
-      storeSelectedSymbol(symbol);
+  function openSymbolDetail(
+    symbol: string,
+    returnContext: SymbolPopupReturnContext,
+  ) {
+    const identity = createSymbolPopupIdentity(
+      selectedUiMode,
+      symbol,
+      returnContext,
+    );
+
+    if (!identity) {
+      return;
     }
 
-    setModalState({ type: "symbolDetail", symbol, returnTo });
+    if (isKnownSummarySymbol(identity.symbol)) {
+      storeSelectedSymbol(identity.mode, identity.symbol);
+    }
+
+    setModalState({ type: "symbolDetail", identity });
   }
 
   return (
@@ -389,13 +441,17 @@ function DashboardTablesGrid({
       <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <SymbolHealthShell
           onOpenAll={() => setModalState({ type: "symbols" })}
-          onOpenSymbolDetail={(symbol) => openSymbolDetail(symbol)}
+          onOpenSymbolDetail={(symbol) =>
+            openSymbolDetail(symbol, "dashboard")
+          }
           summary={summary}
           isLoading={isLoading}
         />
         <RecentAnomaliesShell
           onOpenAll={() => setModalState({ type: "anomalies" })}
-          onOpenSymbolDetail={(symbol) => openSymbolDetail(symbol)}
+          onOpenSymbolDetail={(symbol) =>
+            openSymbolDetail(symbol, "dashboard")
+          }
           summary={summary}
           isLoading={isLoading}
         />
@@ -414,25 +470,24 @@ function DashboardTablesGrid({
           onOpenSymbolDetail={(symbol) => openSymbolDetail(symbol, "anomalies")}
         />
       ) : null}
-      {modalState?.type === "symbolDetail" ? (
+      {activePopupIdentity ? (
         <SymbolDetailModal
-          anomalies={anomalies}
-          onBackToAllAnomalies={
-            modalState.returnTo === "anomalies"
-              ? () => setModalState({ type: "anomalies" })
-              : undefined
-          }
-          onBackToAllSymbols={
-            modalState.returnTo === "symbols"
+          key={symbolPopupIdentityKey(activePopupIdentity)}
+          identity={activePopupIdentity}
+          onBack={
+            activePopupIdentity.returnContext === "symbols"
               ? () => setModalState({ type: "symbols" })
-              : undefined
+              : activePopupIdentity.returnContext === "anomalies"
+                ? () => setModalState({ type: "anomalies" })
+                : undefined
           }
           onClose={() => setModalState(null)}
           onOpenSymbolDetail={(symbol) =>
-            openSymbolDetail(symbol, modalState.returnTo)
+            openSymbolDetail(
+              symbol,
+              activePopupIdentity.returnContext,
+            )
           }
-          symbol={modalState.symbol}
-          symbols={symbols}
         />
       ) : null}
     </>
@@ -450,7 +505,7 @@ function SymbolHealthShell({
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
-  const symbols = buildCoveredDashboardSymbols(summary?.symbols ?? []);
+  const symbols = summary?.symbols ?? [];
   const previewSymbols = symbols.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
 
   return (
@@ -1221,148 +1276,188 @@ function SymbolHealthTableRowShell({
 }
 
 function SymbolDetailModal({
-  anomalies,
-  onBackToAllAnomalies,
-  onBackToAllSymbols,
+  identity,
+  onBack,
   onClose,
   onOpenSymbolDetail,
-  symbol,
-  symbols,
 }: {
-  anomalies: DashboardAnomaly[];
-  onBackToAllAnomalies?: () => void;
-  onBackToAllSymbols?: () => void;
+  identity: SymbolPopupIdentity;
+  onBack?: () => void;
   onClose: () => void;
   onOpenSymbolDetail: (symbol: string) => void;
-  symbol: string;
-  symbols: DashboardSymbolSummary[];
 }) {
-  const normalizedSymbol = normalizeSelectedSymbol(symbol);
-  const selectedSymbol =
-    symbols.find(
-      (entry) => normalizeSelectedSymbol(entry.symbol) === normalizedSymbol,
-    ) ?? null;
-  const symbolAnomalies = selectedSymbol
-    ? anomalies.filter(
-        (anomaly) =>
-          normalizeSelectedSymbol(anomaly.symbol) ===
-          normalizeSelectedSymbol(selectedSymbol.symbol),
-      )
-    : [];
-  const statusTone = toStatusTone(selectedSymbol?.health?.status, "neutral");
-  const titleSymbol = selectedSymbol?.symbol ?? normalizedSymbol ?? "Unknown market";
-  const statusText = selectedSymbol ? marketStatusLabel(selectedSymbol) : "No data yet";
+  const resourceState = useSymbolPopupResource(identity);
+  const backLabel =
+    identity.returnContext === "symbols"
+      ? "Back to all markets"
+      : identity.returnContext === "anomalies"
+        ? "Back to all anomalies"
+        : null;
+
+  if (
+    resourceState.status === "success" &&
+    (resourceState.resource.mode !== identity.mode ||
+      resourceState.resource.symbol !== identity.symbol)
+  ) {
+    throw new TypeError(
+      `popup resource identity mismatch: expected ${identity.mode}/${identity.symbol}`,
+    );
+  }
 
   return (
     <DashboardTableModal
-      title={`${titleSymbol} market details`}
-      subtitle="Current market state from the dashboard summary."
+      title={`${identity.symbol} market details`}
+      subtitle={`Current ${identity.mode === "demo" ? "Demo" : "Live"} market state from the dashboard summary.`}
       dialogId="symbol-detail-title"
       onClose={onClose}
       secondaryAction={
-        onBackToAllSymbols || onBackToAllAnomalies ? (
+        onBack && backLabel ? (
           <button
             type="button"
-            onClick={onBackToAllSymbols ?? onBackToAllAnomalies}
+            onClick={onBack}
             className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
           >
-            {onBackToAllSymbols ? "Back to all markets" : "Back to all anomalies"}
+            {backLabel}
           </button>
         ) : null
       }
     >
-      {selectedSymbol ? (
-        <div className="space-y-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="font-mono text-2xl font-bold text-white">
-              {selectedSymbol.symbol}
+      <div
+        data-popup-identity={`${identity.mode}:${identity.symbol}:${identity.returnContext}`}
+      >
+        {resourceState.status === "loading" ? (
+          <div
+            aria-live="polite"
+            className="space-y-3"
+            data-testid="symbol-popup-loading"
+          >
+            <p className="text-sm text-slate-400">
+              Loading {identity.symbol} market details for {identity.mode === "demo" ? "Demo" : "Live"} mode.
             </p>
-            <StatusBadge
-              status={statusTone}
-              text={statusText}
-            />
+            <LoadingSkeleton className="h-64" />
           </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <SymbolDetailMetric
-              label="Health"
-              value={selectedSymbol.health?.score?.toString() ?? "—"}
-            />
-            <SymbolDetailMetric
-              label="Price"
-              value={formatTickerPrice(selectedSymbol.state?.last_trade_price)}
-            />
-            <SymbolDetailMetric
-              label="Spread"
-              value={formatTickerPercent(selectedSymbol.state?.spread_pct)}
-            />
-            <SymbolDetailMetric
-              label="Trades/min"
-              value={formatOptionalCompact(selectedSymbol.state?.trades_per_minute)}
-            />
-            <SymbolDetailMetric
-              label="Freshness"
-              value={formatOptionalAge(selectedSymbol.state?.last_event_age_ms)}
-            />
-            <SymbolDetailMetric
-              label="Anomalies"
-              value={formatCompactNumber(symbolAnomalies.length)}
-            />
-            <SymbolDetailMetric
-              label="Best bid"
-              value={formatTickerPrice(selectedSymbol.state?.best_bid_price)}
-            />
-            <SymbolDetailMetric
-              label="Best ask"
-              value={formatTickerPrice(selectedSymbol.state?.best_ask_price)}
-            />
-          </div>
-
-          <section className="space-y-3">
-            <SectionTitle
-              title="Recent market anomalies"
-              subtitle="Quality events for this market in the current summary."
-            />
-            {symbolAnomalies.length > 0 ? (
-              <>
-                <div className="hidden overflow-hidden border-y border-white/10 lg:block">
-                  <table className="w-full border-collapse text-left">
-                    <thead>
-                      <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                        <th className="px-2 py-3 pr-4">Type</th>
-                        <th className="px-2 py-3 pr-4">Severity</th>
-                        <th className="px-2 py-3 pr-4">Observed</th>
-                        <th className="px-2 py-3 pr-4">Threshold</th>
-                        <th className="px-2 py-3 pr-4">Detected</th>
-                        <th className="px-2 py-3">Context</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {symbolAnomalies.map((anomaly) => (
-                        <SymbolDetailAnomalyRow key={anomaly.id} anomaly={anomaly} />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
-                  {symbolAnomalies.map((anomaly) => (
-                    <AnomalyModalCard
-                      key={anomaly.id}
-                      anomaly={anomaly}
-                      onOpenSymbolDetail={onOpenSymbolDetail}
-                    />
-                  ))}
-                </div>
-              </>
-            ) : (
-              <EmptyBlock message="No recent anomalies for this market." />
-            )}
-          </section>
-        </div>
-      ) : (
-        <EmptyBlock message="Market not found in the current dashboard summary." />
-      )}
+        ) : resourceState.status === "error" ? (
+          <ErrorPanel
+            title={`${identity.symbol} market details unavailable`}
+            message={buildErrorMessage(resourceState.error)}
+            onRetry={() => void resourceState.refetch()}
+          />
+        ) : resourceState.status === "unavailable" ? (
+          <EmptyBlock
+            message={`${identity.symbol} is unavailable in ${identity.mode === "demo" ? "Demo" : "Live"} mode.`}
+          />
+        ) : (
+          <SymbolPopupSuccess
+            anomalies={resourceState.resource.anomalies}
+            onOpenSymbolDetail={onOpenSymbolDetail}
+            symbol={resourceState.resource.summary}
+          />
+        )}
+      </div>
     </DashboardTableModal>
+  );
+}
+
+function SymbolPopupSuccess({
+  anomalies,
+  onOpenSymbolDetail,
+  symbol,
+}: {
+  anomalies: DashboardAnomaly[];
+  onOpenSymbolDetail: (symbol: string) => void;
+  symbol: DashboardSymbolSummary;
+}) {
+  const statusTone = toStatusTone(symbol.health?.status, "neutral");
+  const statusText = marketStatusLabel(symbol);
+
+  return (
+    <div className="space-y-6" data-testid="symbol-popup-success">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="font-mono text-2xl font-bold text-white">
+          {symbol.symbol}
+        </p>
+        <StatusBadge
+          status={statusTone}
+          text={statusText}
+        />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SymbolDetailMetric
+          label="Health"
+          value={symbol.health?.score?.toString() ?? "—"}
+        />
+        <SymbolDetailMetric
+          label="Price"
+          value={formatTickerPrice(symbol.state?.last_trade_price)}
+        />
+        <SymbolDetailMetric
+          label="Spread"
+          value={formatTickerPercent(symbol.state?.spread_pct)}
+        />
+        <SymbolDetailMetric
+          label="Trades/min"
+          value={formatOptionalCompact(symbol.state?.trades_per_minute)}
+        />
+        <SymbolDetailMetric
+          label="Freshness"
+          value={formatOptionalAge(symbol.state?.last_event_age_ms)}
+        />
+        <SymbolDetailMetric
+          label="Anomalies"
+          value={formatCompactNumber(anomalies.length)}
+        />
+        <SymbolDetailMetric
+          label="Best bid"
+          value={formatTickerPrice(symbol.state?.best_bid_price)}
+        />
+        <SymbolDetailMetric
+          label="Best ask"
+          value={formatTickerPrice(symbol.state?.best_ask_price)}
+        />
+      </div>
+
+      <section className="space-y-3">
+        <SectionTitle
+          title="Recent market anomalies"
+          subtitle="Quality events for this market in the current summary."
+        />
+        {anomalies.length > 0 ? (
+          <>
+            <div className="hidden overflow-hidden border-y border-white/10 lg:block">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <th className="px-2 py-3 pr-4">Type</th>
+                    <th className="px-2 py-3 pr-4">Severity</th>
+                    <th className="px-2 py-3 pr-4">Observed</th>
+                    <th className="px-2 py-3 pr-4">Threshold</th>
+                    <th className="px-2 py-3 pr-4">Detected</th>
+                    <th className="px-2 py-3">Context</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {anomalies.map((anomaly) => (
+                    <SymbolDetailAnomalyRow key={anomaly.id} anomaly={anomaly} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
+              {anomalies.map((anomaly) => (
+                <AnomalyModalCard
+                  key={anomaly.id}
+                  anomaly={anomaly}
+                  onOpenSymbolDetail={onOpenSymbolDetail}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <EmptyBlock message="No recent anomalies for this market." />
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -1517,21 +1612,18 @@ function EmptyBlock({ message }: { message: string }) {
 
 function selectSignalSymbol(
   symbols: DashboardSymbolSummary[],
-  preferredSymbol: string,
+  preferredSymbol: string | null,
 ): DashboardSymbolSummary | null {
   const normalizedPreferredSymbol = normalizeSelectedSymbol(preferredSymbol);
+
+  if (!normalizedPreferredSymbol) {
+    return null;
+  }
 
   return (
     symbols.find(
       (symbol) => normalizeSelectedSymbol(symbol.symbol) === normalizedPreferredSymbol,
-    ) ??
-    symbols.find(
-      (symbol) =>
-        normalizeSelectedSymbol(symbol.symbol) === "BTCUSDT" &&
-        !isDashboardSymbolPlaceholder(symbol),
-    ) ??
-    symbols[0] ??
-    null
+    ) ?? null
   );
 }
 

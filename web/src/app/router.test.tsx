@@ -25,6 +25,7 @@ vi.mock("@/pages/AnomaliesPage", () => ({
   AnomaliesPage: () => <main aria-label="Anomalies page boundary" />,
 }));
 
+import { canonicalSymbolRoutePath } from "@/app/symbolRoutePath";
 import { appRoutes } from "@/app/router";
 
 const REQUIRED_ROUTE_PATHS = [
@@ -96,4 +97,20 @@ describe("dashboard route inventory", () => {
 
     expect(hasExplicitUnknownRoute).toBe(false);
   });
+});
+
+describe("symbol route identity", () => {
+  it.each([
+    ["btcusdt", "/symbols/BTCUSDT"],
+    [" eThUsDt ", "/symbols/ETHUSDT"],
+  ] as const)("redirects %s to %s", (value, expected) => {
+    expect(canonicalSymbolRoutePath(value)).toBe(expected);
+  });
+
+  it.each(["BTCUSDT", "", "BTC-USDT", undefined] as const)(
+    "does not redirect canonical or invalid value %s",
+    (value) => {
+      expect(canonicalSymbolRoutePath(value)).toBeNull();
+    },
+  );
 });

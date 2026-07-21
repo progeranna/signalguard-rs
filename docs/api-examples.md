@@ -305,3 +305,32 @@ After replaying `examples/replay/depth_sample.jsonl` or `examples/replay/depth_g
 ```text
 signalguard_events_processed_total{source="replay",event_type="depth"} 2
 ```
+
+## Runtime mode status and operator switch
+
+`GET /runtime/mode` is always read-only. Its `switching_supported` field reflects the configured `SIGNALGUARD_ENABLE_RUNTIME_SWITCH` operator gate.
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8080/runtime/mode
+```
+
+With the default `SIGNALGUARD_ENABLE_RUNTIME_SWITCH=false`, `switching_supported` is `false` and every `POST /runtime/mode` request returns `403 Forbidden`, including requests that contain explicit reset flags.
+
+When an operator-controlled environment explicitly enables switching, omission is non-destructive:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request POST http://127.0.0.1:8080/runtime/mode \
+  --header 'content-type: application/json' \
+  --data '{"mode":"live","symbols":["BTCUSDT","ETHUSDT"]}'
+```
+
+The request above resolves `reset_state=false` and `reset_storage=false`. Destructive operations require explicit `true`, and the flags remain independent:
+
+```json
+{"mode":"replay","reset_state":true}
+```
+
+```json
+{"mode":"replay","reset_storage":true}
+```

@@ -127,7 +127,7 @@ Full endpoint examples live in [docs/api-examples.md](docs/api-examples.md).
 
 `GET /dashboard/summary?mode=demo|live` is the compact read-only dashboard bootstrap endpoint for the public web console. Missing `mode` defaults to `demo`. `mode=demo` returns deterministic read-only demo data, while `mode=live` reads the existing storage/cache-backed live path and may be stale if backend ingestion is not active.
 
-`GET /runtime/mode` remains a read-only runtime status endpoint. `POST /runtime/mode` is disabled by default and returns `403 Forbidden` unless `SIGNALGUARD_ENABLE_RUNTIME_SWITCH=true` is set in an operator-controlled environment.
+`GET /runtime/mode` remains a read-only runtime status endpoint and reports the actual operator gate through `switching_supported`. `POST /runtime/mode` is disabled by default and returns `403 Forbidden` unless `SIGNALGUARD_ENABLE_RUNTIME_SWITCH=true` is set in an operator-controlled environment. When enabled, omitted reset flags are non-destructive; Redis or PostgreSQL reset requires the corresponding flag to be explicitly `true`.
 
 ## Architecture
 

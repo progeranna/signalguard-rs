@@ -5,6 +5,9 @@ use signalguard_rs::{
     api::{self, AppState},
     config::Settings,
     runtime_supervisor::IngestionSupervisor,
+    startup::{
+        MarketStateStartupPolicy, prepare_market_state_cache, resolve_market_state_startup_policy,
+    },
     storage::{self, RedisCache},
     telemetry::{self, InternalCounters},
 };
@@ -26,16 +29,22 @@ async fn main() -> Result<()> {
         .context("failed to resolve server bind address")?;
     let postgres_pool = initialize_postgres(&settings).await?;
     let redis_cache = initialize_redis(&settings, &counters).await;
+    let market_state_startup_policy = resolve_market_state_startup_policy(
+        settings.ingestion.mode,
+        settings.ingestion.replay_reset_state,
+    );
 
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .with_context(|| format!("failed to bind HTTP server to {address}"))?;
 
-    let redis_cache = clear_market_state_cache(redis_cache, &counters).await;
+    let redis_cache =
+        prepare_market_state_cache(redis_cache, market_state_startup_policy, &counters).await;
     let supervisor = Arc::new(IngestionSupervisor::new(
         &settings.ingestion,
         &settings.binance,
         &settings.detectors,
+        settings.enable_runtime_switch,
         postgres_pool.clone(),
         redis_cache.clone(),
         counters.clone(),
@@ -48,7 +57,7 @@ async fn main() -> Result<()> {
         supervisor.clone(),
     );
 
-    log_startup(&settings);
+    log_startup(&settings, market_state_startup_policy);
 
     let (shutdown_tx, _shutdown_rx) = watch::channel(false);
     supervisor.start_initial().await?;
@@ -80,24 +89,6 @@ async fn initialize_redis(settings: &Settings, counters: &InternalCounters) -> O
     }
 }
 
-async fn clear_market_state_cache(
-    redis_cache: Option<RedisCache>,
-    counters: &InternalCounters,
-) -> RedisCache {
-    let Some(cache) = redis_cache else {
-        return RedisCache::unavailable();
-    };
-
-    match cache.clear_market_state_cache().await {
-        Ok(_) => cache,
-        Err(error) => {
-            counters.increment_cache_errors();
-            warn!(%error, "failed to clear Redis market state cache; continuing in degraded mode");
-            RedisCache::unavailable()
-        }
-    }
-}
-
 fn build_app_state(
     postgres_pool: &PgPool,
     redis_cache: &RedisCache,
@@ -110,14 +101,13 @@ fn build_app_state(
         redis_cache: redis_cache.clone(),
         detector_settings: settings.detectors.clone(),
         health_settings: settings.health.clone(),
-        enable_runtime_switch: settings.enable_runtime_switch,
         runtime_mode: supervisor.runtime_mode_handle(),
         supervisor,
         counters: counters.clone(),
     }
 }
 
-fn log_startup(settings: &Settings) {
+fn log_startup(settings: &Settings, market_state_startup_policy: MarketStateStartupPolicy) {
     info!(
         service = "signalguard-rs",
         host = %settings.server.host,
@@ -126,7 +116,9 @@ fn log_startup(settings: &Settings) {
         ingestion_mode = settings.ingestion.mode.as_str(),
         configured_symbols = settings.ingestion.symbols.len(),
         replay_path = %settings.ingestion.replay_path.display(),
+        replay_reset_state = settings.ingestion.replay_reset_state,
         replay_reset_storage = settings.ingestion.replay_reset_storage,
+        market_state_startup_policy = market_state_startup_policy.as_str(),
         event_channel_capacity = settings.ingestion.event_channel_capacity,
         binance_websocket_base_url = %settings.binance.websocket_base_url,
         database_url_configured = !settings.database.url.trim().is_empty(),

@@ -38,7 +38,7 @@ pub struct RuntimeModeSnapshot {
     pub last_error: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RuntimeResetPolicy {
     pub reset_state: bool,
     pub reset_storage: bool,
@@ -92,12 +92,13 @@ impl RuntimeModeSnapshot {
         mode: IngestionMode,
         symbols: &[Symbol],
         started_at: DateTime<Utc>,
+        switching_supported: bool,
     ) -> Self {
         Self {
             mode: RuntimeMode::from(mode),
             status: RuntimeModeStatus::Running,
             symbols: symbols.to_vec(),
-            switching_supported: true,
+            switching_supported,
             source: RuntimeModeSource::Config,
             last_started_at: started_at,
             last_switched_at: None,
@@ -107,11 +108,25 @@ impl RuntimeModeSnapshot {
 }
 
 impl RuntimeResetPolicy {
-    pub const fn reset_safe_demo_defaults() -> Self {
+    pub const fn from_optional_flags(
+        reset_state: Option<bool>,
+        reset_storage: Option<bool>,
+    ) -> Self {
         Self {
-            reset_state: true,
-            reset_storage: true,
+            reset_state: matches!(reset_state, Some(true)),
+            reset_storage: matches!(reset_storage, Some(true)),
         }
+    }
+
+    pub const fn non_destructive() -> Self {
+        Self {
+            reset_state: false,
+            reset_storage: false,
+        }
+    }
+
+    pub const fn is_noop(self) -> bool {
+        !self.reset_state && !self.reset_storage
     }
 }
 
@@ -161,25 +176,36 @@ mod tests {
     use crate::{config::IngestionMode, domain::Symbol};
 
     #[test]
-    fn startup_snapshot_uses_configured_mode_and_symbols() {
+    fn startup_snapshot_uses_configured_mode_symbols_and_operator_gate() {
         let started_at = chrono::Utc.with_ymd_and_hms(2026, 7, 2, 12, 0, 0).unwrap();
         let symbols = vec![
             Symbol::new("BTCUSDT").unwrap(),
             Symbol::new("ETHUSDT").unwrap(),
         ];
 
-        let snapshot =
-            RuntimeModeSnapshot::from_startup_config(IngestionMode::Replay, &symbols, started_at);
+        let disabled = RuntimeModeSnapshot::from_startup_config(
+            IngestionMode::Replay,
+            &symbols,
+            started_at,
+            false,
+        );
+        let enabled = RuntimeModeSnapshot::from_startup_config(
+            IngestionMode::Replay,
+            &symbols,
+            started_at,
+            true,
+        );
 
-        assert_eq!(snapshot.mode.as_str(), "replay");
-        assert_eq!(snapshot.mode.label(), "Replay Demo");
-        assert_eq!(snapshot.status, RuntimeModeStatus::Running);
-        assert_eq!(snapshot.source, RuntimeModeSource::Config);
-        assert_eq!(snapshot.symbols, symbols);
-        assert!(snapshot.switching_supported);
-        assert_eq!(snapshot.last_started_at, started_at);
-        assert_eq!(snapshot.last_switched_at, None);
-        assert_eq!(snapshot.last_error, None);
+        assert_eq!(disabled.mode.as_str(), "replay");
+        assert_eq!(disabled.mode.label(), "Replay Demo");
+        assert_eq!(disabled.status, RuntimeModeStatus::Running);
+        assert_eq!(disabled.source, RuntimeModeSource::Config);
+        assert_eq!(disabled.symbols, symbols);
+        assert!(!disabled.switching_supported);
+        assert!(enabled.switching_supported);
+        assert_eq!(disabled.last_started_at, started_at);
+        assert_eq!(disabled.last_switched_at, None);
+        assert_eq!(disabled.last_error, None);
     }
 
     #[test]
@@ -189,6 +215,7 @@ mod tests {
             IngestionMode::Replay,
             &[Symbol::new("BTCUSDT").unwrap()],
             started_at,
+            false,
         ));
 
         handle.update(|snapshot| {
@@ -199,13 +226,69 @@ mod tests {
         let snapshot = handle.snapshot();
         assert_eq!(snapshot.status, RuntimeModeStatus::Completed);
         assert_eq!(snapshot.last_error.as_deref(), Some("done"));
+        assert!(!snapshot.switching_supported);
     }
 
     #[test]
-    fn reset_policy_defaults_to_reset_safe_demo_behavior() {
-        let policy = RuntimeResetPolicy::reset_safe_demo_defaults();
+    fn optional_reset_flags_are_non_destructive_when_omitted_or_false() {
+        assert_eq!(
+            RuntimeResetPolicy::from_optional_flags(None, None),
+            RuntimeResetPolicy::non_destructive()
+        );
+        assert_eq!(
+            RuntimeResetPolicy::from_optional_flags(Some(false), Some(false)),
+            RuntimeResetPolicy::non_destructive()
+        );
+    }
 
-        assert!(policy.reset_state);
-        assert!(policy.reset_storage);
+    #[test]
+    fn optional_reset_flags_preserve_independent_explicit_requests() {
+        assert_eq!(
+            RuntimeResetPolicy::from_optional_flags(Some(true), Some(false)),
+            RuntimeResetPolicy {
+                reset_state: true,
+                reset_storage: false,
+            }
+        );
+        assert_eq!(
+            RuntimeResetPolicy::from_optional_flags(Some(false), Some(true)),
+            RuntimeResetPolicy {
+                reset_state: false,
+                reset_storage: true,
+            }
+        );
+        assert_eq!(
+            RuntimeResetPolicy::from_optional_flags(Some(true), Some(true)),
+            RuntimeResetPolicy {
+                reset_state: true,
+                reset_storage: true,
+            }
+        );
+        assert_eq!(
+            RuntimeResetPolicy::from_optional_flags(None, Some(true)),
+            RuntimeResetPolicy {
+                reset_state: false,
+                reset_storage: true,
+            }
+        );
+        assert_eq!(
+            RuntimeResetPolicy::from_optional_flags(Some(true), None),
+            RuntimeResetPolicy {
+                reset_state: true,
+                reset_storage: false,
+            }
+        );
+    }
+
+    #[test]
+    fn non_destructive_policy_is_a_noop() {
+        assert!(RuntimeResetPolicy::non_destructive().is_noop());
+        assert!(
+            !RuntimeResetPolicy {
+                reset_state: true,
+                reset_storage: false,
+            }
+            .is_noop()
+        );
     }
 }

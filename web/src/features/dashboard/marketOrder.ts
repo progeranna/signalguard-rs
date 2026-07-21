@@ -1,37 +1,33 @@
-import { normalizeSelectedSymbol } from "./selectedSymbol";
+import {
+  DEMO_MARKETS,
+  getMarketCatalogAvailability,
+} from "./marketCatalog";
+import { parseSymbolId } from "./symbolId";
 import type { DashboardSymbolSummary } from "./types";
 
-export const DEMO_MARKETS = [
-  "BTCUSDT",
-  "ETHUSDT",
-  "SOLUSDT",
-  "XRPUSDT",
-  "BNBUSDT",
-  "ADAUSDT",
-  "DOGEUSDT",
-] as const;
+export { DEMO_MARKETS } from "./marketCatalog";
 
 const demoMarketIndex = new Map(
-  DEMO_MARKETS.map((market, index) => [normalizeSelectedSymbol(market) ?? market, index]),
+  DEMO_MARKETS.map((market, index) => [parseSymbolId(market) ?? market, index]),
 );
 
 export function orderMarkets(markets: string[]): string[] {
   const knownMarkets = [...DEMO_MARKETS];
   const seenMarkets = new Set(
-    knownMarkets.map((market) => normalizeSelectedSymbol(market) ?? market),
+    knownMarkets.map((market) => parseSymbolId(market) ?? market),
   );
 
   const extraMarkets: string[] = [];
 
   for (const market of markets) {
-    const normalizedMarket = normalizeSelectedSymbol(market);
+    const normalizedMarket = parseSymbolId(market);
 
     if (!normalizedMarket || seenMarkets.has(normalizedMarket)) {
       continue;
     }
 
     seenMarkets.add(normalizedMarket);
-    extraMarkets.push(market);
+    extraMarkets.push(normalizedMarket);
   }
 
   return [...knownMarkets, ...extraMarkets];
@@ -45,7 +41,7 @@ export function orderMarketEntries<T>(
   const extraEntries: T[] = [];
 
   for (const entry of entries) {
-    const normalizedMarket = normalizeSelectedSymbol(getMarket(entry));
+    const normalizedMarket = parseSymbolId(getMarket(entry));
     const knownIndex =
       normalizedMarket !== null ? demoMarketIndex.get(normalizedMarket) : undefined;
 
@@ -79,6 +75,16 @@ export function buildCoveredDashboardSymbols(
 export function isDashboardSymbolPlaceholder(
   symbol: DashboardSymbolSummary,
 ): boolean {
+  const availability = getMarketCatalogAvailability(symbol);
+
+  if (availability === "observed") {
+    return false;
+  }
+
+  if (availability === "configured-unobserved") {
+    return true;
+  }
+
   return symbol.state === null && symbol.health === null;
 }
 
@@ -91,7 +97,7 @@ function coverCanonicalMarketEntries<T>(
   const extraEntries: T[] = [];
 
   for (const entry of entries) {
-    const normalizedMarket = normalizeSelectedSymbol(getMarket(entry));
+    const normalizedMarket = parseSymbolId(getMarket(entry));
 
     if (!normalizedMarket) {
       extraEntries.push(entry);
@@ -112,7 +118,7 @@ function coverCanonicalMarketEntries<T>(
   return [
     ...DEMO_MARKETS.map(
       (market) =>
-        entryByMarket.get(normalizeSelectedSymbol(market) ?? market) ??
+        entryByMarket.get(parseSymbolId(market) ?? market) ??
         createMissingEntry(market),
     ),
     ...extraEntries,

@@ -14,6 +14,7 @@ type FetchJsonOptions<TSchema extends z.ZodTypeAny> = {
   schema: TSchema;
   init?: RequestInit;
   query?: Record<string, QueryValue>;
+  signal?: AbortSignal;
 };
 
 export function getApiBaseUrl(): string {
@@ -55,9 +56,10 @@ export async function fetchJson<TSchema extends z.ZodTypeAny>(
   path: string,
   options: FetchJsonOptions<TSchema>,
 ): Promise<z.infer<TSchema>> {
-  const { schema, init, query } = options;
+  const { schema, init, query, signal } = options;
   const response = await fetch(buildApiUrl(path, query), {
     ...init,
+    signal: signal ?? init?.signal,
     headers: {
       Accept: "application/json",
       ...init?.headers,

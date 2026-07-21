@@ -3,6 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/shared/api/client";
 
 import {
+  buildMarketCatalog,
+  marketCatalogDashboardSymbols,
+} from "./marketCatalog";
+import { parseSymbolId, requireSymbolId } from "./symbolId";
+
+import {
   dashboardSummarySchema,
   marketTimelineSchema,
   runtimeModeResponseSchema,
@@ -24,9 +30,13 @@ function withMode(path: string, mode: UiMode): string {
   return search ? `${path}?${search}` : path;
 }
 
-export function fetchDashboardSummary(mode: UiMode): Promise<DashboardSummary> {
+export function fetchDashboardSummary(
+  mode: UiMode,
+  signal?: AbortSignal,
+): Promise<DashboardSummary> {
   return fetchJson(withMode("/dashboard/summary", mode), {
     schema: dashboardSummarySchema,
+    signal,
   });
 }
 
@@ -38,42 +48,84 @@ export function marketTimelineQueryKeyRootForMode(mode: UiMode) {
   return [...marketTimelineQueryKeyRoot, mode] as const;
 }
 
-export function marketTimelineQueryKey(symbol: string, mode: UiMode) {
-  return [...marketTimelineQueryKeyRootForMode(mode), symbol] as const;
+export function marketTimelineQueryKey(
+  symbol: string | null | undefined,
+  mode: UiMode,
+) {
+  return [
+    ...marketTimelineQueryKeyRootForMode(mode),
+    parseSymbolId(symbol),
+  ] as const;
 }
 
-export function fetchMarketTimeline(symbol: string, mode: UiMode): Promise<MarketTimeline> {
-  return fetchJson(withMode(`/market/${encodeURIComponent(symbol)}/timeline`, mode), {
-    schema: marketTimelineSchema,
-  });
+export function fetchMarketTimeline(
+  symbol: string,
+  mode: UiMode,
+  signal?: AbortSignal,
+): Promise<MarketTimeline> {
+  const symbolId = requireSymbolId(symbol);
+
+  return fetchJson(
+    withMode(`/market/${encodeURIComponent(symbolId)}/timeline`, mode),
+    {
+      schema: marketTimelineSchema,
+      signal,
+    },
+  );
 }
 
-export function fetchRuntimeMode(): Promise<RuntimeModeResponse> {
+export function fetchRuntimeMode(signal?: AbortSignal): Promise<RuntimeModeResponse> {
   return fetchJson("/runtime/mode", {
     schema: runtimeModeResponseSchema,
+    signal,
   });
 }
 
 export function useDashboardSummaryQuery(mode: UiMode) {
   return useQuery({
     queryKey: dashboardSummaryQueryKeyForMode(mode),
-    queryFn: () => fetchDashboardSummary(mode),
+    queryFn: ({ signal }) => fetchDashboardSummary(mode, signal),
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
+}
+
+export function useCatalogDashboardSummaryQuery(mode: UiMode) {
+  const dashboardSummaryQuery = useDashboardSummaryQuery(mode);
+  const runtimeModeQuery = useRuntimeModeQuery(mode === "live");
+  const summary = dashboardSummaryQuery.data;
+
+  return {
+    ...dashboardSummaryQuery,
+    data: summary
+      ? {
+          ...summary,
+          symbols: marketCatalogDashboardSymbols(
+            buildMarketCatalog({
+              configuredSymbols: runtimeModeQuery.data?.symbols ?? [],
+              mode,
+              observedSymbols: summary.symbols,
+            }),
+          ),
+        }
+      : summary,
+  };
 }
 
 export function useMarketTimelineQuery(symbol: string | null | undefined, mode: UiMode) {
+  const symbolId = parseSymbolId(symbol);
+
   return useQuery({
-    queryKey: marketTimelineQueryKey(symbol ?? "", mode),
-    queryFn: () => fetchMarketTimeline(symbol ?? "", mode),
-    enabled: Boolean(symbol),
+    queryKey: marketTimelineQueryKey(symbolId, mode),
+    queryFn: ({ signal }) => fetchMarketTimeline(symbolId ?? "", mode, signal),
+    enabled: symbolId !== null,
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
 }
 
-export function useRuntimeModeQuery() {
+export function useRuntimeModeQuery(enabled = true) {
   return useQuery({
     queryKey: runtimeModeQueryKey,
-    queryFn: fetchRuntimeMode,
+    queryFn: ({ signal }) => fetchRuntimeMode(signal),
+    enabled,
   });
 }

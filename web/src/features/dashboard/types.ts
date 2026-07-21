@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { parseSymbolId } from "./symbolId";
+
 export const serviceSummarySchema = z.object({
   status: z.literal("ok"),
   service: z.literal("signalguard-rs"),
@@ -37,11 +39,25 @@ export const dashboardHealthSummarySchema = z.object({
   evaluated_at: z.string().datetime(),
 });
 
+export const symbolIdSchema = z.string().transform((value, context): string => {
+  const symbolId = parseSymbolId(value);
+
+  if (!symbolId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "symbol must contain only ASCII letters and digits",
+    });
+    return z.NEVER;
+  }
+
+  return symbolId;
+});
+
 export const anomalySeveritySchema = z.enum(["info", "warning", "critical"]);
 
 export const anomalySchema = z.object({
   id: z.string().uuid(),
-  symbol: z.string(),
+  symbol: symbolIdSchema,
   anomaly_type: z.string(),
   severity: anomalySeveritySchema,
   message: z.string(),
@@ -52,7 +68,7 @@ export const anomalySchema = z.object({
 });
 
 export const dashboardSymbolSummarySchema = z.object({
-  symbol: z.string(),
+  symbol: symbolIdSchema,
   state: dashboardStateSummarySchema.nullable(),
   health: dashboardHealthSummarySchema.nullable(),
 });
@@ -73,7 +89,7 @@ export const marketTimelinePointSchema = z.object({
 });
 
 export const marketTimelineSchema = z.object({
-  symbol: z.string(),
+  symbol: symbolIdSchema,
   points: z.array(marketTimelinePointSchema),
   anomalies: z.array(anomalySchema),
 });
@@ -94,7 +110,7 @@ export const runtimeModeResponseSchema = z.object({
   mode: runtimeModeSchema,
   mode_label: z.string(),
   status: runtimeModeStatusSchema,
-  symbols: z.array(z.string()),
+  symbols: z.array(symbolIdSchema),
   switching_supported: z.boolean(),
   source: runtimeModeSourceSchema,
   last_started_at: z.string().datetime().nullable(),
