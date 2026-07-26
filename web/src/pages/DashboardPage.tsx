@@ -28,6 +28,11 @@ import {
   type SymbolPopupIdentity,
   type SymbolPopupReturnContext,
 } from "@/features/dashboard/symbolPopup";
+import { adaptMarketDetailResource } from "@/features/dashboard/marketAdapters";
+import type {
+  MarketAnomalyViewModel,
+  MarketDetailViewModel,
+} from "@/features/dashboard/marketViewModel";
 import { useSymbolPopupResource } from "@/features/dashboard/symbolPopupResource";
 import type {
   DashboardAnomaly,
@@ -400,7 +405,7 @@ function DashboardTablesGrid({
         type: "symbolDetail",
         identity: replaceSymbolPopupMode(
           currentState.identity,
-          selectedUiMode,
+           selectedUiMode,
         ),
       };
     });
@@ -658,13 +663,14 @@ function SymbolHealthCard({
       className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
       aria-label={`Open ${symbol.symbol} market detail`}
     >
-      <article>
+     <article>
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
             <p className="font-mono text-lg font-bold text-white">
               {symbol.symbol}
             </p>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-
+slate-500">
               View market detail
             </p>
           </div>
@@ -1107,7 +1113,7 @@ function AnomalyModalCard({
           )}
         />
         <MobileSymbolMetric
-          label="Detected"
+          label="Time"
           value={formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
         />
         <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
@@ -1119,7 +1125,7 @@ function AnomalyModalCard({
           </p>
         </div>
       </div>
-      <p className="mt-3 text-sm leading-6 text-slate-400">
+      <p>
         {anomaly.message || "—"}
       </p>
     </button>
@@ -1287,22 +1293,19 @@ function SymbolDetailModal({
   onOpenSymbolDetail: (symbol: string) => void;
 }) {
   const resourceState = useSymbolPopupResource(identity);
+  const viewModel =
+    resourceState.status === "success"
+      ? adaptMarketDetailResource(
+          { mode: identity.mode, symbol: identity.symbol },
+          resourceState.resource,
+        )
+      : null;
   const backLabel =
     identity.returnContext === "symbols"
       ? "Back to all markets"
       : identity.returnContext === "anomalies"
         ? "Back to all anomalies"
         : null;
-
-  if (
-    resourceState.status === "success" &&
-    (resourceState.resource.mode !== identity.mode ||
-      resourceState.resource.symbol !== identity.symbol)
-  ) {
-    throw new TypeError(
-      `popup resource identity mismatch: expected ${identity.mode}/${identity.symbol}`,
-    );
-  }
 
   return (
     <DashboardTableModal
@@ -1346,74 +1349,68 @@ function SymbolDetailModal({
           <EmptyBlock
             message={`${identity.symbol} is unavailable in ${identity.mode === "demo" ? "Demo" : "Live"} mode.`}
           />
-        ) : (
+        ) : viewModel ? (
           <SymbolPopupSuccess
-            anomalies={resourceState.resource.anomalies}
             onOpenSymbolDetail={onOpenSymbolDetail}
-            symbol={resourceState.resource.summary}
+            viewModel={viewModel}
           />
-        )}
+        ) : null}
       </div>
     </DashboardTableModal>
   );
 }
 
 function SymbolPopupSuccess({
-  anomalies,
   onOpenSymbolDetail,
-  symbol,
+  viewModel,
 }: {
-  anomalies: DashboardAnomaly[];
   onOpenSymbolDetail: (symbol: string) => void;
-  symbol: DashboardSymbolSummary;
+  viewModel: MarketDetailViewModel;
 }) {
-  const statusTone = toStatusTone(symbol.health?.status, "neutral");
-  const statusText = marketStatusLabel(symbol);
-
   return (
     <div className="space-y-6" data-testid="symbol-popup-success">
       <div className="flex flex-wrap items-center gap-3">
         <p className="font-mono text-2xl font-bold text-white">
-          {symbol.symbol}
+          {viewModel.identity.symbol}
         </p>
         <StatusBadge
-          status={statusTone}
-          text={statusText}
+          status={viewModel.status.tone}
+          text={viewModel.status.text}
         />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SymbolDetailMetric
           label="Health"
-          value={symbol.health?.score?.toString() ?? "—"}
+          value={viewModel.metrics.healthScore}
         />
         <SymbolDetailMetric
           label="Price"
-          value={formatTickerPrice(symbol.state?.last_trade_price)}
+          value={viewModel.metrics.lastPrice}
         />
         <SymbolDetailMetric
           label="Spread"
-          value={formatTickerPercent(symbol.state?.spread_pct)}
+          value={viewModel.metrics.spread}
         />
         <SymbolDetailMetric
           label="Trades/min"
-          value={formatOptionalCompact(symbol.state?.trades_per_minute)}
+          value={viewModel.metrics.tradesPerMinute}
         />
         <SymbolDetailMetric
           label="Freshness"
-          value={formatOptionalAge(symbol.state?.last_event_age_ms)}
+          value={viewModel.metrics.freshness.popup}
         />
         <SymbolDetailMetric
           label="Anomalies"
-          value={formatCompactNumber(anomalies.length)}
+          value={viewModel.metrics.anomalyCount.popup}
         />
         <SymbolDetailMetric
           label="Best bid"
-          value={formatTickerPrice(symbol.state?.best_bid_price)}
+          value={viewModel.metrics.bestBid}
         />
         <SymbolDetailMetric
           label="Best ask"
-          value={formatTickerPrice(symbol.state?.best_ask_price)}
+          value={viewModel.metrics.bestAsk}
         />
       </div>
 
@@ -1422,7 +1419,7 @@ function SymbolPopupSuccess({
           title="Recent market anomalies"
           subtitle="Quality events for this market in the current summary."
         />
-        {anomalies.length > 0 ? (
+        {viewModel.hasAnomalies ? (
           <>
             <div className="hidden overflow-hidden border-y border-white/10 lg:block">
               <table className="w-full border-collapse text-left">
@@ -1437,15 +1434,15 @@ function SymbolPopupSuccess({
                   </tr>
                 </thead>
                 <tbody>
-                  {anomalies.map((anomaly) => (
+                  {viewModel.anomalies.map((anomaly) => (
                     <SymbolDetailAnomalyRow key={anomaly.id} anomaly={anomaly} />
                   ))}
                 </tbody>
               </table>
             </div>
             <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
-              {anomalies.map((anomaly) => (
-                <AnomalyModalCard
+              {viewModel.anomalies.map((anomaly) => (
+                <SymbolDetailAnomalyCard
                   key={anomaly.id}
                   anomaly={anomaly}
                   onOpenSymbolDetail={onOpenSymbolDetail}
@@ -1472,30 +1469,86 @@ function SymbolDetailMetric({ label, value }: { label: string; value: string }) 
   );
 }
 
-function SymbolDetailAnomalyRow({ anomaly }: { anomaly: DashboardAnomaly }) {
-  const severityTone = toStatusTone(anomaly.severity, "neutral");
-
+function SymbolDetailAnomalyRow({
+  anomaly,
+}: {
+  anomaly: MarketAnomalyViewModel;
+}) {
   return (
     <tr className="border-b border-white/[0.06] transition hover:bg-white/[0.025] last:border-0">
       <td className="px-2 py-3 pr-4 text-sm font-bold text-slate-100">
-        {formatAnomalyType(anomaly.anomaly_type)}
+        {anomaly.type}
       </td>
       <td className="px-2 py-3 pr-4">
         <SeverityBadge severity={anomaly.severity} />
       </td>
-      <td className={`px-2 py-3 pr-4 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
-        {formatAnomalyValue(anomaly.anomaly_type, anomaly.observed_value, "observed")}
+      <td className={`px-2 py-3 pr-4 text-sm font-bold ${anomalyValueClass(anomaly.severityTone)}`}>
+        {anomaly.observed.popup}
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {formatAnomalyValue(anomaly.anomaly_type, anomaly.threshold_value, "threshold")}
+        {anomaly.threshold.popup}
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
+        {anomaly.detectedAt.popup}
       </td>
       <td className="px-2 py-3 text-sm leading-5 text-slate-400">
-        {anomaly.message || "—"}
+        {anomaly.message.popup}
       </td>
     </tr>
+  );
+}
+
+function SymbolDetailAnomalyCard({
+  anomaly,
+  onOpenSymbolDetail,
+}: {
+  anomaly: MarketAnomalyViewModel;
+  onOpenSymbolDetail: (symbol: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenSymbolDetail(anomaly.symbol)}
+      className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+      aria-label={`Open ${anomaly.symbol} market detail`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <span className="font-mono text-base font-bold text-white transition">
+            {anomaly.symbol}
+          </span>
+          <p className="mt-2 text-base font-bold text-slate-100">
+            {anomaly.type}
+          </p>
+        </div>
+        <SeverityBadge severity={anomaly.severity} />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <MobileSymbolMetric
+          label="Observed"
+          value={anomaly.observed.popup}
+        />
+        <MobileSymbolMetric
+          label="Threshold"
+          value={anomaly.threshold.popup}
+        />
+        <MobileSymbolMetric
+          label="Detected"
+          value={anomaly.detectedAt.popup}
+        />
+        <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Severity
+          </p>
+          <p className={`mt-1 text-sm font-bold ${anomalyValueClass(anomaly.severityTone)}`}>
+            {anomaly.severityText}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-slate-400">
+        {anomaly.message.popup}
+      </p>
+    </button>
   );
 }
 
@@ -1692,8 +1745,7 @@ function buildTimelineTimeDomain(points: MarketTimelineChartPoint[]): [number, n
 
 function buildVisibleTimelineAnomalies(
   anomalies: DashboardAnomaly[],
-  timeDomain: [number, number],
-): Array<DashboardAnomaly & { timestampMs: number }> {
+  timeDomain: [number, number],) : Array<DashboardAnomaly & { timestampMs: number }> {
   return anomalies
     .map((anomaly) => {
       const timestampMs = Date.parse(anomaly.event_time || anomaly.created_at);
