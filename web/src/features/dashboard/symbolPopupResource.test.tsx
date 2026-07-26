@@ -4,15 +4,27 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "@/shared/api/errors";
+
 import { createSymbolPopupIdentity } from "./symbolPopup";
 import {
   resolveSymbolPopupResource,
   useSymbolPopupResource,
 } from "./symbolPopupResource";
+import {
+  resolveSymbolMarketResource,
+  useSymbolMarketResource,
+  type SymbolMarketQueryBundle,
+} from "./symbolMarketResource";
+import { parseSymbolId } from "./symbolId";
 import type {
+  AnomaliesResponse,
   DashboardAnomaly,
   DashboardSummary,
   DashboardSymbolSummary,
+  MarketHealth,
+  MarketState,
+  MarketTimeline,
   UiMode,
 } from "./types";
 
@@ -29,6 +41,8 @@ type PendingRequest = {
 };
 
 const queryClients: QueryClient[] = [];
+
+const refetch = vi.fn(async () => undefined);
 
 afterEach(() => {
   queryClients.splice(0).forEach((queryClient) => queryClient.clear());
@@ -68,7 +82,7 @@ function createWrapper(queryClient: QueryClient) {
   };
 }
 
-function jsonResponse(payload: unknown): Response {
+function jsonResponse(payload: unknown, status = 200): Response {
   const body = JSON.stringify(payload);
 
   return {
@@ -78,10 +92,46 @@ function jsonResponse(payload: unknown): Response {
       },
     },
     json: async () => JSON.parse(body),
-    ok: true,
-    status: 200,
+    ok: status >= 200 && status < 300,
+    status,
     text: async () => body,
   } as Response;
+}
+
+function installPendingFetch() {
+  const requests: PendingRequest[] = [];
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const deferred = createDeferred<Response>();
+    requests.push({
+      deferred,
+      signal: init?.signal ?? undefined,
+      url: String(input),
+    });
+    return deferred.promise;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  return requests;
+}
+
+function requestByUrl(requests: PendingRequest[], fragment: string) {
+  const request = requests.find((candidate) => candidate.url.includes(fragment));
+
+  if (!request) {
+    throw new Error(`request not found: ${fragment}`);
+  }
+
+  return request;
+}
+
+function symbolId(symbol: string) {
+  const parsed = parseSymbolId(symbol);
+
+  if (!parsed) {
+    throw new TypeError(`invalid test symbol: ${symbol}`);
+  }
+
+  return parsed;
 }
 
 function observedSymbol(symbol: string, price: string): DashboardSymbolSummary {
@@ -140,365 +190,334 @@ function dashboardSummary(
   };
 }
 
-function runtimeMode(symbols: string[]) {
+function marketState(symbol: string, price: string): MarketState {
   return {
-    last_error: null,
-    last_started_at: null,
-    last_switched_at: null,
-    mode: "live",
-    mode_label: "Live",
-    source: "runtime",
-    status: "running",
-    switching_supported: true,
-    symbols,
+    best_ask_price: price,
+    best_bid_price: price,
+    depth_sequence_gap_count: 0,
+    last_event_age_ms: 100,
+    last_event_time: "2026-07-20T10:00:00.000Z",
+    last_trade_price: price,
+    price_change_1m_pct: 0.1,
+    spread_pct: 0.01,
+    symbol,
+    trades_per_minute: 12,
   };
 }
 
-function installPendingFetch({ rejectOnAbort = false } = {}) {
-  const requests: PendingRequest[] = [];
-  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-    const deferred = createDeferred<Response>();
-    const signal = init?.signal ?? undefined;
-    const request = { deferred, signal, url: String(input) };
-    requests.push(request);
+function marketHealth(symbol: string): MarketHealth {
+  return {
+    evaluated_at: "2026-07-20T10:00:00.000Z",
+    recent_anomaly_count: 1,
+    score: 95,
+    status: "healthy",
+    symbol,
+  };
+}
 
-    signal?.addEventListener(
-      "abort",
-      () => {
-        if (rejectOnAbort) {
-          const error = new Error("The request was aborted");
-          error.name = "AbortError";
-          deferred.reject(error);
-        }
+function marketTimeline(
+  symbol: string,
+  anomalies: DashboardAnomaly[] = [],
+): MarketTimeline {
+  return {
+    anomalies,
+    points: [
+      {
+        last_event_age_ms: 100,
+        price: symbol === "BTCUSDT" ? "100" : "200",
+        spread_pct: 0.01,
+        timestamp: "2026-07-20T10:00:00.000Z",
+        trades_per_minute: 12,
       },
-      { once: true },
+    ],
+    symbol,
+  };
+}
+
+function anomaliesResponse(anomalies: DashboardAnomaly[]): AnomaliesResponse {
+  return { anomalies };
+}
+
+function query<T>(
+  data: T | null | undefined,
+  options: { error?: unknown; isError?: boolean; isLoading?: boolean } = {},
+) {
+  return {
+    data,
+    error: options.error ?? null,
+    isError: options.isError ?? false,
+    isLoading: options.isLoading ?? false,
+    refetch,
+  };
+}
+
+function bundle(overrides: Partial<SymbolMarketQueryBundle> = {}): SymbolMarketQueryBundle {
+  return {
+    anomalies: query<AnomaliesResponse>(undefined),
+    demoSummary: query<DashboardSummary>(undefined),
+    health: query<MarketHealth>(undefined),
+    state: query<MarketState>(undefined),
+    timeline: query<MarketTimeline>(undefined),
+    ...overrides,
+  };
+}
+
+async function resolveLiveRequests(
+  requests: PendingRequest[],
+  symbol: string,
+  price: string,
+) {
+  const anomalyValue = anomaly(
+    symbol,
+    symbol === "BTCUSDT"
+      ? "00000000-0000-4000-8000-000000000001"
+      : "00000000-0000-4000-8000-000000000002",
+  );
+
+  await act(async () => {
+    requestByUrl(requests, `/market/${symbol}/state`).deferred.resolve(
+      jsonResponse(marketState(symbol, price)),
+    );
+    requestByUrl(requests, `/market/${symbol}/health`).deferred.resolve(
+      jsonResponse(marketHealth(symbol)),
+    );
+    requestByUrl(requests, `/anomalies?limit=50&symbol=${symbol}`).deferred.resolve(
+      jsonResponse(anomaliesResponse([anomalyValue])),
+    );
+  });
+}
+
+describe("symbol market resource states", () => {
+  it("returns explicit loading, error, unavailable, and empty-anomaly success states", () => {
+    const identity = { mode: "live" as const, symbol: symbolId("BTCUSDT") };
+
+    expect(
+      resolveSymbolMarketResource(
+        identity,
+        bundle({ state: query<MarketState>(undefined, { isLoading: true }) }),
+      ),
+    ).toMatchObject({ identity, status: "loading" });
+
+    const failure = new Error("health failed");
+    expect(
+      resolveSymbolMarketResource(
+        identity,
+        bundle({ health: query<MarketHealth>(undefined, { error: failure, isError: true }) }),
+      ),
+    ).toMatchObject({ error: failure, identity, status: "error" });
+
+    expect(
+      resolveSymbolMarketResource(
+        identity,
+        bundle({
+          state: query<MarketState>(undefined, {
+            error: new ApiError({ code: "not_found", message: "missing", status: 404 }),
+            isError: true,
+          }),
+        }),
+      ),
+    ).toMatchObject({ identity, status: "unavailable" });
+
+    const success = resolveSymbolMarketResource(
+      identity,
+      bundle({
+        anomalies: query(anomaliesResponse([])),
+        health: query(marketHealth("BTCUSDT")),
+        state: query(marketState("BTCUSDT", "100")),
+      }),
     );
 
-    return deferred.promise;
-  });
-  vi.stubGlobal("fetch", fetchMock);
-
-  return requests;
-}
-
-function identity(mode: UiMode, symbol: string) {
-  const value = createSymbolPopupIdentity(mode, symbol, "dashboard");
-
-  if (!value) {
-    throw new TypeError(`invalid test identity: ${mode}/${symbol}`);
-  }
-
-  return value;
-}
-
-function requestByUrl(requests: PendingRequest[], fragment: string) {
-  const request = requests.find((candidate) => candidate.url.includes(fragment));
-
-  if (!request) {
-    throw new Error(`request not found: ${fragment}`);
-  }
-
-  return request;
-}
-
-const refetch = vi.fn(async () => undefined);
-
-describe("symbol popup resource selector", () => {
-  it("returns only the requested canonical symbol and its anomalies", () => {
-    const state = resolveSymbolPopupResource(identity("demo", "BTCUSDT"), {
-      data: dashboardSummary(
-        [
-          observedSymbol("BTCUSDT", "100"),
-          observedSymbol("ETHUSDT", "200"),
-        ],
-        [
-          anomaly("BTCUSDT", "00000000-0000-4000-8000-000000000001"),
-          anomaly("ETHUSDT", "00000000-0000-4000-8000-000000000002"),
-        ],
-      ),
-      error: null,
-      isError: false,
-      isLoading: false,
-      refetch,
-    });
-
-    expect(state.status).toBe("success");
-    if (state.status !== "success") {
-      return;
+    expect(success.status).toBe("success");
+    if (success.status === "success") {
+      expect(success.resource.anomalies).toEqual([]);
+      expect(success.resource.summary.state?.last_trade_price).toBe("100");
     }
-    expect(state.resource.symbol).toBe("BTCUSDT");
-    expect(state.resource.summary.state?.last_trade_price).toBe("100");
-    expect(state.resource.anomalies).toHaveLength(1);
-    expect(state.resource.anomalies[0]?.symbol).toBe("BTCUSDT");
   });
 
-  it("keeps loading, error, and unavailable states attached to identity", () => {
-    const popupIdentity = identity("live", "ETHUSDT");
-
-    expect(
-      resolveSymbolPopupResource(popupIdentity, {
-        data: null,
-        error: null,
-        isError: false,
-        isLoading: true,
-        refetch,
-      }),
-    ).toMatchObject({ identity: popupIdentity, status: "loading" });
-    expect(
-      resolveSymbolPopupResource(popupIdentity, {
-        data: null,
-        error: new Error("failed"),
-        isError: true,
-        isLoading: false,
-        refetch,
-      }),
-    ).toMatchObject({ identity: popupIdentity, status: "error" });
-    expect(
-      resolveSymbolPopupResource(popupIdentity, {
-        data: dashboardSummary([observedSymbol("BTCUSDT", "100")]),
-        error: null,
-        isError: false,
-        isLoading: false,
-        refetch,
-      }),
-    ).toMatchObject({ identity: popupIdentity, status: "unavailable" });
-  });
-});
-
-describe("rapid popup symbol changes", () => {
-  it.each([
-    ["BTCUSDT", "ETHUSDT", "200"],
-    ["ETHUSDT", "BTCUSDT", "100"],
-  ] as const)(
-    "detaches %s immediately and selects only %s when the pending summary resolves",
-    async (from, to, toPrice) => {
-      const requests = installPendingFetch();
-      const { result, rerender } = renderHook(
-        ({ symbol }: { symbol: string }) =>
-          useSymbolPopupResource(identity("demo", symbol)),
-        {
-          initialProps: { symbol: from },
-          wrapper: createWrapper(createQueryClient()),
-        },
-      );
-
-      await waitFor(() => expect(requests).toHaveLength(1));
-      rerender({ symbol: to });
-
-      expect(requests).toHaveLength(1);
-      expect(result.current.status).toBe("loading");
-      expect(result.current.identity.symbol).toBe(to);
-      expect("resource" in result.current).toBe(false);
-
-      requests[0]?.deferred.resolve(
-        jsonResponse(
+  it("uses Demo summary state and dedicated Demo timeline anomalies without Live fallback", () => {
+    const identity = { mode: "demo" as const, symbol: symbolId("ETHUSDT") };
+    const ethAnomaly = anomaly(
+      "ETHUSDT",
+      "00000000-0000-4000-8000-000000000002",
+    );
+    const state = resolveSymbolMarketResource(
+      identity,
+      bundle({
+        demoSummary: query(
           dashboardSummary([
             observedSymbol("BTCUSDT", "100"),
             observedSymbol("ETHUSDT", "200"),
           ]),
         ),
-      );
+        timeline: query(marketTimeline("ETHUSDT", [ethAnomaly])),
+      }),
+    );
 
-      await waitFor(() => expect(result.current.status).toBe("success"));
-      expect(result.current.status).toBe("success");
-      if (result.current.status !== "success") {
-        return;
-      }
-      expect(result.current.resource.symbol).toBe(to);
-      expect(result.current.resource.summary.state?.last_trade_price).toBe(toPrice);
-    },
-  );
+    expect(state.status).toBe("success");
+    if (state.status === "success") {
+      expect(state.resource.mode).toBe("demo");
+      expect(state.resource.symbol).toBe("ETHUSDT");
+      expect(state.resource.summary.state?.last_trade_price).toBe("200");
+      expect(state.resource.anomalies).toEqual([ethAnomaly]);
+    }
+  });
 
-  it("never renders cached BTC content under an ETH identity", async () => {
+  it("rejects a response that claims another symbol identity", () => {
+    const identity = { mode: "live" as const, symbol: symbolId("ETHUSDT") };
+
+    expect(() =>
+      resolveSymbolMarketResource(
+        identity,
+        bundle({
+          anomalies: query(anomaliesResponse([])),
+          health: query(marketHealth("ETHUSDT")),
+          state: query(marketState("BTCUSDT", "100")),
+        }),
+      ),
+    ).toThrow(/state resource symbol mismatch/);
+  });
+});
+
+describe("out-of-order symbol responses", () => {
+  it("never renders late BTC data under ETH and then renders ETH correctly", async () => {
     const requests = installPendingFetch();
     const { result, rerender } = renderHook(
       ({ symbol }: { symbol: string }) =>
-        useSymbolPopupResource(identity("demo", symbol)),
+        useSymbolMarketResource({ mode: "live", symbol: symbolId(symbol) }),
       {
         initialProps: { symbol: "BTCUSDT" },
         wrapper: createWrapper(createQueryClient()),
       },
     );
 
-    await waitFor(() => expect(requests).toHaveLength(1));
-    requests[0]?.deferred.resolve(
-      jsonResponse(
-        dashboardSummary([
-          observedSymbol("BTCUSDT", "100"),
-          observedSymbol("ETHUSDT", "200"),
-        ]),
-      ),
-    );
-    await waitFor(() => expect(result.current.status).toBe("success"));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    const btcRequests = [...requests];
 
     rerender({ symbol: "ETHUSDT" });
+    await waitFor(() => expect(requests).toHaveLength(6));
+
+    expect(btcRequests.every((request) => request.signal?.aborted)).toBe(true);
+    expect(result.current).toMatchObject({
+      identity: { mode: "live", symbol: "ETHUSDT" },
+      status: "loading",
+    });
+
+    await act(async () => {
+      requestByUrl(btcRequests, "/market/BTCUSDT/state").deferred.resolve(
+        jsonResponse(marketState("BTCUSDT", "100")),
+      );
+      requestByUrl(btcRequests, "/market/BTCUSDT/health").deferred.resolve(
+        jsonResponse(marketHealth("BTCUSDT")),
+      );
+      requestByUrl(btcRequests, "/anomalies?limit=50&symbol=BTCUSDT").deferred.resolve(
+        jsonResponse(anomaliesResponse([])),
+      );
+    });
+
+    expect(result.current.status).toBe("loading");
+    expect(result.current.identity.symbol).toBe("ETHUSDT");
+    expect("resource" in result.current).toBe(false);
+
+    await resolveLiveRequests(requests.slice(3), "ETHUSDT", "200");
+    await waitFor(() => expect(result.current.status).toBe("success"));
 
     expect(result.current.status).toBe("success");
-    if (result.current.status !== "success") {
-      return;
+    if (result.current.status === "success") {
+      expect(result.current.resource.symbol).toBe("ETHUSDT");
+      expect(result.current.resource.summary.state?.last_trade_price).toBe("200");
+      expect(result.current.resource.anomalies[0]?.symbol).toBe("ETHUSDT");
     }
-    expect(result.current.identity.symbol).toBe("ETHUSDT");
-    expect(result.current.resource.symbol).toBe("ETHUSDT");
-    expect(result.current.resource.summary.state?.last_trade_price).toBe("200");
   });
 });
 
-describe("popup mode changes", () => {
+describe("mode isolation", () => {
   it("detaches Demo immediately and ignores its late response in Live", async () => {
     const requests = installPendingFetch();
     const { result, rerender } = renderHook(
       ({ mode }: { mode: UiMode }) =>
-        useSymbolPopupResource(identity(mode, "BTCUSDT")),
+        useSymbolMarketResource({ mode, symbol: symbolId("BTCUSDT") }),
       {
         initialProps: { mode: "demo" as UiMode },
         wrapper: createWrapper(createQueryClient()),
       },
     );
 
-    await waitFor(() => expect(requests).toHaveLength(1));
-    const demoRequest = requests[0];
+    await waitFor(() => expect(requests).toHaveLength(2));
+    const demoRequests = [...requests];
 
     rerender({ mode: "live" });
-    await waitFor(() => expect(requests).toHaveLength(3));
+    await waitFor(() => expect(requests).toHaveLength(5));
 
-    expect(demoRequest?.signal?.aborted).toBe(true);
-    expect(result.current.status).toBe("loading");
-    expect(result.current.identity.mode).toBe("live");
-
-    requestByUrl(requests, "/dashboard/summary?mode=live").deferred.resolve(
-      jsonResponse(dashboardSummary([observedSymbol("BTCUSDT", "300")])),
-    );
-    requestByUrl(requests, "/runtime/mode").deferred.resolve(
-      jsonResponse(runtimeMode(["BTCUSDT"])),
-    );
-
-    await waitFor(() => expect(result.current.status).toBe("success"));
-    expect(result.current.status).toBe("success");
-    if (result.current.status !== "success") {
-      return;
-    }
-    expect(result.current.resource.mode).toBe("live");
-    expect(result.current.resource.summary.state?.last_trade_price).toBe("300");
-
-    demoRequest?.deferred.resolve(
-      jsonResponse(dashboardSummary([observedSymbol("BTCUSDT", "100")])),
-    );
-    await act(async () => {
-      await Promise.resolve();
+    expect(demoRequests.every((request) => request.signal?.aborted)).toBe(true);
+    expect(result.current).toMatchObject({
+      identity: { mode: "live", symbol: "BTCUSDT" },
+      status: "loading",
     });
 
-    expect(result.current.status).toBe("success");
-    if (result.current.status !== "success") {
-      return;
-    }
-    expect(result.current.resource.mode).toBe("live");
-    expect(result.current.resource.summary.state?.last_trade_price).toBe("300");
-  });
-
-  it("detaches Live immediately and restores only Demo data", async () => {
-    const requests = installPendingFetch();
-    const { result, rerender } = renderHook(
-      ({ mode }: { mode: UiMode }) =>
-        useSymbolPopupResource(identity(mode, "ETHUSDT")),
-      {
-        initialProps: { mode: "live" as UiMode },
-        wrapper: createWrapper(createQueryClient()),
-      },
-    );
-
-    await waitFor(() => expect(requests).toHaveLength(2));
-    const liveSummary = requestByUrl(requests, "/dashboard/summary?mode=live");
-    const liveRuntime = requestByUrl(requests, "/runtime/mode");
-
-    rerender({ mode: "demo" });
-    await waitFor(() => expect(requests).toHaveLength(3));
-
-    expect(liveSummary.signal?.aborted).toBe(true);
-    expect(result.current.status).toBe("loading");
-    expect(result.current.identity.mode).toBe("demo");
-
-    requestByUrl(requests, "/dashboard/summary?mode=demo").deferred.resolve(
-      jsonResponse(dashboardSummary([observedSymbol("ETHUSDT", "200")])),
-    );
+    await resolveLiveRequests(requests.slice(2), "BTCUSDT", "300");
     await waitFor(() => expect(result.current.status).toBe("success"));
 
-    liveSummary.deferred.resolve(
-      jsonResponse(dashboardSummary([observedSymbol("ETHUSDT", "400")])),
-    );
-    liveRuntime.deferred.resolve(jsonResponse(runtimeMode(["ETHUSDT"])));
     await act(async () => {
-      await Promise.resolve();
+      requestByUrl(demoRequests, "/dashboard/summary?mode=demo").deferred.resolve(
+        jsonResponse(dashboardSummary([observedSymbol("BTCUSDT", "100")])),
+      );
+      requestByUrl(demoRequests, "/market/BTCUSDT/timeline?mode=demo").deferred.resolve(
+        jsonResponse(marketTimeline("BTCUSDT")),
+      );
     });
 
     expect(result.current.status).toBe("success");
-    if (result.current.status !== "success") {
-      return;
+    if (result.current.status === "success") {
+      expect(result.current.resource.mode).toBe("live");
+      expect(result.current.resource.summary.state?.last_trade_price).toBe("300");
     }
-    expect(result.current.resource.mode).toBe("demo");
-    expect(result.current.resource.summary.state?.last_trade_price).toBe("200");
-  });
-
-  it("returns explicit unavailability without Demo fallback in Live", async () => {
-    const requests = installPendingFetch();
-    const { result } = renderHook(
-      () => useSymbolPopupResource(identity("live", "BTCUSDT")),
-      { wrapper: createWrapper(createQueryClient()) },
-    );
-
-    await waitFor(() => expect(requests).toHaveLength(2));
-    requestByUrl(requests, "/dashboard/summary?mode=live").deferred.resolve(
-      jsonResponse(dashboardSummary([observedSymbol("ETHUSDT", "200")])),
-    );
-    requestByUrl(requests, "/runtime/mode").deferred.resolve(
-      jsonResponse(runtimeMode(["ETHUSDT"])),
-    );
-
-    await waitFor(() => expect(result.current.status).toBe("unavailable"));
-    expect(result.current.identity).toMatchObject({
-      mode: "live",
-      symbol: "BTCUSDT",
-    });
-    expect("resource" in result.current).toBe(false);
-  });
-
-  it("returns configured-unobserved Live markets as unavailable", async () => {
-    const requests = installPendingFetch();
-    const { result } = renderHook(
-      () => useSymbolPopupResource(identity("live", "BTCUSDT")),
-      { wrapper: createWrapper(createQueryClient()) },
-    );
-
-    await waitFor(() => expect(requests).toHaveLength(2));
-    requestByUrl(requests, "/dashboard/summary?mode=live").deferred.resolve(
-      jsonResponse(dashboardSummary([])),
-    );
-    requestByUrl(requests, "/runtime/mode").deferred.resolve(
-      jsonResponse(runtimeMode(["BTCUSDT"])),
-    );
-
-    await waitFor(() => expect(result.current.status).toBe("unavailable"));
   });
 });
 
-describe("identity-specific resource errors", () => {
-  it("keeps an error attached to the requested identity", async () => {
+describe("popup compatibility", () => {
+  it("keeps popup presentation context attached without adding it to server requests", async () => {
     const requests = installPendingFetch();
-    const { result } = renderHook(
-      () => useSymbolPopupResource(identity("demo", "ETHUSDT")),
-      { wrapper: createWrapper(createQueryClient()) },
+    const identity = createSymbolPopupIdentity(
+      "live",
+      "BTCUSDT",
+      "anomalies",
     );
 
-    await waitFor(() => expect(requests).toHaveLength(1));
-    requests[0]?.deferred.reject(new Error("ETH summary failed"));
-
-    await waitFor(() => expect(result.current.status).toBe("error"));
-    expect(result.current.identity).toMatchObject({
-      mode: "demo",
-      symbol: "ETHUSDT",
-    });
-    expect(result.current.status).toBe("error");
-    if (result.current.status === "error") {
-      expect(result.current.error).toEqual(new Error("ETH summary failed"));
+    if (!identity) {
+      throw new TypeError("expected valid popup identity");
     }
+
+    const { result } = renderHook(() => useSymbolPopupResource(identity), {
+      wrapper: createWrapper(createQueryClient()),
+    });
+
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(result.current.identity).toBe(identity);
+    expect(requests.every((request) => !request.url.includes("popup"))).toBe(true);
+    expect(requests.every((request) => !request.url.includes("anomalies%3A"))).toBe(true);
+  });
+
+  it("preserves popup resolver return context", () => {
+    const identity = createSymbolPopupIdentity(
+      "demo",
+      "BTCUSDT",
+      "symbols",
+    );
+
+    if (!identity) {
+      throw new TypeError("expected valid popup identity");
+    }
+
+    const state = resolveSymbolPopupResource(
+      identity,
+      bundle({
+        demoSummary: query(dashboardSummary([observedSymbol("BTCUSDT", "100")])),
+        timeline: query(marketTimeline("BTCUSDT")),
+      }),
+    );
+
+    expect(state.status).toBe("success");
+    expect(state.identity).toBe(identity);
+    expect(state.identity.returnContext).toBe("symbols");
   });
 });
