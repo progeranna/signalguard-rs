@@ -32,13 +32,13 @@ describe("mode-scoped selected-symbol consumer wiring", () => {
 
   it("scopes known route and route-link writes to the active mode", () => {
     expect(symbolDetailSource).toContain(
-      "storeSelectedSymbol(selectedUiMode, selectedSummary.symbol)",
+      "storeSelectedSymbol(selectedUiMode, resolvedSymbol)",
     );
     expect(symbolDetailSource).toContain(
       "storeSelectedSymbol(selectedUiMode, entry.symbol)",
     );
     expect(symbolDetailSource).toContain(
-      "[isKnownSymbol, selectedSummary, selectedUiMode]",
+      "[resolvedSymbol, selectedUiMode]",
     );
   });
 
