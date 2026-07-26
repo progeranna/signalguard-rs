@@ -15,6 +15,7 @@ import { AppShell } from "./AppShell";
 import { CanonicalSymbolRoute } from "./CanonicalSymbolRoute";
 import {
   dashboardSummaryQueryKeyForMode,
+  marketTimelineQueryKey,
   runtimeModeQueryKey,
 } from "@/features/dashboard/api";
 import { selectedSymbolStorageKey } from "@/features/dashboard/selectedSymbol";
@@ -22,6 +23,7 @@ import {
   matrixRuntimeMode,
   matrixSentinel,
   matrixSummary,
+  matrixTimeline,
 } from "@/test/marketFixtures";
 
 vi.mock("@/app/GlobalMarketTicker", () => ({
@@ -95,6 +97,14 @@ function renderRoute(
     liveSummary,
   );
   queryClient.setQueryData(runtimeModeQueryKey, matrixRuntimeMode(liveSymbols));
+  queryClient.setQueryData(
+    marketTimelineQueryKey("BTCUSDT", "demo"),
+    matrixTimeline("demo", "BTCUSDT"),
+  );
+  queryClient.setQueryData(
+    marketTimelineQueryKey("ETHUSDT", "demo"),
+    matrixTimeline("demo", "ETHUSDT"),
+  );
 
   render(
     <QueryClientProvider client={queryClient}>
@@ -143,8 +153,11 @@ describe("route and header market identity", () => {
         .toBeInTheDocument(),
     );
     await waitFor(() => expectHeaderSymbol("BTCUSDT"));
-    expect(screen.getAllByText(matrixSentinel("demo", "BTCUSDT").anomaly).length)
-      .toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        matrixSentinel("demo", "BTCUSDT").timelineAnomaly,
+      ).length,
+    ).toBeGreaterThan(0);
 
     await navigate("/symbols/ETHUSDT?mode=demo");
 
@@ -153,10 +166,16 @@ describe("route and header market identity", () => {
         .toBeInTheDocument(),
     );
     await waitFor(() => expectHeaderSymbol("ETHUSDT"));
-    expect(screen.getAllByText(matrixSentinel("demo", "ETHUSDT").anomaly).length)
-      .toBeGreaterThan(0);
-    expect(screen.queryByText(matrixSentinel("demo", "BTCUSDT").anomaly))
-      .not.toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        matrixSentinel("demo", "ETHUSDT").timelineAnomaly,
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText(
+        matrixSentinel("demo", "BTCUSDT").timelineAnomaly,
+      ),
+    ).not.toBeInTheDocument();
     expect(window.localStorage.getItem(selectedSymbolStorageKey("demo")))
       .toBe("ETHUSDT");
   });

@@ -4,6 +4,8 @@ import { Link, useParams } from "react-router-dom";
 import { useCatalogDashboardSummaryQuery } from "@/features/dashboard/api";
 import { isDashboardSymbolPlaceholder } from "@/features/dashboard/marketOrder";
 import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
+import { parseSymbolId } from "@/features/dashboard/symbolId";
+import { useSymbolMarketResource } from "@/features/dashboard/symbolMarketResource";
 import { useResolvedUiMode } from "@/features/dashboard/uiMode";
 import type {
   DashboardAnomaly,
@@ -24,26 +26,32 @@ import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 export function SymbolDetailPage() {
   const selectedUiMode = useResolvedUiMode();
-  const dashboardSummaryQuery = useCatalogDashboardSummaryQuery(selectedUiMode);
-  const summary = dashboardSummaryQuery.data ?? null;
-  const availableSymbols = summary?.symbols ?? [];
-  const recentAnomalies = summary?.recent_anomalies ?? [];
+  const catalogQuery = useCatalogDashboardSummaryQuery(selectedUiMode);
+  const availableSymbols = catalogQuery.data?.symbols ?? [];
   const routeSymbol = useParams().symbol ?? "";
   const selectedSymbol = normalizeSymbol(routeSymbol);
+  const resourceState = useSymbolMarketResource({
+    mode: selectedUiMode,
+    symbol: parseSymbolId(routeSymbol),
+  });
   const selectedSummary =
-    availableSymbols.find((entry) => normalizeSymbol(entry.symbol) === selectedSymbol) ?? null;
-  const selectedAnomalies = recentAnomalies.filter(
-    (anomaly) => normalizeSymbol(anomaly.symbol) === selectedSymbol,
-  );
-  const isKnownSymbol = selectedSummary !== null;
+    resourceState.status === "success" ? resourceState.resource.summary : null;
+  const selectedAnomalies =
+    resourceState.status === "success" ? resourceState.resource.anomalies : [];
+  const isKnownSymbol = resourceState.status === "success";
+  const resolvedSymbol =
+    resourceState.status === "success" ? resourceState.resource.symbol : null;
+  const isLoading =
+    resourceState.status === "loading" ||
+    (resourceState.status === "unavailable" && catalogQuery.isLoading);
   const statusTone = toStatusTone(selectedSummary?.health?.status, "neutral");
   const symbolStatusText = formatMarketStatusLabel(selectedSummary);
 
   useEffect(() => {
-    if (isKnownSymbol && selectedSummary) {
-      storeSelectedSymbol(selectedUiMode, selectedSummary.symbol);
+    if (resolvedSymbol) {
+      storeSelectedSymbol(selectedUiMode, resolvedSymbol);
     }
-  }, [isKnownSymbol, selectedSummary, selectedUiMode]);
+  }, [resolvedSymbol, selectedUiMode]);
 
   return (
     <section className="space-y-4">
@@ -63,9 +71,9 @@ export function SymbolDetailPage() {
           </p>
         </div>
 
-        {dashboardSummaryQuery.isLoading || isKnownSymbol ? (
+        {isLoading || isKnownSymbol ? (
           <div className="mt-5 border-t border-white/10 pt-4">
-            {dashboardSummaryQuery.isLoading ? (
+            {isLoading ? (
               <LoadingSkeleton className="h-20" />
             ) : (
               <MetricStrip
@@ -81,15 +89,15 @@ export function SymbolDetailPage() {
         ) : null}
       </section>
 
-      {dashboardSummaryQuery.isError ? (
+      {resourceState.status === "error" ? (
         <ErrorPanel
-          title="Dashboard summary unavailable"
-          message="Market detail is using the existing dashboard summary in this phase. Retry once the summary endpoint is available."
-          onRetry={() => void dashboardSummaryQuery.refetch()}
+          title="Market detail unavailable"
+          message="Retry the selected market resources."
+          onRetry={() => void resourceState.refetch()}
         />
       ) : null}
 
-      {!dashboardSummaryQuery.isLoading && !isKnownSymbol ? (
+      {!isLoading && resourceState.status === "unavailable" ? (
         <SymbolNotFoundState
           selectedSymbol={selectedSymbol}
           availableSymbols={availableSymbols}
@@ -97,10 +105,10 @@ export function SymbolDetailPage() {
         />
       ) : null}
 
-      {dashboardSummaryQuery.isLoading || isKnownSymbol ? (
+      {isLoading || isKnownSymbol ? (
         <>
           <section className="sg-panel px-5 py-5">
-            {dashboardSummaryQuery.isLoading ? (
+            {isLoading ? (
               <LoadingSkeleton className="h-64" />
             ) : (
               <div className="grid gap-6 xl:grid-cols-[1fr_1.1fr]">
@@ -108,12 +116,12 @@ export function SymbolDetailPage() {
                   <PanelHeader
                     eyebrow="Signal Preview"
                     title={`${selectedSymbol} signal snapshot`}
-                    description="Summary-backed preview only."
+                    description="Selected-market resource snapshot."
                   />
                   {selectedSummary ? (
                     <dl className="mt-5 divide-y divide-white/[0.08] border-y border-white/[0.08]">
                       <InlineDataRow
-                        label="Summary status"
+                        label="Market status"
                         value={symbolStatusText}
                         valueClassName={toneTextClass(statusTone)}
                       />
@@ -131,7 +139,7 @@ export function SymbolDetailPage() {
                       />
                     </dl>
                   ) : (
-                    <FlatEmptyState message="Summary-backed preview is unavailable for this market." />
+                    <FlatEmptyState message="Market snapshot is unavailable for this market." />
                   )}
                 </div>
 
@@ -139,7 +147,7 @@ export function SymbolDetailPage() {
                   <PanelHeader
                     eyebrow="Current Market State"
                     title="Latest normalized state"
-                    description="Read-only fields derived from the existing summary response."
+                    description="Read-only fields from the selected market resource."
                   />
                   {selectedSummary?.state ? (
                     <dl className="mt-5 grid gap-x-8 border-y border-white/[0.08] md:grid-cols-2">
@@ -193,7 +201,7 @@ export function SymbolDetailPage() {
                 Latest quality events for the selected market.
               </p>
             </div>
-            {dashboardSummaryQuery.isLoading ? (
+            {isLoading ? (
               <LoadingSkeleton className="h-52" />
             ) : selectedAnomalies.length > 0 ? (
               <>

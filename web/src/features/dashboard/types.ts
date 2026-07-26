@@ -80,6 +80,31 @@ export const dashboardSummarySchema = z.object({
   recent_anomalies: z.array(anomalySchema),
 });
 
+export const marketStateSchema = z.object({
+  symbol: symbolIdSchema,
+  last_trade_price: z.string().nullable(),
+  best_bid_price: z.string().nullable(),
+  best_ask_price: z.string().nullable(),
+  spread_pct: z.number().nullable(),
+  price_change_1m_pct: z.number().nullable(),
+  trades_per_minute: z.number().nullable(),
+  last_event_time: z.string().datetime().nullable(),
+  last_event_age_ms: z.number().int().nonnegative().nullable(),
+  depth_sequence_gap_count: z.number().int().nonnegative(),
+});
+
+export const marketHealthSchema = z.object({
+  symbol: symbolIdSchema,
+  score: z.number().int().min(0).max(100),
+  status: healthStatusSchema,
+  evaluated_at: z.string().datetime(),
+  recent_anomaly_count: z.number().int().nonnegative(),
+});
+
+export const anomaliesResponseSchema = z.object({
+  anomalies: z.array(anomalySchema),
+});
+
 export const marketTimelinePointSchema = z.object({
   timestamp: z.string().datetime(),
   price: z.string(),
@@ -132,6 +157,9 @@ export type DashboardHealthSummary = z.infer<typeof dashboardHealthSummarySchema
 export type DashboardSymbolSummary = z.infer<typeof dashboardSymbolSummarySchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
 export type DashboardAnomaly = z.infer<typeof anomalySchema>;
+export type MarketState = z.infer<typeof marketStateSchema>;
+export type MarketHealth = z.infer<typeof marketHealthSchema>;
+export type AnomaliesResponse = z.infer<typeof anomaliesResponseSchema>;
 export type MarketTimelinePoint = z.infer<typeof marketTimelinePointSchema>;
 export type MarketTimeline = z.infer<typeof marketTimelineSchema>;
 export type UiMode = z.infer<typeof uiModeSchema>;

@@ -8,16 +8,25 @@ import {
 } from "./marketCatalog";
 import {
   dashboardSummaryQueryKeyForMode,
+  marketAnomaliesQueryKey,
+  marketHealthQueryKey,
+  marketStateQueryKey,
   marketTimelineQueryKey,
   runtimeModeQueryKey,
 } from "./queryKeys";
 import { parseSymbolId, requireSymbolId } from "./symbolId";
 
 import {
+  anomaliesResponseSchema,
   dashboardSummarySchema,
+  marketHealthSchema,
+  marketStateSchema,
   marketTimelineSchema,
   runtimeModeResponseSchema,
+  type AnomaliesResponse,
   type DashboardSummary,
+  type MarketHealth,
+  type MarketState,
   type MarketTimeline,
   type RuntimeModeResponse,
   type UiMode,
@@ -26,12 +35,19 @@ import {
 export {
   dashboardSummaryQueryKey,
   dashboardSummaryQueryKeyForMode,
+  marketAnomaliesQueryKey,
+  marketAnomaliesQueryKeyRoot,
+  marketHealthQueryKey,
+  marketHealthQueryKeyRoot,
+  marketStateQueryKey,
+  marketStateQueryKeyRoot,
   marketTimelineQueryKey,
   marketTimelineQueryKeyRoot,
   marketTimelineQueryKeyRootForMode,
   runtimeModeQueryKey,
 } from "./queryKeys";
 
+export const SYMBOL_ANOMALY_LIMIT = 50;
 const DASHBOARD_REFRESH_INTERVAL_MS = 5_000;
 
 function withMode(path: string, mode: UiMode): string {
@@ -47,6 +63,30 @@ export function fetchDashboardSummary(
 ): Promise<DashboardSummary> {
   return fetchJson(withMode("/dashboard/summary", mode), {
     schema: dashboardSummarySchema,
+    signal,
+  });
+}
+
+export function fetchMarketState(
+  symbol: string,
+  signal?: AbortSignal,
+): Promise<MarketState> {
+  const symbolId = requireSymbolId(symbol);
+
+  return fetchJson(`/market/${encodeURIComponent(symbolId)}/state`, {
+    schema: marketStateSchema,
+    signal,
+  });
+}
+
+export function fetchMarketHealth(
+  symbol: string,
+  signal?: AbortSignal,
+): Promise<MarketHealth> {
+  const symbolId = requireSymbolId(symbol);
+
+  return fetchJson(`/market/${encodeURIComponent(symbolId)}/health`, {
+    schema: marketHealthSchema,
     signal,
   });
 }
@@ -67,6 +107,20 @@ export function fetchMarketTimeline(
   );
 }
 
+export function fetchMarketAnomalies(
+  symbol: string,
+  limit = SYMBOL_ANOMALY_LIMIT,
+  signal?: AbortSignal,
+): Promise<AnomaliesResponse> {
+  const symbolId = requireSymbolId(symbol);
+
+  return fetchJson("/anomalies", {
+    query: { limit, symbol: symbolId },
+    schema: anomaliesResponseSchema,
+    signal,
+  });
+}
+
 export function fetchRuntimeMode(signal?: AbortSignal): Promise<RuntimeModeResponse> {
   return fetchJson("/runtime/mode", {
     schema: runtimeModeResponseSchema,
@@ -74,10 +128,11 @@ export function fetchRuntimeMode(signal?: AbortSignal): Promise<RuntimeModeRespo
   });
 }
 
-export function useDashboardSummaryQuery(mode: UiMode) {
+export function useDashboardSummaryQuery(mode: UiMode, enabled = true) {
   return useQuery({
     queryKey: dashboardSummaryQueryKeyForMode(mode),
     queryFn: ({ signal }) => fetchDashboardSummary(mode, signal),
+    enabled,
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
 }
@@ -104,13 +159,61 @@ export function useCatalogDashboardSummaryQuery(mode: UiMode) {
   };
 }
 
-export function useMarketTimelineQuery(symbol: string | null | undefined, mode: UiMode) {
+export function useMarketStateQuery(
+  symbol: string | null | undefined,
+  mode: UiMode,
+) {
+  const symbolId = parseSymbolId(symbol);
+
+  return useQuery({
+    queryKey: marketStateQueryKey(symbolId, mode),
+    queryFn: ({ signal }) => fetchMarketState(symbolId ?? "", signal),
+    enabled: mode === "live" && symbolId !== null,
+    refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
+  });
+}
+
+export function useMarketHealthQuery(
+  symbol: string | null | undefined,
+  mode: UiMode,
+) {
+  const symbolId = parseSymbolId(symbol);
+
+  return useQuery({
+    queryKey: marketHealthQueryKey(symbolId, mode),
+    queryFn: ({ signal }) => fetchMarketHealth(symbolId ?? "", signal),
+    enabled: mode === "live" && symbolId !== null,
+    refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
+  });
+}
+
+export function useMarketTimelineQuery(
+  symbol: string | null | undefined,
+  mode: UiMode,
+  enabled = true,
+) {
   const symbolId = parseSymbolId(symbol);
 
   return useQuery({
     queryKey: marketTimelineQueryKey(symbolId, mode),
     queryFn: ({ signal }) => fetchMarketTimeline(symbolId ?? "", mode, signal),
-    enabled: symbolId !== null,
+    enabled: enabled && symbolId !== null,
+    refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
+  });
+}
+
+export function useMarketAnomaliesQuery(
+  symbol: string | null | undefined,
+  mode: UiMode,
+  limit = SYMBOL_ANOMALY_LIMIT,
+) {
+  const symbolId = parseSymbolId(symbol);
+
+  return useQuery({
+    queryKey: marketAnomaliesQueryKey(symbolId, mode, limit),
+    queryFn: ({ signal }) =>
+      fetchMarketAnomalies(symbolId ?? "", limit, signal),
+    enabled: mode === "live" && symbolId !== null,
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
 }

@@ -4,122 +4,165 @@ import { parseSymbolId, type SymbolId } from "./symbolId";
 import {
   dashboardSummaryQueryKey,
   dashboardSummaryQueryKeyForMode,
+  marketAnomaliesQueryKey,
+  marketAnomaliesQueryKeyRoot,
+  marketHealthQueryKey,
+  marketHealthQueryKeyRoot,
+  marketStateQueryKey,
+  marketStateQueryKeyRoot,
   marketTimelineQueryKey,
   marketTimelineQueryKeyRoot,
   marketTimelineQueryKeyRootForMode,
   runtimeModeQueryKey,
 } from "./queryKeys";
 
-describe("centralized query-key identities", () => {
-  it("keeps Demo and Live summary identities distinct", () => {
-    expect(dashboardSummaryQueryKeyForMode("demo")).not.toEqual(
-      dashboardSummaryQueryKeyForMode("live"),
+const SYMBOL_ANOMALY_LIMIT = 50;
+const symbolOwnedFactories = [
+  ["state", (symbol: string, mode: "demo" | "live") => marketStateQueryKey(symbol, mode)],
+  ["health", (symbol: string, mode: "demo" | "live") => marketHealthQueryKey(symbol, mode)],
+  ["timeline", (symbol: string, mode: "demo" | "live") => marketTimelineQueryKey(symbol, mode)],
+  [
+    "anomalies",
+    (symbol: string, mode: "demo" | "live") =>
+      marketAnomaliesQueryKey(symbol, mode, SYMBOL_ANOMALY_LIMIT),
+  ],
+] as const;
+
+describe("symbol-owned query-key identities", () => {
+  it.each(symbolOwnedFactories)(
+    "keeps Demo and Live %s identities distinct",
+    (_family, factory) => {
+      expect(factory("BTCUSDT", "demo")).not.toEqual(
+        factory("BTCUSDT", "live"),
+      );
+    },
+  );
+
+  it.each(symbolOwnedFactories)(
+    "keeps BTC and ETH %s identities distinct",
+    (_family, factory) => {
+      expect(factory("BTCUSDT", "live")).not.toEqual(
+        factory("ETHUSDT", "live"),
+      );
+    },
+  );
+
+  it("keeps every resource family distinct", () => {
+    const keys = symbolOwnedFactories.map(([, factory]) =>
+      factory("BTCUSDT", "live"),
     );
+
+    expect(new Set(keys.map((key) => JSON.stringify(key)))).toHaveLength(4);
   });
 
-  it("keeps BTC and ETH timeline identities distinct", () => {
-    expect(marketTimelineQueryKey("BTCUSDT", "demo")).not.toEqual(
-      marketTimelineQueryKey("ETHUSDT", "demo"),
-    );
-  });
+  it.each(symbolOwnedFactories)(
+    "returns structurally equal stable serializable %s keys",
+    (_family, factory) => {
+      const first = factory("BTCUSDT", "live");
+      const second = factory("BTCUSDT", "live");
 
-  it("keeps summary identity distinct from timeline identity", () => {
-    expect(dashboardSummaryQueryKeyForMode("demo")).not.toEqual(
-      marketTimelineQueryKey("BTCUSDT", "demo"),
-    );
-  });
+      expect(first).toEqual(second);
+      expect(first).not.toBe(second);
+      expect(JSON.parse(JSON.stringify(first))).toEqual(first);
+    },
+  );
 
-  it("keeps runtime identity distinct from market-resource identities", () => {
-    expect(runtimeModeQueryKey).not.toEqual(
-      dashboardSummaryQueryKeyForMode("demo"),
-    );
-    expect(runtimeModeQueryKey).not.toEqual(
-      marketTimelineQueryKey("BTCUSDT", "demo"),
-    );
-  });
+  it.each(symbolOwnedFactories)(
+    "passes %s symbols through the canonical SymbolId boundary",
+    (_family, factory) => {
+      const canonicalSymbol = parseSymbolId(" btcusdt ");
+      const key = factory(" btcusdt ", "live");
+      const symbolIdentity: SymbolId | null = key[3];
 
-  it("returns structurally equal serializable keys for equal inputs", () => {
-    const first = marketTimelineQueryKey("BTCUSDT", "live");
-    const second = marketTimelineQueryKey("BTCUSDT", "live");
+      expect(symbolIdentity).toBe(canonicalSymbol);
+      expect(symbolIdentity).toBe("BTCUSDT");
+    },
+  );
 
-    expect(first).toEqual(second);
-    expect(first).not.toBe(second);
-    expect(JSON.parse(JSON.stringify(first))).toEqual(first);
-  });
+  it.each(symbolOwnedFactories)(
+    "normalizes case and whitespace for %s",
+    (_family, factory) => {
+      expect(factory(" eThUsDt ", "demo")).toEqual(
+        factory("ETHUSDT", "demo"),
+      );
+    },
+  );
 
-  it("passes symbol identity through the canonical SymbolId boundary", () => {
-    const canonicalSymbol = parseSymbolId(" btcusdt ");
-    const key = marketTimelineQueryKey(" btcusdt ", "live");
-    const symbolIdentity: SymbolId | null = key[3];
+  it.each(symbolOwnedFactories)(
+    "keeps absent and invalid %s symbols on a disabled identity",
+    (_family, factory) => {
+      const disabled = factory("", "live");
 
-    expect(symbolIdentity).toBe(canonicalSymbol);
-    expect(symbolIdentity).toBe("BTCUSDT");
-  });
+      for (const symbol of ["   ", "BTC-USDT", "BTC/USDT"]) {
+        expect(factory(symbol, "live")).toEqual(disabled);
+      }
+      expect(disabled[3]).toBeNull();
+      expect(disabled).not.toEqual(factory("BTCUSDT", "live"));
+    },
+  );
 
-  it("normalizes symbol case and surrounding whitespace consistently", () => {
-    expect(marketTimelineQueryKey(" btcusdt ", "demo")).toEqual(
-      marketTimelineQueryKey("BTCUSDT", "demo"),
-    );
-    expect(marketTimelineQueryKey(" eThUsDt ", "live")).toEqual(
-      marketTimelineQueryKey("ETHUSDT", "live"),
-    );
-  });
-
-  it("keeps absent and invalid symbols on the disabled identity", () => {
-    const disabledIdentity = marketTimelineQueryKey(null, "demo");
-
-    for (const symbol of [undefined, "", "   ", "BTC-USDT", "BTC/USDT"]) {
-      expect(marketTimelineQueryKey(symbol, "demo")).toEqual(disabledIdentity);
-    }
-
-    expect(disabledIdentity).toEqual(["market", "timeline", "demo", null]);
-    expect(disabledIdentity).not.toEqual(
-      marketTimelineQueryKey("BTCUSDT", "demo"),
-    );
-  });
-
-  it("excludes popup presentation state from server-resource identity", () => {
-    const presentationStates = [
-      { surface: "route", open: false },
-      { surface: "popup", open: true },
+  it("gives route and popup the same server-resource keys", () => {
+    const surfaces = [
+      { open: false, surface: "route" },
+      { open: true, surface: "popup" },
     ] as const;
-    const keys = presentationStates.map(() =>
-      marketTimelineQueryKey("BTCUSDT", "demo"),
-    );
 
-    expect(keys[0]).toEqual(keys[1]);
-    expect(keys[0]).toHaveLength(4);
-    expect(JSON.stringify(keys[0])).not.toContain("popup");
+    for (const [, factory] of symbolOwnedFactories) {
+      const keys = surfaces.map(() => factory("BTCUSDT", "live"));
+      expect(keys[0]).toEqual(keys[1]);
+      expect(JSON.stringify(keys[0])).not.toContain("popup");
+      expect(JSON.stringify(keys[0])).not.toContain("route");
+      expect(JSON.stringify(keys[0])).not.toContain("open");
+    }
   });
 
-  it("keeps summary identity mode-wide rather than symbol-owned", () => {
-    const selectedSymbols = ["BTCUSDT", "ETHUSDT"] as const;
-    const keys = selectedSymbols.map(() => dashboardSummaryQueryKeyForMode("live"));
-
-    expect(new Set(keys.map((key) => JSON.stringify(key)))).toHaveLength(1);
-    expect(keys[0]).toEqual(["dashboard", "summary", "live"]);
+  it("includes the anomaly limit because it changes returned server data", () => {
+    expect(marketAnomaliesQueryKey("BTCUSDT", "live", 25)).not.toEqual(
+      marketAnomaliesQueryKey("BTCUSDT", "live", 50),
+    );
+    expect(marketAnomaliesQueryKey("BTCUSDT", "live", 50)).toEqual([
+      "market",
+      "anomalies",
+      "live",
+      "BTCUSDT",
+      50,
+    ]);
   });
 
-  it("includes every server-data parameter in each parameterized key", () => {
-    expect(dashboardSummaryQueryKeyForMode("demo")).not.toEqual(
-      dashboardSummaryQueryKeyForMode("live"),
-    );
-    expect(marketTimelineQueryKey("BTCUSDT", "demo")).not.toEqual(
-      marketTimelineQueryKey("BTCUSDT", "live"),
-    );
-    expect(marketTimelineQueryKey("BTCUSDT", "demo")).not.toEqual(
-      marketTimelineQueryKey("ETHUSDT", "demo"),
-    );
-  });
+  it("keeps the complete Demo/Live by BTC/ETH identity matrix unique", () => {
+    for (const [, factory] of symbolOwnedFactories) {
+      const keys = [
+        factory("BTCUSDT", "demo"),
+        factory("BTCUSDT", "live"),
+        factory("ETHUSDT", "demo"),
+        factory("ETHUSDT", "live"),
+      ];
 
-  it("preserves the established root and root-for-mode shapes", () => {
+      expect(new Set(keys.map((key) => JSON.stringify(key)))).toHaveLength(4);
+    }
+  });
+});
+
+describe("existing mode-wide and runtime identities", () => {
+  it("keeps the dashboard summary mode-wide", () => {
+    expect(dashboardSummaryQueryKeyForMode("live")).toEqual([
+      "dashboard",
+      "summary",
+      "live",
+    ]);
     expect(dashboardSummaryQueryKey).toEqual(["dashboard", "summary"]);
+  });
+
+  it("preserves established roots and runtime identity", () => {
+    expect(marketStateQueryKeyRoot).toEqual(["market", "state"]);
+    expect(marketHealthQueryKeyRoot).toEqual(["market", "health"]);
     expect(marketTimelineQueryKeyRoot).toEqual(["market", "timeline"]);
     expect(marketTimelineQueryKeyRootForMode("demo")).toEqual([
       "market",
       "timeline",
       "demo",
     ]);
+    expect(marketAnomaliesQueryKeyRoot).toEqual(["market", "anomalies"]);
     expect(runtimeModeQueryKey).toEqual(["runtime", "mode"]);
   });
 });
