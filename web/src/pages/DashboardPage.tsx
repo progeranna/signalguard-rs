@@ -1350,7 +1350,10 @@ function SymbolDetailModal({
           />
         ) : (
           <SymbolPopupSuccess
-            viewModel={adaptMarketResourceToViewModel(resourceState.resource)}
+            viewModel={adaptMarketResourceToViewModel(resourceState.resource, {
+              mode: identity.mode,
+              symbol: identity.symbol,
+            })}
             onOpenSymbolDetail={onOpenSymbolDetail}
           />
         )}
@@ -1480,10 +1483,10 @@ function SymbolDetailAnomalyRow({ anomaly }: { anomaly: MarketAnomalyViewModel }
         <SeverityBadge severity={anomaly.severity.key} />
       </td>
       <td className={`px-2 py-3 pr-4 text-sm font-bold ${anomaly.valueClassName}`}>
-        {anomaly.observed}
+        {anomaly.observed.popup}
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {anomaly.threshold}
+        {anomaly.threshold.popup}
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
         {anomaly.detected}
@@ -1519,8 +1522,8 @@ function SymbolDetailAnomalyCard({
         <SeverityBadge severity={anomaly.severity.key} />
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <MobileSymbolMetric label="Observed" value={anomaly.observed} />
-        <MobileSymbolMetric label="Threshold" value={anomaly.threshold} />
+        <MobileSymbolMetric label="Observed" value={anomaly.observed.popup} />
+        <MobileSymbolMetric label="Threshold" value={anomaly.threshold.popup} />
         <MobileSymbolMetric label="Detected" value={anomaly.detected} />
         <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Severity</p>

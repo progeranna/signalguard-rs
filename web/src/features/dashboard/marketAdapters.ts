@@ -11,7 +11,12 @@ import { isDashboardSymbolPlaceholder } from "./marketOrder";
 import { parseSymbolId, type SymbolId } from "./symbolId";
 import type { SymbolMarketResourceData } from "./symbolMarketResource";
 import type { DashboardAnomaly, DashboardSymbolSummary } from "./types";
-import type { MarketAnomalyViewModel, MarketDetailIdentity, MarketDetailViewModel } from "./marketViewModel";
+import type {
+  MarketAnomalyViewModel,
+  MarketDisplayVariants,
+  MarketDetailIdentity,
+  MarketDetailViewModel,
+} from "./marketViewModel";
 
 const unavailable = "—";
 
@@ -45,7 +50,7 @@ function formatAnomalyTime(value: string | null | undefined): string {
   }).format(date);
 }
 
-function formatAnomalyValue(type: string, value: number | null, role: "observed" | "threshold"): string {
+function formatPopupAnomalyValue(type: string, value: number | null, role: "observed" | "threshold"): string {
   if (value === null || Number.isNaN(value)) return unavailable;
   switch (type) {
     case "spread_spike":
@@ -57,6 +62,22 @@ function formatAnomalyValue(type: string, value: number | null, role: "observed"
     case "depth_sequence_gap": return `${formatInteger(value)} ${role === "threshold" ? "limit" : "gap"}`;
     default: return formatNumber(value);
   }
+}
+
+function formatRouteAnomalyValue(value: number | null): string {
+  if (value === null || Number.isNaN(value)) return unavailable;
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(value);
+}
+
+function anomalyDisplayVariants(
+  type: string,
+  value: number | null,
+  role: "observed" | "threshold",
+): MarketDisplayVariants {
+  return {
+    popup: formatPopupAnomalyValue(type, value, role),
+    route: formatRouteAnomalyValue(value),
+  };
 }
 
 function formatInteger(value: number): string {
@@ -77,8 +98,8 @@ function anomalyViewModel(anomaly: DashboardAnomaly, symbol: SymbolId): MarketAn
     symbol: anomalySymbol,
     type: formatAnomalyType(anomaly.anomaly_type),
     severity: { key: anomaly.severity, text: formatStatus(anomaly.severity), tone: toStatusTone(anomaly.severity, "neutral") },
-    observed: formatAnomalyValue(anomaly.anomaly_type, anomaly.observed_value, "observed"),
-    threshold: formatAnomalyValue(anomaly.anomaly_type, anomaly.threshold_value, "threshold"),
+    observed: anomalyDisplayVariants(anomaly.anomaly_type, anomaly.observed_value, "observed"),
+    threshold: anomalyDisplayVariants(anomaly.anomaly_type, anomaly.threshold_value, "threshold"),
     detected: formatAnomalyTime(anomaly.event_time || anomaly.created_at),
     detectedAt: display(formatTimestamp(anomaly.event_time)),
     context: anomaly.message || unavailable,
@@ -128,10 +149,11 @@ export function adaptMarketResourceToViewModel(
     identity: { mode: resource.mode, symbol: resource.symbol },
     status: { text: statusText, tone: toStatusTone(health?.status, "neutral") },
     healthScore: health?.score == null ? unavailable : `${health.score}`,
+    stateAvailable: state !== null,
     metrics: {
       bestAsk: display(formatDecimalString(state?.best_ask_price)),
       bestBid: display(formatDecimalString(state?.best_bid_price)),
-      depthGaps: formatCount(state?.depth_sequence_gap_count ?? 0),
+      depthGaps: state ? formatCount(state.depth_sequence_gap_count) : unavailable,
       freshness: display(formatAgeMs(state?.last_event_age_ms)),
       lastPrice: display(formatDecimalString(state?.last_trade_price)),
       lastEvent: display(formatTimestamp(state?.last_event_time)),

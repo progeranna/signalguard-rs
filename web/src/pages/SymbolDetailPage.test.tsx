@@ -29,11 +29,16 @@ describe("symbol detail route resource ownership", () => {
     expect(popupSuccess).not.toContain("formatAnomalyValue");
     expect(popupSuccess).toContain("metrics");
     expect(popupSuccess).toContain("anomalies");
+    expect(source).toContain("symbol: canonicalRouteSymbol ?? resourceState.resource.symbol");
+    expect(dashboardSource).toContain("symbol: identity.symbol");
+    expect(source).toContain("marketViewModel.stateAvailable");
+    expect(source).toContain("anomaly.observed.route");
+    expect(dashboardSource).toContain("anomaly.observed.popup");
   });
 
   it("uses the shared canonical symbol-market resource hook", () => {
     expect(source).toContain("useSymbolMarketResource");
-    expect(source).toContain("symbol: parseSymbolId(routeSymbol)");
+    expect(source).toContain("const canonicalRouteSymbol = parseSymbolId(routeSymbol)");
   });
 
   it("keeps dashboard summary usage limited to catalog choices", () => {

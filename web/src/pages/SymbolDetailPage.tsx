@@ -20,13 +20,17 @@ export function SymbolDetailPage() {
   const availableSymbols = catalogQuery.data?.symbols ?? [];
   const routeSymbol = useParams().symbol ?? "";
   const selectedSymbol = normalizeSymbol(routeSymbol);
+  const canonicalRouteSymbol = parseSymbolId(routeSymbol);
   const resourceState = useSymbolMarketResource({
     mode: selectedUiMode,
-    symbol: parseSymbolId(routeSymbol),
+    symbol: canonicalRouteSymbol,
   });
   const marketViewModel =
     resourceState.status === "success"
-      ? adaptMarketResourceToViewModel(resourceState.resource)
+      ? adaptMarketResourceToViewModel(resourceState.resource, {
+          mode: selectedUiMode,
+          symbol: canonicalRouteSymbol ?? resourceState.resource.symbol,
+        })
       : null;
   const isKnownSymbol = marketViewModel !== null;
   const resolvedSymbol =
@@ -135,7 +139,7 @@ export function SymbolDetailPage() {
                     title="Latest normalized state"
                     description="Read-only fields from the selected market resource."
                   />
-                  {marketViewModel ? (
+                  {marketViewModel && marketViewModel.stateAvailable ? (
                     <dl className="mt-5 grid gap-x-8 border-y border-white/[0.08] md:grid-cols-2">
                       <InlineDataRow
                         label="Last trade price"
@@ -370,10 +374,10 @@ function AnomalyTableRow({ anomaly }: { anomaly: MarketAnomalyViewModel }) {
         />
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {anomaly.observed}
+        {anomaly.observed.route}
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {anomaly.threshold}
+        {anomaly.threshold.route}
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
         {anomaly.detectedAt}
@@ -403,8 +407,8 @@ function AnomalyMobileRow({ anomaly }: { anomaly: MarketAnomalyViewModel }) {
         />
       </div>
       <div className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        <InlineMobileValue label="Observed" value={anomaly.observed} />
-        <InlineMobileValue label="Threshold" value={anomaly.threshold} />
+        <InlineMobileValue label="Observed" value={anomaly.observed.route} />
+        <InlineMobileValue label="Threshold" value={anomaly.threshold.route} />
       </div>
       <p className="mt-3 text-sm leading-6 text-slate-400">{anomaly.context}</p>
     </article>
