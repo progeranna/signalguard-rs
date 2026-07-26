@@ -6,6 +6,11 @@ import {
   buildMarketCatalog,
   marketCatalogDashboardSymbols,
 } from "./marketCatalog";
+import {
+  dashboardSummaryQueryKeyForMode,
+  marketTimelineQueryKey,
+  runtimeModeQueryKey,
+} from "./queryKeys";
 import { parseSymbolId, requireSymbolId } from "./symbolId";
 
 import {
@@ -18,9 +23,15 @@ import {
   type UiMode,
 } from "./types";
 
-export const dashboardSummaryQueryKey = ["dashboard", "summary"] as const;
-export const marketTimelineQueryKeyRoot = ["market", "timeline"] as const;
-export const runtimeModeQueryKey = ["runtime", "mode"] as const;
+export {
+  dashboardSummaryQueryKey,
+  dashboardSummaryQueryKeyForMode,
+  marketTimelineQueryKey,
+  marketTimelineQueryKeyRoot,
+  marketTimelineQueryKeyRootForMode,
+  runtimeModeQueryKey,
+} from "./queryKeys";
+
 const DASHBOARD_REFRESH_INTERVAL_MS = 5_000;
 
 function withMode(path: string, mode: UiMode): string {
@@ -38,24 +49,6 @@ export function fetchDashboardSummary(
     schema: dashboardSummarySchema,
     signal,
   });
-}
-
-export function dashboardSummaryQueryKeyForMode(mode: UiMode) {
-  return [...dashboardSummaryQueryKey, mode] as const;
-}
-
-export function marketTimelineQueryKeyRootForMode(mode: UiMode) {
-  return [...marketTimelineQueryKeyRoot, mode] as const;
-}
-
-export function marketTimelineQueryKey(
-  symbol: string | null | undefined,
-  mode: UiMode,
-) {
-  return [
-    ...marketTimelineQueryKeyRootForMode(mode),
-    parseSymbolId(symbol),
-  ] as const;
 }
 
 export function fetchMarketTimeline(
