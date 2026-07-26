@@ -2,27 +2,23 @@ import { useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useCatalogDashboardSummaryQuery } from "@/features/dashboard/api";
-import { isDashboardSymbolPlaceholder } from "@/features/dashboard/marketOrder";
+import { adaptMarketDetailResource } from "@/features/dashboard/marketAdapters";
+import type {
+  MarketAnomalyViewModel,
+  MarketDetailViewModel,
+} from "@/features/dashboard/marketViewModel";
 import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
 import { parseSymbolId } from "@/features/dashboard/symbolId";
 import { useSymbolMarketResource } from "@/features/dashboard/symbolMarketResource";
-import { useResolvedUiMode } from "@/features/dashboard/uiMode";
 import type {
-  DashboardAnomaly,
   DashboardSymbolSummary,
   UiMode,
 } from "@/features/dashboard/types";
+import { useResolvedUiMode } from "@/features/dashboard/uiMode";
 import { ErrorPanel } from "@/shared/components/ErrorPanel";
 import { LoadingSkeleton } from "@/shared/components/LoadingSkeleton";
 import { StatusBadge } from "@/shared/components/StatusBadge";
-import {
-  formatAgeMs,
-  formatCompactNumber,
-  formatDecimalString,
-  formatPercent,
-  formatTimestamp,
-} from "@/shared/lib/format";
-import { toStatusTone, type StatusTone } from "@/shared/lib/status";
+import type { StatusTone } from "@/shared/lib/status";
 
 export function SymbolDetailPage() {
   const selectedUiMode = useResolvedUiMode();
@@ -30,22 +26,25 @@ export function SymbolDetailPage() {
   const availableSymbols = catalogQuery.data?.symbols ?? [];
   const routeSymbol = useParams().symbol ?? "";
   const selectedSymbol = normalizeSymbol(routeSymbol);
+  const parsedRouteSymbol = parseSymbolId(routeSymbol);
   const resourceState = useSymbolMarketResource({
     mode: selectedUiMode,
-    symbol: parseSymbolId(routeSymbol),
+    symbol: parsedRouteSymbol,
   });
-  const selectedSummary =
-    resourceState.status === "success" ? resourceState.resource.summary : null;
-  const selectedAnomalies =
-    resourceState.status === "success" ? resourceState.resource.anomalies : [];
-  const isKnownSymbol = resourceState.status === "success";
-  const resolvedSymbol =
-    resourceState.status === "success" ? resourceState.resource.symbol : null;
+  const viewModel =
+    resourceState.status === "success" && parsedRouteSymbol
+      ? adaptMarketDetailResource(
+          { mode: selectedUiMode, symbol: parsedRouteSymbol },
+          resourceState.resource,
+        )
+      : null;
+  const isKnownSymbol = viewModel !== null;
+  const resolvedSymbol = viewModel?.identity.symbol ?? null;
   const isLoading =
     resourceState.status === "loading" ||
     (resourceState.status === "unavailable" && catalogQuery.isLoading);
-  const statusTone = toStatusTone(selectedSummary?.health?.status, "neutral");
-  const symbolStatusText = formatMarketStatusLabel(selectedSummary);
+  const statusTone = viewModel?.status.tone ?? "neutral";
+  const symbolStatusText = viewModel?.status.text ?? "No data yet";
 
   useEffect(() => {
     if (resolvedSymbol) {
@@ -75,16 +74,9 @@ export function SymbolDetailPage() {
           <div className="mt-5 border-t border-white/10 pt-4">
             {isLoading ? (
               <LoadingSkeleton className="h-20" />
-            ) : (
-              <MetricStrip
-                healthScore={selectedSummary?.health?.score ?? null}
-                freshness={selectedSummary?.state?.last_event_age_ms ?? null}
-                lastPrice={selectedSummary?.state?.last_trade_price ?? null}
-                spread={selectedSummary?.state?.spread_pct ?? null}
-                statusTone={statusTone}
-                tradesPerMinute={selectedSummary?.state?.trades_per_minute ?? null}
-              />
-            )}
+            ) : viewModel ? (
+              <MetricStrip viewModel={viewModel} />
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -110,7 +102,7 @@ export function SymbolDetailPage() {
           <section className="sg-panel px-5 py-5">
             {isLoading ? (
               <LoadingSkeleton className="h-64" />
-            ) : (
+            ) : viewModel ? (
               <div className="grid gap-6 xl:grid-cols-[1fr_1.1fr]">
                 <div>
                   <PanelHeader
@@ -118,29 +110,25 @@ export function SymbolDetailPage() {
                     title={`${selectedSymbol} signal snapshot`}
                     description="Selected-market resource snapshot."
                   />
-                  {selectedSummary ? (
-                    <dl className="mt-5 divide-y divide-white/[0.08] border-y border-white/[0.08]">
-                      <InlineDataRow
-                        label="Market status"
-                        value={symbolStatusText}
-                        valueClassName={toneTextClass(statusTone)}
-                      />
-                      <InlineDataRow
-                        label="Recent anomalies"
-                        value={formatCount(selectedAnomalies.length)}
-                      />
-                      <InlineDataRow
-                        label="Price move (1m)"
-                        value={formatDisplayPercent(selectedSummary.state?.price_change_1m_pct)}
-                      />
-                      <InlineDataRow
-                        label="Depth sequence gaps"
-                        value={formatCount(selectedSummary.state?.depth_sequence_gap_count ?? 0)}
-                      />
-                    </dl>
-                  ) : (
-                    <FlatEmptyState message="Market snapshot is unavailable for this market." />
-                  )}
+                  <dl className="mt-5 divide-y divide-white/[0.08] border-y border-white/[0.08]">
+                    <InlineDataRow
+                      label="Market status"
+                      value={viewModel.status.text}
+                      valueClassName={toneTextClass(viewModel.status.tone)}
+                    />
+                    <InlineDataRow
+                      label="Recent anomalies"
+                      value={viewModel.metrics.anomalyCount.route}
+                    />
+                    <InlineDataRow
+                      label="Price move (1m)"
+                      value={viewModel.metrics.priceMoveOneMinute}
+                    />
+                    <InlineDataRow
+                      label="Depth sequence gaps"
+                      value={viewModel.metrics.depthSequenceGaps}
+                    />
+                  </dl>
                 </div>
 
                 <div>
@@ -149,39 +137,39 @@ export function SymbolDetailPage() {
                     title="Latest normalized state"
                     description="Read-only fields from the selected market resource."
                   />
-                  {selectedSummary?.state ? (
+                  {viewModel.hasState ? (
                     <dl className="mt-5 grid gap-x-8 border-y border-white/[0.08] md:grid-cols-2">
                       <InlineDataRow
                         label="Last trade price"
-                        value={formatDisplayValue(selectedSummary.state.last_trade_price)}
+                        value={viewModel.metrics.lastPrice}
                       />
                       <InlineDataRow
                         label="Best bid"
-                        value={formatDisplayValue(selectedSummary.state.best_bid_price)}
+                        value={viewModel.metrics.bestBid}
                       />
                       <InlineDataRow
                         label="Best ask"
-                        value={formatDisplayValue(selectedSummary.state.best_ask_price)}
+                        value={viewModel.metrics.bestAsk}
                       />
                       <InlineDataRow
                         label="Spread"
-                        value={formatDisplayPercent(selectedSummary.state.spread_pct)}
+                        value={viewModel.metrics.spread}
                       />
                       <InlineDataRow
                         label="Trades/min"
-                        value={formatDisplayCompact(selectedSummary.state.trades_per_minute)}
+                        value={viewModel.metrics.tradesPerMinute}
                       />
                       <InlineDataRow
                         label="Last event"
-                        value={formatDisplayTimestamp(selectedSummary.state.last_event_time)}
+                        value={viewModel.metrics.lastEvent}
                       />
                       <InlineDataRow
                         label="Freshness"
-                        value={formatDisplayAge(selectedSummary.state.last_event_age_ms)}
+                        value={viewModel.metrics.freshness.route}
                       />
                       <InlineDataRow
                         label="Depth gap count"
-                        value={formatCount(selectedSummary.state.depth_sequence_gap_count)}
+                        value={viewModel.metrics.depthSequenceGaps}
                       />
                     </dl>
                   ) : (
@@ -189,6 +177,8 @@ export function SymbolDetailPage() {
                   )}
                 </div>
               </div>
+            ) : (
+              <FlatEmptyState message="Market snapshot is unavailable for this market." />
             )}
           </section>
 
@@ -203,7 +193,7 @@ export function SymbolDetailPage() {
             </div>
             {isLoading ? (
               <LoadingSkeleton className="h-52" />
-            ) : selectedAnomalies.length > 0 ? (
+            ) : viewModel?.hasAnomalies ? (
               <>
                 <div className="hidden overflow-hidden border-y border-white/10 lg:block">
                   <table className="w-full border-collapse text-left">
@@ -218,14 +208,14 @@ export function SymbolDetailPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedAnomalies.map((anomaly) => (
+                      {viewModel.anomalies.map((anomaly) => (
                         <AnomalyTableRow key={anomaly.id} anomaly={anomaly} />
                       ))}
                     </tbody>
                   </table>
                 </div>
                 <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
-                  {selectedAnomalies.map((anomaly) => (
+                  {viewModel.anomalies.map((anomaly) => (
                     <AnomalyMobileRow key={anomaly.id} anomaly={anomaly} />
                   ))}
                 </div>
@@ -278,32 +268,24 @@ function SymbolNotFoundState({
   );
 }
 
-function MetricStrip({
-  healthScore,
-  freshness,
-  lastPrice,
-  spread,
-  statusTone,
-  tradesPerMinute,
-}: {
-  healthScore: number | null;
-  freshness: number | null;
-  lastPrice: string | null;
-  spread: number | null;
-  statusTone: StatusTone;
-  tradesPerMinute: number | null;
-}) {
+function MetricStrip({ viewModel }: { viewModel: MarketDetailViewModel }) {
   return (
     <div className="grid gap-y-4 divide-y divide-white/10 md:grid-cols-5 md:divide-x md:divide-y-0">
       <MetricStripItem
         label="Health"
-        value={healthScore === null ? "—" : `${healthScore}`}
-        valueClassName={toneTextClass(statusTone)}
+        value={viewModel.metrics.healthScore}
+        valueClassName={toneTextClass(viewModel.status.tone)}
       />
-      <MetricStripItem label="Last price" value={formatDisplayValue(lastPrice)} />
-      <MetricStripItem label="Spread" value={formatDisplayPercent(spread)} />
-      <MetricStripItem label="Trades/min" value={formatDisplayCompact(tradesPerMinute)} />
-      <MetricStripItem label="Freshness" value={formatDisplayAge(freshness)} />
+      <MetricStripItem label="Last price" value={viewModel.metrics.lastPrice} />
+      <MetricStripItem label="Spread" value={viewModel.metrics.spread} />
+      <MetricStripItem
+        label="Trades/min"
+        value={viewModel.metrics.tradesPerMinute}
+      />
+      <MetricStripItem
+        label="Freshness"
+        value={viewModel.metrics.freshness.route}
+      />
     </div>
   );
 }
@@ -362,10 +344,10 @@ function InlineDataRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-6 py-3">
-      <dt className="text-sm text-slate-400">
-        {label}
-      </dt>
-      <dd className={`text-right text-sm font-semibold ${valueClassName}`}>{value}</dd>
+      <dt className="text-sm text-slate-400">{label}</dt>
+      <dd className={`text-right text-sm font-semibold ${valueClassName}`}>
+        {value}
+      </dd>
     </div>
   );
 }
@@ -378,56 +360,50 @@ function FlatEmptyState({ message }: { message: string }) {
   );
 }
 
-function AnomalyTableRow({ anomaly }: { anomaly: DashboardAnomaly }) {
+function AnomalyTableRow({ anomaly }: { anomaly: MarketAnomalyViewModel }) {
   return (
     <tr className="border-b border-white/[0.06] transition hover:bg-white/[0.025] last:border-0">
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-100">
-        {formatAnomalyType(anomaly.anomaly_type)}
+        {anomaly.type}
       </td>
       <td className="px-2 py-3 pr-4">
-        <StatusBadge
-          status={toStatusTone(anomaly.severity, "neutral")}
-          text={formatStatusLabel(anomaly.severity)}
-        />
+        <StatusBadge status={anomaly.severityTone} text={anomaly.severityText} />
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {formatObservation(anomaly.observed_value)}
+        {anomaly.observed.route}
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {formatObservation(anomaly.threshold_value)}
+        {anomaly.threshold.route}
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {formatDisplayTimestamp(anomaly.event_time)}
+        {anomaly.detectedAt.route}
       </td>
       <td className="px-2 py-3 text-sm text-slate-400">
-        {anomaly.message}
+        {anomaly.message.route}
       </td>
     </tr>
   );
 }
 
-function AnomalyMobileRow({ anomaly }: { anomaly: DashboardAnomaly }) {
+function AnomalyMobileRow({ anomaly }: { anomaly: MarketAnomalyViewModel }) {
   return (
     <article className="py-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-white">
-            {formatAnomalyType(anomaly.anomaly_type)}
-          </p>
+          <p className="text-sm font-semibold text-white">{anomaly.type}</p>
           <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">
-            {formatDisplayTimestamp(anomaly.event_time)}
+            {anomaly.detectedAt.route}
           </p>
         </div>
-        <StatusBadge
-          status={toStatusTone(anomaly.severity, "neutral")}
-          text={formatStatusLabel(anomaly.severity)}
-        />
+        <StatusBadge status={anomaly.severityTone} text={anomaly.severityText} />
       </div>
       <div className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        <InlineMobileValue label="Observed" value={formatObservation(anomaly.observed_value)} />
-        <InlineMobileValue label="Threshold" value={formatObservation(anomaly.threshold_value)} />
+        <InlineMobileValue label="Observed" value={anomaly.observed.route} />
+        <InlineMobileValue label="Threshold" value={anomaly.threshold.route} />
       </div>
-      <p className="mt-3 text-sm leading-6 text-slate-400">{anomaly.message}</p>
+      <p className="mt-3 text-sm leading-6 text-slate-400">
+        {anomaly.message.route}
+      </p>
     </article>
   );
 }
@@ -462,73 +438,5 @@ function toneTextClass(tone: StatusTone): string {
 
 function normalizeSymbol(value: string | undefined): string {
   const normalized = value?.trim().toUpperCase();
-
   return normalized ? normalized : "UNKNOWN";
-}
-
-function formatStatusLabel(value: string | null | undefined): string {
-  if (!value) {
-    return "Unknown";
-  }
-
-  return value
-    .split("_")
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
-}
-
-function formatMarketStatusLabel(
-  symbol: DashboardSymbolSummary | null,
-): string {
-  if (!symbol || isDashboardSymbolPlaceholder(symbol)) {
-    return "No data yet";
-  }
-
-  return formatStatusLabel(symbol.health?.status);
-}
-
-function formatDisplayValue(value: string | null | undefined): string {
-  const formatted = formatDecimalString(value);
-  return formatted === "n/a" ? "—" : formatted;
-}
-
-function formatDisplayPercent(value: number | null | undefined): string {
-  const formatted = formatPercent(value);
-  return formatted === "n/a" ? "—" : formatted;
-}
-
-function formatDisplayCompact(value: number | null | undefined): string {
-  const formatted = formatCompactNumber(value);
-  return formatted === "n/a" ? "—" : formatted;
-}
-
-function formatDisplayAge(value: number | null | undefined): string {
-  const formatted = formatAgeMs(value);
-  return formatted === "n/a" ? "—" : formatted;
-}
-
-function formatDisplayTimestamp(value: string | null | undefined): string {
-  const formatted = formatTimestamp(value);
-  return formatted === "n/a" ? "—" : formatted;
-}
-
-function formatCount(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
-function formatObservation(value: number | null): string {
-  if (value === null || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 4,
-  }).format(value);
-}
-
-function formatAnomalyType(value: string): string {
-  return value
-    .split("_")
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
 }
