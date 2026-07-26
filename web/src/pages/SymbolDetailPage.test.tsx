@@ -9,6 +9,28 @@ const source = readFileSync(
 );
 
 describe("symbol detail route resource ownership", () => {
+  const dashboardSource = readFileSync(
+    path.join(process.cwd(), "src/pages/DashboardPage.tsx"),
+    "utf8",
+  );
+
+  it("uses the shared view-model contract with the popup success renderer", () => {
+    expect(source).toContain("adaptMarketResourceToViewModel");
+    expect(dashboardSource).toContain("adaptMarketResourceToViewModel");
+    expect(source).toContain("MarketDetailViewModel");
+    expect(dashboardSource).toContain("MarketDetailViewModel");
+    expect(source).not.toContain("formatDecimalString");
+    expect(source).not.toContain("formatAnomalyValue");
+    const popupSuccess = dashboardSource.slice(
+      dashboardSource.indexOf("function SymbolPopupSuccess"),
+      dashboardSource.indexOf("function SymbolDetailMetric"),
+    );
+    expect(popupSuccess).not.toContain("formatTickerPrice");
+    expect(popupSuccess).not.toContain("formatAnomalyValue");
+    expect(popupSuccess).toContain("metrics");
+    expect(popupSuccess).toContain("anomalies");
+  });
+
   it("uses the shared canonical symbol-market resource hook", () => {
     expect(source).toContain("useSymbolMarketResource");
     expect(source).toContain("symbol: parseSymbolId(routeSymbol)");
