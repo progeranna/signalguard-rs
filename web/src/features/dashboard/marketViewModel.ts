@@ -1,6 +1,7 @@
+import type { StatusTone } from "@/shared/lib/status";
+
 import type { SymbolId } from "./symbolId";
 import type { DashboardAnomaly, UiMode } from "./types";
-import type { StatusTone } from "@/shared/lib/status";
 
 export type MarketDisplayVariants = Readonly<{
   popup: string;
@@ -37,6 +38,7 @@ export type MarketDetailMetricsViewModel = Readonly<{
 export type MarketDetailViewModel = Readonly<{
   anomalies: readonly MarketAnomalyViewModel[];
   hasAnomalies: boolean;
+  hasState: boolean;
   identity: Readonly<{
     mode: UiMode;
     symbol: SymbolId;
