@@ -841,7 +841,9 @@ mod tests {
         });
         let cache = RedisCache::connect(&redis_url)
             .await
-            .unwrap_or_else(|error| panic!("failed to connect to Redis integration cache: {error}"));
+            .unwrap_or_else(|error| {
+                panic!("failed to connect to Redis integration cache: {error}")
+            });
 
         (cache, redis_url)
     }
