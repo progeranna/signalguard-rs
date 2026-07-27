@@ -1,4 +1,4 @@
-use signalguard_rs::api::contract::{ARTIFACT_PATH, render};
+use signalguard_rs::api::contract::{ARTIFACT_PATH, artifact_matches, render};
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 fn main() -> ExitCode {
@@ -14,7 +14,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "--check" => match fs::read(&path) {
-            Ok(existing) if existing == generated => ExitCode::SUCCESS,
+            Ok(existing) if artifact_matches(&existing) => ExitCode::SUCCESS,
             Ok(_) => {
                 eprintln!(
                     "{} is stale; run cargo run --quiet --bin export-api-contract -- --write",

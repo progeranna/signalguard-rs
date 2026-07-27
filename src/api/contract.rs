@@ -1,4 +1,14 @@
+use std::collections::BTreeMap;
+
+use schemars::{JsonSchema, schema_for};
 use serde_json::{Map, Value, json};
+
+use super::dto::{
+    AnomaliesResponse, AnomalyResponse, DashboardHealthSummary, DashboardStateSummary,
+    DashboardSummaryResponse, DashboardSymbolSummary, HealthResponse, MarketHealthResponse,
+    MarketStateResponse, MarketTimelinePointResponse, MarketTimelineResponse,
+    PipelineHealthResponse, RuntimeModeResponse, RuntimeModeSwitchRequest, SymbolsResponse,
+};
 
 pub const HEALTH: &str = "/health";
 pub const RUNTIME_MODE: &str = "/runtime/mode";
@@ -10,374 +20,337 @@ pub const MARKET_STATE: &str = "/market/{symbol}/state";
 pub const MARKET_HEALTH: &str = "/market/{symbol}/health";
 pub const MARKET_TIMELINE: &str = "/market/{symbol}/timeline";
 pub const ANOMALIES: &str = "/anomalies";
-
 pub const ARTIFACT_PATH: &str = "contracts/web-console.openapi.json";
 
-fn schema(ty: &str) -> Value {
-    json!({"type": ty})
-}
-fn string() -> Value {
-    schema("string")
-}
-fn nullable(mut value: Value) -> Value {
-    value["nullable"] = json!(true);
-    value
-}
-fn array(items: Value) -> Value {
-    json!({"type":"array","items":items})
-}
-fn object(properties: Map<String, Value>, required: &[&str]) -> Value {
-    let mut value = json!({"type":"object","properties":properties});
-    if !required.is_empty() {
-        value["required"] = json!(required);
+fn generated<T: JsonSchema>() -> (Value, BTreeMap<String, Value>) {
+    let mut root = serde_json::to_value(schema_for!(T)).expect("schema is serializable");
+    let definitions = root
+        .as_object_mut()
+        .and_then(|object| object.remove("definitions"))
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    let mut definitions = definitions.into_iter().collect::<BTreeMap<_, _>>();
+    normalize_refs(&mut root);
+    for schema in definitions.values_mut() {
+        normalize_refs(schema);
     }
-    value["additionalProperties"] = json!(true);
-    value
+    if let Some(object) = root.as_object_mut() {
+        object.remove("$schema");
+    }
+    (root, definitions)
 }
-fn props(items: &[(&str, Value)]) -> Map<String, Value> {
-    items
-        .iter()
-        .map(|(name, value)| ((*name).to_owned(), value.clone()))
-        .collect()
+
+fn normalize_refs(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(any_of) = object.remove("anyOf") {
+                if let Some(items) = any_of.as_array() {
+                    if items.len() == 2 && items.iter().any(|item| item == &json!({"type":"null"}))
+                    {
+                        if let Some(reference) =
+                            items.iter().find(|item| item.get("$ref").is_some())
+                        {
+                            object.insert("allOf".into(), json!([reference]));
+                            object.insert("nullable".into(), json!(true));
+                        } else {
+                            object.insert("anyOf".into(), any_of);
+                        }
+                    } else {
+                        object.insert("anyOf".into(), any_of);
+                    }
+                } else {
+                    object.insert("anyOf".into(), any_of);
+                }
+            }
+            if let Some(Value::Array(types)) = object.get_mut("type")
+                && types.len() == 2
+                && types.iter().any(|item| item == "null")
+                && let Some(non_null) = types.iter().find(|item| *item != "null").cloned()
+            {
+                object.insert("type".into(), non_null);
+                object.insert("nullable".into(), json!(true));
+            }
+            object.values_mut().for_each(normalize_refs)
+        }
+        Value::Array(array) => array.iter_mut().for_each(normalize_refs),
+        Value::String(string) => {
+            if let Some(name) = string.strip_prefix("#/definitions/") {
+                *string = format!("#/components/schemas/{name}");
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
 }
+
+fn add_schema(
+    schemas: &mut BTreeMap<String, Value>,
+    name: &str,
+    generated_schema: (Value, BTreeMap<String, Value>),
+) {
+    let (root, definitions) = generated_schema;
+    for (definition_name, definition) in definitions {
+        schemas.entry(definition_name).or_insert(definition);
+    }
+    schemas.insert(name.to_owned(), root);
+}
+
 fn ref_schema(name: &str) -> Value {
     json!({"$ref": format!("#/components/schemas/{name}")})
 }
+
 fn response(name: &str) -> Value {
-    json!({"description":"OK","content":{"application/json":{"schema":{"$ref":format!("#/components/schemas/{name}")}}}})
+    json!({"description":"OK","content":{"application/json":{"schema":ref_schema(name)}}})
 }
+
+fn error_response() -> Value {
+    json!({"description":"API error","content":{"application/json":{"schema":ref_schema("ApiErrorResponse")}}})
+}
+
 fn query(name: &str, schema: Value) -> Value {
     json!({"name":name,"in":"query","required":false,"schema":schema})
 }
+
 fn path_param() -> Value {
     json!({"name":"symbol","in":"path","required":true,"schema":{"type":"string","pattern":"^[A-Za-z0-9]+$"}})
 }
 
+fn required_nullable(schemas: &mut BTreeMap<String, Value>, schema_name: &str, fields: &[&str]) {
+    let schema = schemas
+        .get_mut(schema_name)
+        .expect("generated schema exists");
+    {
+        let required = schema["required"]
+            .as_array_mut()
+            .expect("required properties");
+        for field in fields {
+            if !required.iter().any(|value| value == field) {
+                required.push(json!(field));
+            }
+        }
+    }
+    let properties = schema["properties"]
+        .as_object_mut()
+        .expect("object properties");
+    for field in fields {
+        let property = properties
+            .get_mut(*field)
+            .expect("generated property exists");
+        if property.get("$ref").is_some() {
+            let reference = property.take();
+            *property = json!({"allOf":[reference],"nullable":true});
+        } else {
+            property["nullable"] = json!(true);
+        }
+    }
+}
+
+fn operation(
+    method: &str,
+    parameters: Vec<Value>,
+    success: &str,
+    errors: &[(&str, &str)],
+) -> Value {
+    let mut value = Map::new();
+    value.insert("operationId".into(), Value::String(method.into()));
+    if !parameters.is_empty() {
+        value.insert("parameters".into(), Value::Array(parameters));
+    }
+    let mut responses = Map::new();
+    responses.insert("200".into(), response(success));
+    for (status, _) in errors {
+        responses.insert((*status).into(), error_response());
+    }
+    value.insert("responses".into(), Value::Object(responses));
+    Value::Object(value)
+}
+
 pub fn document() -> Value {
-    let decimal = json!({"type":"string","description":"rust_decimal JSON serialization"});
-    let date_time = json!({"type":"string","format":"date-time"});
-    let nullable_decimal = nullable(decimal.clone());
-    let nullable_number = nullable(schema("number"));
-    let nullable_date_time = nullable(date_time.clone());
-    let health_status = json!({"type":"string","enum":["healthy","degraded","unhealthy"]});
-    let severity = json!({"type":"string","enum":["info","warning","critical"]});
-    let mut schemas = Map::new();
-    schemas.insert(
-        "HealthResponse".into(),
-        object(
-            props(&[
-                ("status", json!({"type":"string","enum":["ok"]})),
-                (
-                    "service",
-                    json!({"type":"string","enum":["signalguard-rs"]}),
-                ),
-            ]),
-            &["status", "service"],
-        ),
+    let mut schemas = BTreeMap::new();
+    add_schema(
+        &mut schemas,
+        "HealthResponse",
+        generated::<HealthResponse>(),
     );
-    schemas.insert(
-        "SymbolsResponse".into(),
-        object(props(&[("symbols", array(string()))]), &["symbols"]),
+    add_schema(
+        &mut schemas,
+        "SymbolsResponse",
+        generated::<SymbolsResponse>(),
     );
-    schemas.insert("RuntimeModeResponse".into(), object(props(&[("mode",json!({"type":"string","enum":["replay","live"]})),("mode_label",string()),("status",json!({"type":"string","enum":["starting","running","switching","failed","stopped","completed"]})),("symbols",array(string())),("switching_supported",schema("boolean")),("source",json!({"type":"string","enum":["config","runtime"]})),("last_started_at",date_time.clone()),("last_switched_at",nullable_date_time.clone()),("last_error",nullable(string()))]), &["mode","mode_label","status","symbols","switching_supported","source","last_started_at","last_switched_at","last_error"]));
-    schemas.insert(
-        "RuntimeModeSwitchRequest".into(),
-        object(
-            props(&[
-                ("mode", json!({"type":"string","enum":["replay","live"]})),
-                ("symbols", array(string())),
-                ("reset_state", schema("boolean")),
-                ("reset_storage", schema("boolean")),
-            ]),
-            &["mode"],
-        ),
+    add_schema(
+        &mut schemas,
+        "RuntimeModeResponse",
+        generated::<RuntimeModeResponse>(),
     );
-    schemas.insert(
-        "PipelineHealthResponse".into(),
-        object(
-            props(&[
-                (
-                    "status",
-                    json!({"type":"string","enum":["healthy","degraded","unhealthy"]}),
-                ),
-                ("last_message_age_ms", nullable(schema("integer"))),
-                ("parse_errors", schema("integer")),
-                ("reconnect_attempts", schema("integer")),
-                ("storage_errors", schema("integer")),
-                ("cache_errors", schema("integer")),
-            ]),
-            &[
-                "status",
-                "last_message_age_ms",
-                "parse_errors",
-                "reconnect_attempts",
-                "storage_errors",
-                "cache_errors",
-            ],
-        ),
+    add_schema(
+        &mut schemas,
+        "RuntimeModeSwitchRequest",
+        generated::<RuntimeModeSwitchRequest>(),
     );
-    schemas.insert(
-        "AnomalyResponse".into(),
-        object(
-            props(&[
-                ("id", json!({"type":"string","format":"uuid"})),
-                ("symbol", string()),
-                ("anomaly_type", string()),
-                ("severity", severity.clone()),
-                ("message", string()),
-                ("observed_value", nullable_number.clone()),
-                ("threshold_value", nullable_number.clone()),
-                ("event_time", date_time.clone()),
-                ("created_at", date_time.clone()),
-            ]),
-            &[
-                "id",
-                "symbol",
-                "anomaly_type",
-                "severity",
-                "message",
-                "observed_value",
-                "threshold_value",
-                "event_time",
-                "created_at",
-            ],
-        ),
+    add_schema(
+        &mut schemas,
+        "PipelineHealthResponse",
+        generated::<PipelineHealthResponse>(),
     );
-    let state_props = [
-        ("last_trade_price", nullable_decimal.clone()),
-        ("best_bid_price", nullable_decimal.clone()),
-        ("best_ask_price", nullable_decimal.clone()),
-        ("spread_pct", nullable_number.clone()),
-        ("price_change_1m_pct", nullable_number.clone()),
-        ("trades_per_minute", nullable_number.clone()),
-        ("last_event_time", nullable_date_time.clone()),
-        ("last_event_age_ms", nullable(schema("integer"))),
-        ("depth_sequence_gap_count", schema("integer")),
-    ];
-    let state_required = [
-        "last_trade_price",
-        "best_bid_price",
-        "best_ask_price",
-        "spread_pct",
-        "price_change_1m_pct",
-        "trades_per_minute",
-        "last_event_time",
-        "last_event_age_ms",
-        "depth_sequence_gap_count",
-    ];
-    schemas.insert(
-        "DashboardStateSummary".into(),
-        object(props(&state_props), &state_required),
+    let (mut anomaly_schema, anomaly_definitions) = generated::<AnomalyResponse>();
+    anomaly_schema["properties"]["id"]["format"] = json!("uuid");
+    schemas.insert("AnomalyResponse".into(), anomaly_schema);
+    for (definition_name, definition) in anomaly_definitions {
+        schemas.entry(definition_name).or_insert(definition);
+    }
+    add_schema(
+        &mut schemas,
+        "AnomaliesResponse",
+        generated::<AnomaliesResponse>(),
     );
-    schemas.insert(
-        "DashboardHealthSummary".into(),
-        object(
-            props(&[
-                ("score", json!({"type":"integer","minimum":0,"maximum":100})),
-                ("status", health_status.clone()),
-                ("recent_anomaly_count", schema("integer")),
-                ("evaluated_at", date_time.clone()),
-            ]),
-            &["score", "status", "recent_anomaly_count", "evaluated_at"],
-        ),
+    add_schema(
+        &mut schemas,
+        "DashboardStateSummary",
+        generated::<DashboardStateSummary>(),
     );
-    schemas.insert(
-        "DashboardSymbolSummary".into(),
-        object(
-            props(&[
-                ("symbol", string()),
-                ("state", nullable(ref_schema("DashboardStateSummary"))),
-                ("health", nullable(ref_schema("DashboardHealthSummary"))),
-            ]),
-            &["symbol", "state", "health"],
-        ),
+    add_schema(
+        &mut schemas,
+        "DashboardHealthSummary",
+        generated::<DashboardHealthSummary>(),
     );
-    schemas.insert(
-        "DashboardSummaryResponse".into(),
-        object(
-            props(&[
-                ("service", ref_schema("HealthResponse")),
-                ("pipeline", ref_schema("PipelineHealthResponse")),
-                ("symbols", array(ref_schema("DashboardSymbolSummary"))),
-                ("recent_anomalies", array(ref_schema("AnomalyResponse"))),
-            ]),
-            &["service", "pipeline", "symbols", "recent_anomalies"],
-        ),
+    add_schema(
+        &mut schemas,
+        "DashboardSymbolSummary",
+        generated::<DashboardSymbolSummary>(),
     );
-    schemas.insert(
-        "MarketStateResponse".into(),
-        object(
-            props(&[
-                ("symbol", string()),
-                ("last_trade_price", nullable_decimal.clone()),
-                ("last_trade_quantity", nullable_decimal.clone()),
-                ("best_bid_price", nullable_decimal.clone()),
-                ("best_bid_quantity", nullable_decimal.clone()),
-                ("best_ask_price", nullable_decimal.clone()),
-                ("best_ask_quantity", nullable_decimal.clone()),
-                ("top_bid_quantity", nullable_decimal.clone()),
-                ("top_ask_quantity", nullable_decimal.clone()),
-                ("top_bid_liquidity", nullable_decimal.clone()),
-                ("top_ask_liquidity", nullable_decimal.clone()),
-                ("book_imbalance", nullable_decimal),
-                ("depth_sequence_gap_count", schema("integer")),
-                ("last_depth_event_time", nullable_date_time.clone()),
-                ("last_depth_ingest_time", nullable_date_time.clone()),
-                ("spread_pct", nullable_number.clone()),
-                ("price_change_1m_pct", nullable_number.clone()),
-                ("trades_per_minute", nullable_number.clone()),
-                ("last_event_time", nullable_date_time.clone()),
-                ("last_ingest_time", nullable_date_time.clone()),
-                ("last_event_age_ms", nullable(schema("integer"))),
-            ]),
-            &[
-                "symbol",
-                "last_trade_price",
-                "last_trade_quantity",
-                "best_bid_price",
-                "best_bid_quantity",
-                "best_ask_price",
-                "best_ask_quantity",
-                "top_bid_quantity",
-                "top_ask_quantity",
-                "top_bid_liquidity",
-                "top_ask_liquidity",
-                "book_imbalance",
-                "depth_sequence_gap_count",
-                "last_depth_event_time",
-                "last_depth_ingest_time",
-                "spread_pct",
-                "price_change_1m_pct",
-                "trades_per_minute",
-                "last_event_time",
-                "last_ingest_time",
-                "last_event_age_ms",
-            ],
-        ),
+    add_schema(
+        &mut schemas,
+        "DashboardSummaryResponse",
+        generated::<DashboardSummaryResponse>(),
     );
-    schemas.insert(
-        "MarketHealthSignals".into(),
-        object(
-            props(&[
-                ("spread_pct", nullable_number.clone()),
-                ("price_change_1m_pct", nullable_number.clone()),
-                ("trades_per_minute", nullable_number.clone()),
-                ("last_event_time", nullable_date_time.clone()),
-                ("last_event_age_ms", nullable(schema("integer"))),
-            ]),
-            &[
-                "spread_pct",
-                "price_change_1m_pct",
-                "trades_per_minute",
-                "last_event_time",
-                "last_event_age_ms",
-            ],
-        ),
+    add_schema(
+        &mut schemas,
+        "MarketStateResponse",
+        generated::<MarketStateResponse>(),
     );
-    schemas.insert(
-        "HealthPenalty".into(),
-        object(
-            props(&[
-                ("reason", string()),
-                ("penalty", schema("integer")),
-                ("anomaly_type", nullable(string())),
-                ("severity", nullable(severity)),
-                ("observed_value", nullable_number.clone()),
-                ("threshold_value", nullable_number.clone()),
-                ("event_time", nullable_date_time),
-            ]),
-            &[
-                "reason",
-                "penalty",
-                "anomaly_type",
-                "severity",
-                "observed_value",
-                "threshold_value",
-                "event_time",
-            ],
-        ),
+    add_schema(
+        &mut schemas,
+        "MarketHealthResponse",
+        generated::<MarketHealthResponse>(),
     );
-    schemas.insert(
-        "MarketHealthResponse".into(),
-        object(
-            props(&[
-                ("symbol", string()),
-                ("score", schema("integer")),
-                ("base_score", schema("integer")),
-                ("status", health_status),
-                ("evaluated_at", date_time.clone()),
-                ("recent_anomaly_count", schema("integer")),
-                ("signals", ref_schema("MarketHealthSignals")),
-                ("penalties", array(ref_schema("HealthPenalty"))),
-            ]),
-            &[
-                "symbol",
-                "score",
-                "base_score",
-                "status",
-                "evaluated_at",
-                "recent_anomaly_count",
-                "signals",
-                "penalties",
-            ],
-        ),
+    add_schema(
+        &mut schemas,
+        "MarketTimelinePointResponse",
+        generated::<MarketTimelinePointResponse>(),
     );
-    schemas.insert(
-        "MarketTimelinePointResponse".into(),
-        object(
-            props(&[
-                ("timestamp", date_time),
-                ("price", decimal),
-                ("spread_pct", nullable_number.clone()),
-                ("trades_per_minute", nullable_number),
-                ("last_event_age_ms", nullable(schema("integer"))),
-            ]),
-            &[
-                "timestamp",
-                "price",
-                "spread_pct",
-                "trades_per_minute",
-                "last_event_age_ms",
-            ],
-        ),
+    add_schema(
+        &mut schemas,
+        "MarketTimelineResponse",
+        generated::<MarketTimelineResponse>(),
     );
-    schemas.insert(
-        "MarketTimelineResponse".into(),
-        object(
-            props(&[
-                ("symbol", string()),
-                ("points", array(ref_schema("MarketTimelinePointResponse"))),
-                ("anomalies", array(ref_schema("AnomalyResponse"))),
-            ]),
-            &["symbol", "points", "anomalies"],
-        ),
+    required_nullable(
+        &mut schemas,
+        "RuntimeModeResponse",
+        &["last_switched_at", "last_error"],
     );
-    schemas.insert(
-        "AnomaliesResponse".into(),
-        object(
-            props(&[("anomalies", array(ref_schema("AnomalyResponse")))]),
-            &["anomalies"],
-        ),
+    required_nullable(
+        &mut schemas,
+        "PipelineHealthResponse",
+        &["last_message_age_ms"],
     );
+    required_nullable(
+        &mut schemas,
+        "MarketStateResponse",
+        &[
+            "last_trade_price",
+            "last_trade_quantity",
+            "best_bid_price",
+            "best_bid_quantity",
+            "best_ask_price",
+            "best_ask_quantity",
+            "top_bid_quantity",
+            "top_ask_quantity",
+            "top_bid_liquidity",
+            "top_ask_liquidity",
+            "book_imbalance",
+            "last_depth_event_time",
+            "last_depth_ingest_time",
+            "spread_pct",
+            "price_change_1m_pct",
+            "trades_per_minute",
+            "last_event_time",
+            "last_ingest_time",
+            "last_event_age_ms",
+        ],
+    );
+    required_nullable(
+        &mut schemas,
+        "AnomalyResponse",
+        &["observed_value", "threshold_value"],
+    );
+    required_nullable(
+        &mut schemas,
+        "DashboardStateSummary",
+        &[
+            "last_trade_price",
+            "best_bid_price",
+            "best_ask_price",
+            "spread_pct",
+            "price_change_1m_pct",
+            "trades_per_minute",
+            "last_event_time",
+            "last_event_age_ms",
+        ],
+    );
+    required_nullable(
+        &mut schemas,
+        "MarketTimelinePointResponse",
+        &["spread_pct", "trades_per_minute", "last_event_age_ms"],
+    );
+    {
+        let summary = schemas
+            .get_mut("DashboardSymbolSummary")
+            .expect("summary schema exists");
+        summary["properties"]["state"] =
+            json!({"allOf":[ref_schema("DashboardStateSummary")],"nullable":true});
+        summary["properties"]["health"] =
+            json!({"allOf":[ref_schema("DashboardHealthSummary")],"nullable":true});
+        summary["required"] = json!(["health", "state", "symbol"]);
+    }
+    let mut error = Map::new();
+    error.insert("type".into(), json!("object"));
+    error.insert("additionalProperties".into(), json!(false));
+    error.insert("properties".into(), json!({"error":{"type":"string","enum":["invalid_symbol","invalid_request","forbidden","conflict","not_found","cache_unavailable","internal_error"]},"message":{"type":"string"}}));
+    error.insert("required".into(), json!(["error", "message"]));
+    schemas.insert("ApiErrorResponse".into(), Value::Object(error));
 
     let mode = query("mode", json!({"type":"string","enum":["demo","live"]}));
     let mut paths = Map::new();
     paths.insert(
         HEALTH.into(),
-        json!({"get":{"operationId":"getHealth","responses":{"200":response("HealthResponse")}}}),
+        json!({"get":operation("getHealth", vec![], "HealthResponse", &[])}),
     );
-    paths.insert(RUNTIME_MODE.into(), json!({"get":{"operationId":"getRuntimeMode","responses":{"200":response("RuntimeModeResponse")}},"post":{"operationId":"postRuntimeMode","requestBody":{"required":true,"content":{"application/json":{"schema":ref_schema("RuntimeModeSwitchRequest")}}},"responses":{"200":response("RuntimeModeResponse")}}}));
-    paths.insert(PIPELINE_HEALTH.into(), json!({"get":{"operationId":"getPipelineHealth","responses":{"200":response("PipelineHealthResponse")}}}));
-    paths.insert(DASHBOARD_SUMMARY.into(), json!({"get":{"operationId":"getDashboardSummary","parameters":[mode],"responses":{"200":response("DashboardSummaryResponse")}}}));
+    paths.insert(RUNTIME_MODE.into(), json!({"get":operation("getRuntimeMode", vec![], "RuntimeModeResponse", &[]),"post":{"operationId":"postRuntimeMode","requestBody":{"required":true,"content":{"application/json":{"schema":ref_schema("RuntimeModeSwitchRequest")}}},"responses":{"200":response("RuntimeModeResponse"),"400":error_response(),"403":error_response(),"409":error_response(),"500":error_response()}}}));
     paths.insert(
-        SYMBOLS.into(),
-        json!({"get":{"operationId":"getSymbols","responses":{"200":response("SymbolsResponse")}}}),
+        PIPELINE_HEALTH.into(),
+        json!({"get":operation("getPipelineHealth", vec![], "PipelineHealthResponse", &[])}),
     );
-    paths.insert(MARKET_STATE.into(), json!({"get":{"operationId":"getMarketState","parameters":[path_param()],"responses":{"200":response("MarketStateResponse")}}}));
-    paths.insert(MARKET_HEALTH.into(), json!({"get":{"operationId":"getMarketHealth","parameters":[path_param()],"responses":{"200":response("MarketHealthResponse")}}}));
-    paths.insert(MARKET_TIMELINE.into(), json!({"get":{"operationId":"getMarketTimeline","parameters":[path_param(),mode],"responses":{"200":response("MarketTimelineResponse")}}}));
-    paths.insert(ANOMALIES.into(), json!({"get":{"operationId":"getAnomalies","parameters":[query("symbol",string()),query("limit",json!({"type":"string","pattern":"^[0-9]+$"}))],"responses":{"200":response("AnomaliesResponse")}}}));
-    json!({"openapi":"3.0.3","info":{"title":"SignalGuard web console API","version":"0.4.0"},"paths":paths,"components":{"schemas":schemas},"x-signalguard-metrics":{"path":METRICS,"method":"GET","contentType":"text/plain; version=0.0.4; charset=utf-8","description":"Prometheus text endpoint; excluded from JSON schemas."}})
+    paths.insert(DASHBOARD_SUMMARY.into(), json!({"get":operation("getDashboardSummary", vec![mode.clone()], "DashboardSummaryResponse", &[("400", "invalid mode"), ("500", "storage error"), ("503", "cache unavailable")])}));
+    paths.insert(SYMBOLS.into(), json!({"get":operation("getSymbols", vec![], "SymbolsResponse", &[("500", "storage error"), ("503", "cache unavailable")])}));
+    paths.insert(MARKET_STATE.into(), json!({"get":operation("getMarketState", vec![path_param()], "MarketStateResponse", &[("400", "invalid symbol"), ("404", "not found"), ("503", "cache unavailable")])}));
+    paths.insert(MARKET_HEALTH.into(), json!({"get":operation("getMarketHealth", vec![path_param()], "MarketHealthResponse", &[("400", "invalid symbol"), ("404", "not found"), ("500", "storage error"), ("503", "cache unavailable")])}));
+    paths.insert(MARKET_TIMELINE.into(), json!({"get":operation("getMarketTimeline", vec![path_param(), mode], "MarketTimelineResponse", &[("400", "invalid symbol or mode"), ("500", "storage error")])}));
+    paths.insert(ANOMALIES.into(), json!({"get":operation("getAnomalies", vec![query("symbol", json!({"type":"string","pattern":"^[A-Za-z0-9]+$"})), query("limit", json!({"type":"string","pattern":"^[0-9]+$"}))], "AnomaliesResponse", &[("400", "invalid query"), ("500", "storage error")])}));
+    let mut document = json!({"openapi":"3.0.3","info":{"title":"SignalGuard web console API","version":"0.4.0"},"paths":paths,"components":{"schemas":schemas},"x-signalguard-metrics":{"path":METRICS,"method":"GET","contentType":"text/plain; version=0.0.4; charset=utf-8","description":"Prometheus text endpoint; excluded from JSON schemas."}});
+    sort_object_keys(&mut document);
+    document
+}
+
+fn sort_object_keys(value: &mut Value) {
+    if let Value::Object(object) = value {
+        let mut sorted = Map::new();
+        for (key, mut value) in std::mem::take(object) {
+            sort_object_keys(&mut value);
+            sorted.insert(key, value);
+        }
+        *object = sorted;
+    } else if let Value::Array(array) = value {
+        array.iter_mut().for_each(sort_object_keys);
+    }
 }
 
 pub fn render() -> Vec<u8> {
@@ -386,43 +359,202 @@ pub fn render() -> Vec<u8> {
     bytes
 }
 
+pub fn artifact_matches(bytes: &[u8]) -> bool {
+    bytes == render()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn generation_is_deterministic() {
         assert_eq!(render(), render());
     }
+
     #[test]
-    fn inventory_is_complete() {
-        let contract = document();
-        let paths = contract["paths"].as_object().unwrap();
-        assert_eq!(paths.len(), 9);
-        assert!(paths.contains_key(MARKET_STATE));
-        assert!(paths[MARKET_STATE]["get"]["parameters"][0]["name"] == "symbol");
+    fn checked_artifact_bytes_equal_generated_bytes() {
+        let artifact = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/contracts/web-console.openapi.json"
+        ));
+        assert!(artifact_matches(artifact));
     }
+
     #[test]
-    fn schema_semantics_are_explicit() {
+    fn intentional_artifact_drift_fails_the_check() {
+        let mut stale = render();
+        stale[0] = b' ';
+        assert!(!artifact_matches(&stale));
+    }
+
+    #[test]
+    fn generated_route_method_inventory_is_complete() {
+        let document = document();
+        let paths = document["paths"].as_object().unwrap();
+        let expected = [
+            ANOMALIES,
+            DASHBOARD_SUMMARY,
+            HEALTH,
+            MARKET_HEALTH,
+            MARKET_STATE,
+            MARKET_TIMELINE,
+            PIPELINE_HEALTH,
+            RUNTIME_MODE,
+            SYMBOLS,
+        ];
+        assert_eq!(
+            paths.keys().map(String::as_str).collect::<Vec<_>>(),
+            expected.to_vec()
+        );
+        assert_eq!(
+            paths[HEALTH]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            &[&String::from("get")]
+        );
+        assert!(
+            paths[RUNTIME_MODE].get("get").is_some() && paths[RUNTIME_MODE].get("post").is_some()
+        );
+        for path in [
+            PIPELINE_HEALTH,
+            DASHBOARD_SUMMARY,
+            SYMBOLS,
+            MARKET_STATE,
+            MARKET_HEALTH,
+            MARKET_TIMELINE,
+            ANOMALIES,
+        ] {
+            assert!(paths[path].get("get").is_some());
+        }
+        assert_eq!(
+            paths[MARKET_STATE]["get"]["parameters"][0]["name"],
+            "symbol"
+        );
+        assert_eq!(
+            paths[DASHBOARD_SUMMARY]["get"]["parameters"][0]["name"],
+            "mode"
+        );
+        assert_eq!(
+            paths[MARKET_TIMELINE]["get"]["parameters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["symbol", "mode"]
+        );
+        assert_eq!(
+            paths[ANOMALIES]["get"]["parameters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["symbol", "limit"]
+        );
+        assert_eq!(
+            document["x-signalguard-metrics"]["contentType"],
+            "text/plain; version=0.0.4; charset=utf-8"
+        );
+    }
+
+    #[test]
+    fn generated_schema_covers_serialization_and_null_semantics() {
         let schemas = &document()["components"]["schemas"];
         assert_eq!(
             schemas["MarketStateResponse"]["properties"]["last_trade_price"]["type"],
             "string"
         );
         assert_eq!(
-            schemas["MarketStateResponse"]["properties"]["last_trade_price"]["nullable"],
-            true
+            schemas["AnomalyResponse"]["properties"]["id"]["type"],
+            "string"
         );
         assert_eq!(
             schemas["AnomalyResponse"]["properties"]["id"]["format"],
             "uuid"
         );
         assert_eq!(
-            schemas["RuntimeModeResponse"]["properties"]["last_started_at"]["format"],
-            "date-time"
-        );
-        assert_eq!(
-            schemas["AnomalyResponse"]["properties"]["severity"]["enum"],
+            schemas["ContractSeverity"]["enum"],
             json!(["info", "warning", "critical"])
         );
+        assert_eq!(
+            schemas["AnomalyResponse"]["properties"]["event_time"]["format"],
+            "date-time"
+        );
+        assert!(schemas["DashboardSummaryResponse"]["properties"]["symbols"]["type"] == "array");
+        assert_eq!(
+            schemas["DashboardSymbolSummary"]["properties"]["state"]["allOf"][0]["$ref"],
+            "#/components/schemas/DashboardStateSummary"
+        );
+        assert_eq!(
+            schemas["DashboardSymbolSummary"]["properties"]["state"]["nullable"],
+            true
+        );
+        assert_eq!(
+            schemas["DashboardSymbolSummary"]["properties"]["health"]["allOf"][0]["$ref"],
+            "#/components/schemas/DashboardHealthSummary"
+        );
+        assert_eq!(
+            schemas["DashboardSymbolSummary"]["properties"]["health"]["nullable"],
+            true
+        );
+        assert!(
+            schemas["DashboardStateSummary"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|field| field == "last_trade_price")
+        );
+        assert!(
+            !schemas["RuntimeModeSwitchRequest"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "symbols")
+        );
+        assert_eq!(
+            schemas["RuntimeModeSwitchRequest"]["properties"]["symbols"]["nullable"],
+            true
+        );
+        assert_eq!(
+            schemas["ApiErrorResponse"]["required"],
+            json!(["error", "message"])
+        );
+    }
+
+    #[test]
+    fn error_status_inventory_is_reachable_and_existing() {
+        let document = document();
+        let responses = |path: &str, method: &str| {
+            document["paths"][path][method]["responses"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            responses(RUNTIME_MODE, "post"),
+            vec!["200", "400", "403", "409", "500"]
+        );
+        assert_eq!(
+            responses(MARKET_STATE, "get"),
+            vec!["200", "400", "404", "503"]
+        );
+        for path in [
+            DASHBOARD_SUMMARY,
+            SYMBOLS,
+            MARKET_HEALTH,
+            MARKET_TIMELINE,
+            ANOMALIES,
+        ] {
+            assert!(
+                responses(path, "get").contains(&"500".into())
+                    || responses(path, "get").contains(&"503".into())
+            );
+        }
     }
 }

@@ -2,7 +2,6 @@
   "components": {
     "schemas": {
       "AnomaliesResponse": {
-        "additionalProperties": true,
         "properties": {
           "anomalies": {
             "items": {
@@ -14,10 +13,10 @@
         "required": [
           "anomalies"
         ],
+        "title": "AnomaliesResponse",
         "type": "object"
       },
       "AnomalyResponse": {
-        "additionalProperties": true,
         "properties": {
           "anomaly_type": {
             "type": "string"
@@ -38,180 +37,62 @@
             "type": "string"
           },
           "observed_value": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           },
           "severity": {
-            "enum": [
-              "info",
-              "warning",
-              "critical"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/ContractSeverity"
           },
           "symbol": {
             "type": "string"
           },
           "threshold_value": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           }
         },
         "required": [
-          "id",
-          "symbol",
           "anomaly_type",
-          "severity",
+          "created_at",
+          "event_time",
+          "id",
           "message",
           "observed_value",
-          "threshold_value",
-          "event_time",
-          "created_at"
+          "severity",
+          "symbol",
+          "threshold_value"
         ],
+        "title": "AnomalyResponse",
         "type": "object"
       },
-      "DashboardHealthSummary": {
-        "additionalProperties": true,
+      "ApiErrorResponse": {
+        "additionalProperties": false,
         "properties": {
-          "evaluated_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "recent_anomaly_count": {
-            "type": "integer"
-          },
-          "score": {
-            "maximum": 100,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "status": {
+          "error": {
             "enum": [
-              "healthy",
-              "degraded",
-              "unhealthy"
+              "invalid_symbol",
+              "invalid_request",
+              "forbidden",
+              "conflict",
+              "not_found",
+              "cache_unavailable",
+              "internal_error"
             ],
             "type": "string"
-          }
-        },
-        "required": [
-          "score",
-          "status",
-          "recent_anomaly_count",
-          "evaluated_at"
-        ],
-        "type": "object"
-      },
-      "DashboardStateSummary": {
-        "additionalProperties": true,
-        "properties": {
-          "best_ask_price": {
-            "description": "rust_decimal JSON serialization",
-            "nullable": true,
-            "type": "string"
           },
-          "best_bid_price": {
-            "description": "rust_decimal JSON serialization",
-            "nullable": true,
-            "type": "string"
-          },
-          "depth_sequence_gap_count": {
-            "type": "integer"
-          },
-          "last_event_age_ms": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "last_event_time": {
-            "format": "date-time",
-            "nullable": true,
-            "type": "string"
-          },
-          "last_trade_price": {
-            "description": "rust_decimal JSON serialization",
-            "nullable": true,
-            "type": "string"
-          },
-          "price_change_1m_pct": {
-            "nullable": true,
-            "type": "number"
-          },
-          "spread_pct": {
-            "nullable": true,
-            "type": "number"
-          },
-          "trades_per_minute": {
-            "nullable": true,
-            "type": "number"
-          }
-        },
-        "required": [
-          "last_trade_price",
-          "best_bid_price",
-          "best_ask_price",
-          "spread_pct",
-          "price_change_1m_pct",
-          "trades_per_minute",
-          "last_event_time",
-          "last_event_age_ms",
-          "depth_sequence_gap_count"
-        ],
-        "type": "object"
-      },
-      "DashboardSummaryResponse": {
-        "additionalProperties": true,
-        "properties": {
-          "pipeline": {
-            "$ref": "#/components/schemas/PipelineHealthResponse"
-          },
-          "recent_anomalies": {
-            "items": {
-              "$ref": "#/components/schemas/AnomalyResponse"
-            },
-            "type": "array"
-          },
-          "service": {
-            "$ref": "#/components/schemas/HealthResponse"
-          },
-          "symbols": {
-            "items": {
-              "$ref": "#/components/schemas/DashboardSymbolSummary"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "service",
-          "pipeline",
-          "symbols",
-          "recent_anomalies"
-        ],
-        "type": "object"
-      },
-      "DashboardSymbolSummary": {
-        "additionalProperties": true,
-        "properties": {
-          "health": {
-            "$ref": "#/components/schemas/DashboardHealthSummary",
-            "nullable": true
-          },
-          "state": {
-            "$ref": "#/components/schemas/DashboardStateSummary",
-            "nullable": true
-          },
-          "symbol": {
+          "message": {
             "type": "string"
           }
         },
         "required": [
-          "symbol",
-          "state",
-          "health"
+          "error",
+          "message"
         ],
         "type": "object"
       },
-      "HealthPenalty": {
-        "additionalProperties": true,
+      "ContractHealthPenalty": {
         "properties": {
           "anomaly_type": {
             "nullable": true,
@@ -223,115 +104,43 @@
             "type": "string"
           },
           "observed_value": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           },
           "penalty": {
+            "format": "uint8",
+            "minimum": 0.0,
             "type": "integer"
           },
           "reason": {
             "type": "string"
           },
           "severity": {
-            "enum": [
-              "info",
-              "warning",
-              "critical"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ContractSeverity"
+              }
             ],
-            "nullable": true,
-            "type": "string"
+            "nullable": true
           },
           "threshold_value": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           }
         },
         "required": [
-          "reason",
           "penalty",
-          "anomaly_type",
-          "severity",
-          "observed_value",
-          "threshold_value",
-          "event_time"
+          "reason"
         ],
         "type": "object"
       },
-      "HealthResponse": {
-        "additionalProperties": true,
-        "properties": {
-          "service": {
-            "enum": [
-              "signalguard-rs"
-            ],
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "ok"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "service"
-        ],
-        "type": "object"
-      },
-      "MarketHealthResponse": {
-        "additionalProperties": true,
-        "properties": {
-          "base_score": {
-            "type": "integer"
-          },
-          "evaluated_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "penalties": {
-            "items": {
-              "$ref": "#/components/schemas/HealthPenalty"
-            },
-            "type": "array"
-          },
-          "recent_anomaly_count": {
-            "type": "integer"
-          },
-          "score": {
-            "type": "integer"
-          },
-          "signals": {
-            "$ref": "#/components/schemas/MarketHealthSignals"
-          },
-          "status": {
-            "enum": [
-              "healthy",
-              "degraded",
-              "unhealthy"
-            ],
-            "type": "string"
-          },
-          "symbol": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "symbol",
-          "score",
-          "base_score",
-          "status",
-          "evaluated_at",
-          "recent_anomaly_count",
-          "signals",
-          "penalties"
-        ],
-        "type": "object"
-      },
-      "MarketHealthSignals": {
-        "additionalProperties": true,
+      "ContractHealthSignals": {
         "properties": {
           "last_event_age_ms": {
+            "format": "uint64",
+            "minimum": 0.0,
             "nullable": true,
             "type": "integer"
           },
@@ -341,56 +150,319 @@
             "type": "string"
           },
           "price_change_1m_pct": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           },
           "spread_pct": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           },
           "trades_per_minute": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "ContractHealthStatus": {
+        "enum": [
+          "healthy",
+          "degraded",
+          "unhealthy"
+        ],
+        "type": "string"
+      },
+      "ContractRuntimeMode": {
+        "enum": [
+          "replay",
+          "live"
+        ],
+        "type": "string"
+      },
+      "ContractRuntimeSource": {
+        "enum": [
+          "config",
+          "runtime"
+        ],
+        "type": "string"
+      },
+      "ContractRuntimeStatus": {
+        "enum": [
+          "starting",
+          "running",
+          "switching",
+          "failed",
+          "stopped",
+          "completed"
+        ],
+        "type": "string"
+      },
+      "ContractSeverity": {
+        "enum": [
+          "info",
+          "warning",
+          "critical"
+        ],
+        "type": "string"
+      },
+      "DashboardHealthSummary": {
+        "properties": {
+          "evaluated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "recent_anomaly_count": {
+            "format": "uint",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "score": {
+            "format": "uint8",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContractHealthStatus"
+          }
+        },
+        "required": [
+          "evaluated_at",
+          "recent_anomaly_count",
+          "score",
+          "status"
+        ],
+        "title": "DashboardHealthSummary",
+        "type": "object"
+      },
+      "DashboardServiceSummary": {
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "status"
+        ],
+        "type": "object"
+      },
+      "DashboardStateSummary": {
+        "properties": {
+          "best_ask_price": {
+            "nullable": true,
+            "type": "string"
+          },
+          "best_bid_price": {
+            "nullable": true,
+            "type": "string"
+          },
+          "depth_sequence_gap_count": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "last_event_age_ms": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "last_event_time": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "last_trade_price": {
+            "nullable": true,
+            "type": "string"
+          },
+          "price_change_1m_pct": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "spread_pct": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "trades_per_minute": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           }
         },
         "required": [
-          "spread_pct",
-          "price_change_1m_pct",
-          "trades_per_minute",
+          "best_ask_price",
+          "best_bid_price",
+          "depth_sequence_gap_count",
+          "last_event_age_ms",
           "last_event_time",
-          "last_event_age_ms"
+          "last_trade_price",
+          "price_change_1m_pct",
+          "spread_pct",
+          "trades_per_minute"
         ],
+        "title": "DashboardStateSummary",
+        "type": "object"
+      },
+      "DashboardSummaryResponse": {
+        "properties": {
+          "pipeline": {
+            "$ref": "#/components/schemas/PipelineHealthResponse"
+          },
+          "recent_anomalies": {
+            "items": {
+              "$ref": "#/components/schemas/AnomalyResponse"
+            },
+            "type": "array"
+          },
+          "service": {
+            "$ref": "#/components/schemas/DashboardServiceSummary"
+          },
+          "symbols": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardSymbolSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "pipeline",
+          "recent_anomalies",
+          "service",
+          "symbols"
+        ],
+        "title": "DashboardSummaryResponse",
+        "type": "object"
+      },
+      "DashboardSymbolSummary": {
+        "properties": {
+          "health": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DashboardHealthSummary"
+              }
+            ],
+            "nullable": true
+          },
+          "state": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DashboardStateSummary"
+              }
+            ],
+            "nullable": true
+          },
+          "symbol": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "health",
+          "state",
+          "symbol"
+        ],
+        "title": "DashboardSymbolSummary",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "status"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "MarketHealthResponse": {
+        "properties": {
+          "base_score": {
+            "format": "uint8",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "penalties": {
+            "items": {
+              "$ref": "#/components/schemas/ContractHealthPenalty"
+            },
+            "type": "array"
+          },
+          "recent_anomaly_count": {
+            "format": "uint",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "score": {
+            "format": "uint8",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "signals": {
+            "$ref": "#/components/schemas/ContractHealthSignals"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContractHealthStatus"
+          },
+          "symbol": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_score",
+          "evaluated_at",
+          "penalties",
+          "recent_anomaly_count",
+          "score",
+          "signals",
+          "status",
+          "symbol"
+        ],
+        "title": "MarketHealthResponse",
         "type": "object"
       },
       "MarketStateResponse": {
-        "additionalProperties": true,
         "properties": {
           "best_ask_price": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "best_ask_quantity": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "best_bid_price": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "best_bid_quantity": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "book_imbalance": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "depth_sequence_gap_count": {
+            "format": "uint64",
+            "minimum": 0.0,
             "type": "integer"
           },
           "last_depth_event_time": {
@@ -404,6 +476,8 @@
             "type": "string"
           },
           "last_event_age_ms": {
+            "format": "uint64",
+            "minimum": 0.0,
             "nullable": true,
             "type": "integer"
           },
@@ -418,20 +492,20 @@
             "type": "string"
           },
           "last_trade_price": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "last_trade_quantity": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "price_change_1m_pct": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           },
           "spread_pct": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           },
@@ -439,67 +513,66 @@
             "type": "string"
           },
           "top_ask_liquidity": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "top_ask_quantity": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "top_bid_liquidity": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "top_bid_quantity": {
-            "description": "rust_decimal JSON serialization",
             "nullable": true,
             "type": "string"
           },
           "trades_per_minute": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           }
         },
         "required": [
-          "symbol",
-          "last_trade_price",
-          "last_trade_quantity",
-          "best_bid_price",
-          "best_bid_quantity",
           "best_ask_price",
           "best_ask_quantity",
-          "top_bid_quantity",
-          "top_ask_quantity",
-          "top_bid_liquidity",
-          "top_ask_liquidity",
+          "best_bid_price",
+          "best_bid_quantity",
           "book_imbalance",
           "depth_sequence_gap_count",
           "last_depth_event_time",
           "last_depth_ingest_time",
-          "spread_pct",
-          "price_change_1m_pct",
-          "trades_per_minute",
+          "last_event_age_ms",
           "last_event_time",
           "last_ingest_time",
-          "last_event_age_ms"
+          "last_trade_price",
+          "last_trade_quantity",
+          "price_change_1m_pct",
+          "spread_pct",
+          "symbol",
+          "top_ask_liquidity",
+          "top_ask_quantity",
+          "top_bid_liquidity",
+          "top_bid_quantity",
+          "trades_per_minute"
         ],
+        "title": "MarketStateResponse",
         "type": "object"
       },
       "MarketTimelinePointResponse": {
-        "additionalProperties": true,
         "properties": {
           "last_event_age_ms": {
+            "format": "uint64",
+            "minimum": 0.0,
             "nullable": true,
             "type": "integer"
           },
           "price": {
-            "description": "rust_decimal JSON serialization",
             "type": "string"
           },
           "spread_pct": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           },
@@ -508,21 +581,22 @@
             "type": "string"
           },
           "trades_per_minute": {
+            "format": "double",
             "nullable": true,
             "type": "number"
           }
         },
         "required": [
-          "timestamp",
+          "last_event_age_ms",
           "price",
           "spread_pct",
-          "trades_per_minute",
-          "last_event_age_ms"
+          "timestamp",
+          "trades_per_minute"
         ],
+        "title": "MarketTimelinePointResponse",
         "type": "object"
       },
       "MarketTimelineResponse": {
-        "additionalProperties": true,
         "properties": {
           "anomalies": {
             "items": {
@@ -541,52 +615,65 @@
           }
         },
         "required": [
-          "symbol",
+          "anomalies",
           "points",
-          "anomalies"
+          "symbol"
         ],
+        "title": "MarketTimelineResponse",
         "type": "object"
       },
       "PipelineHealthResponse": {
-        "additionalProperties": true,
         "properties": {
           "cache_errors": {
+            "format": "uint64",
+            "minimum": 0.0,
             "type": "integer"
           },
           "last_message_age_ms": {
+            "format": "uint64",
+            "minimum": 0.0,
             "nullable": true,
             "type": "integer"
           },
           "parse_errors": {
+            "format": "uint64",
+            "minimum": 0.0,
             "type": "integer"
           },
           "reconnect_attempts": {
+            "format": "uint64",
+            "minimum": 0.0,
             "type": "integer"
           },
           "status": {
-            "enum": [
-              "healthy",
-              "degraded",
-              "unhealthy"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/PipelineHealthStatus"
           },
           "storage_errors": {
+            "format": "uint64",
+            "minimum": 0.0,
             "type": "integer"
           }
         },
         "required": [
-          "status",
+          "cache_errors",
           "last_message_age_ms",
           "parse_errors",
           "reconnect_attempts",
-          "storage_errors",
-          "cache_errors"
+          "status",
+          "storage_errors"
         ],
+        "title": "PipelineHealthResponse",
         "type": "object"
       },
+      "PipelineHealthStatus": {
+        "enum": [
+          "healthy",
+          "degraded",
+          "unhealthy"
+        ],
+        "type": "string"
+      },
       "RuntimeModeResponse": {
-        "additionalProperties": true,
         "properties": {
           "last_error": {
             "nullable": true,
@@ -602,32 +689,16 @@
             "type": "string"
           },
           "mode": {
-            "enum": [
-              "replay",
-              "live"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/ContractRuntimeMode"
           },
           "mode_label": {
             "type": "string"
           },
           "source": {
-            "enum": [
-              "config",
-              "runtime"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/ContractRuntimeSource"
           },
           "status": {
-            "enum": [
-              "starting",
-              "running",
-              "switching",
-              "failed",
-              "stopped",
-              "completed"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/ContractRuntimeStatus"
           },
           "switching_supported": {
             "type": "boolean"
@@ -640,48 +711,47 @@
           }
         },
         "required": [
-          "mode",
-          "mode_label",
-          "status",
-          "symbols",
-          "switching_supported",
-          "source",
+          "last_error",
           "last_started_at",
           "last_switched_at",
-          "last_error"
+          "mode",
+          "mode_label",
+          "source",
+          "status",
+          "switching_supported",
+          "symbols"
         ],
+        "title": "RuntimeModeResponse",
         "type": "object"
       },
       "RuntimeModeSwitchRequest": {
-        "additionalProperties": true,
         "properties": {
           "mode": {
-            "enum": [
-              "replay",
-              "live"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/ContractRuntimeMode"
           },
           "reset_state": {
+            "nullable": true,
             "type": "boolean"
           },
           "reset_storage": {
+            "nullable": true,
             "type": "boolean"
           },
           "symbols": {
             "items": {
               "type": "string"
             },
+            "nullable": true,
             "type": "array"
           }
         },
         "required": [
           "mode"
         ],
+        "title": "RuntimeModeSwitchRequest",
         "type": "object"
       },
       "SymbolsResponse": {
-        "additionalProperties": true,
         "properties": {
           "symbols": {
             "items": {
@@ -693,6 +763,7 @@
         "required": [
           "symbols"
         ],
+        "title": "SymbolsResponse",
         "type": "object"
       }
     }
@@ -712,6 +783,7 @@
             "name": "symbol",
             "required": false,
             "schema": {
+              "pattern": "^[A-Za-z0-9]+$",
               "type": "string"
             }
           },
@@ -735,6 +807,26 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
           }
         }
       }
@@ -766,6 +858,36 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
           }
         }
       }
@@ -811,6 +933,46 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
           }
         }
       }
@@ -839,6 +1001,36 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
           }
         }
       }
@@ -879,6 +1071,26 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
           }
         }
       }
@@ -938,6 +1150,46 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
           }
         }
       }
@@ -955,6 +1207,26 @@
               }
             },
             "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
           }
         }
       }

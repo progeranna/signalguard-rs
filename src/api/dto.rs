@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use uuid::Uuid;
@@ -11,39 +12,126 @@ use crate::{
     telemetry::InternalCountersSnapshot,
 };
 
-#[derive(Debug, Serialize)]
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+enum ContractHealthStatus {
+    #[schemars(rename = "healthy")]
+    Healthy,
+    #[schemars(rename = "degraded")]
+    Degraded,
+    #[schemars(rename = "unhealthy")]
+    Unhealthy,
+}
+
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+enum ContractSeverity {
+    #[schemars(rename = "info")]
+    Info,
+    #[schemars(rename = "warning")]
+    Warning,
+    #[schemars(rename = "critical")]
+    Critical,
+}
+
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+enum ContractRuntimeMode {
+    #[schemars(rename = "replay")]
+    Replay,
+    #[schemars(rename = "live")]
+    Live,
+}
+
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+enum ContractRuntimeStatus {
+    #[schemars(rename = "starting")]
+    Starting,
+    #[schemars(rename = "running")]
+    Running,
+    #[schemars(rename = "switching")]
+    Switching,
+    #[schemars(rename = "failed")]
+    Failed,
+    #[schemars(rename = "stopped")]
+    Stopped,
+    #[schemars(rename = "completed")]
+    Completed,
+}
+
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+enum ContractRuntimeSource {
+    #[schemars(rename = "config")]
+    Config,
+    #[schemars(rename = "runtime")]
+    Runtime,
+}
+
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+struct ContractHealthSignals {
+    spread_pct: Option<f64>,
+    price_change_1m_pct: Option<f64>,
+    trades_per_minute: Option<f64>,
+    last_event_time: Option<DateTime<Utc>>,
+    last_event_age_ms: Option<u64>,
+}
+
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+struct ContractHealthPenalty {
+    reason: String,
+    penalty: u8,
+    anomaly_type: Option<String>,
+    severity: Option<ContractSeverity>,
+    observed_value: Option<f64>,
+    threshold_value: Option<f64>,
+    event_time: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct HealthResponse {
+    #[schemars(with = "String")]
     pub status: &'static str,
+    #[schemars(with = "String")]
     pub service: &'static str,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct SymbolsResponse {
     pub symbols: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct RuntimeModeResponse {
+    #[schemars(with = "ContractRuntimeMode")]
     pub mode: &'static str,
     pub mode_label: &'static str,
+    #[schemars(with = "ContractRuntimeStatus")]
     pub status: &'static str,
     pub symbols: Vec<String>,
     pub switching_supported: bool,
+    #[schemars(with = "ContractRuntimeSource")]
     pub source: &'static str,
     pub last_started_at: DateTime<Utc>,
+    #[schemars(required)]
     pub last_switched_at: Option<DateTime<Utc>>,
+    #[schemars(required)]
     pub last_error: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct RuntimeModeSwitchRequest {
+    #[schemars(with = "ContractRuntimeMode")]
     pub mode: String,
     pub symbols: Option<Vec<String>>,
     pub reset_state: Option<bool>,
     pub reset_storage: Option<bool>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PublicDataMode {
     #[default]
@@ -51,12 +139,12 @@ pub enum PublicDataMode {
     Live,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq)]
 pub struct PublicDataModeQuery {
     pub mode: Option<PublicDataMode>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, JsonSchema, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineHealthStatus {
     Healthy,
@@ -64,9 +152,10 @@ pub enum PipelineHealthStatus {
     Unhealthy,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct PipelineHealthResponse {
     pub status: PipelineHealthStatus,
+    #[schemars(required)]
     pub last_message_age_ms: Option<u64>,
     pub parse_errors: u64,
     pub reconnect_attempts: u64,
@@ -74,50 +163,73 @@ pub struct PipelineHealthResponse {
     pub cache_errors: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct MarketStateResponse {
     pub symbol: String,
+    #[schemars(required, with = "Option<String>")]
     pub last_trade_price: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub last_trade_quantity: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub best_bid_price: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub best_bid_quantity: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub best_ask_price: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub best_ask_quantity: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub top_bid_quantity: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub top_ask_quantity: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub top_bid_liquidity: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub top_ask_liquidity: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub book_imbalance: Option<Decimal>,
     pub depth_sequence_gap_count: u64,
+    #[schemars(required)]
     pub last_depth_event_time: Option<DateTime<Utc>>,
+    #[schemars(required)]
     pub last_depth_ingest_time: Option<DateTime<Utc>>,
+    #[schemars(required)]
     pub spread_pct: Option<f64>,
+    #[schemars(required)]
     pub price_change_1m_pct: Option<f64>,
+    #[schemars(required)]
     pub trades_per_minute: Option<f64>,
+    #[schemars(required)]
     pub last_event_time: Option<DateTime<Utc>>,
+    #[schemars(required)]
     pub last_ingest_time: Option<DateTime<Utc>>,
+    #[schemars(required)]
     pub last_event_age_ms: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct AnomaliesResponse {
     pub anomalies: Vec<AnomalyResponse>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct AnomalyResponse {
+    #[schemars(with = "String")]
     pub id: Uuid,
     pub symbol: String,
     pub anomaly_type: String,
+    #[schemars(with = "ContractSeverity")]
     pub severity: String,
     pub message: String,
+    #[schemars(required)]
     pub observed_value: Option<f64>,
+    #[schemars(required)]
     pub threshold_value: Option<f64>,
     pub event_time: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct DashboardSummaryResponse {
     pub service: DashboardServiceSummary,
     pub pipeline: PipelineHealthResponse,
@@ -125,53 +237,70 @@ pub struct DashboardSummaryResponse {
     pub recent_anomalies: Vec<AnomalyResponse>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct MarketTimelineResponse {
     pub symbol: String,
     pub points: Vec<MarketTimelinePointResponse>,
     pub anomalies: Vec<AnomalyResponse>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct DashboardServiceSummary {
+    #[schemars(with = "String")]
     pub status: &'static str,
+    #[schemars(with = "String")]
     pub service: &'static str,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct DashboardSymbolSummary {
     pub symbol: String,
+    #[schemars(required)]
     pub state: Option<DashboardStateSummary>,
+    #[schemars(required)]
     pub health: Option<DashboardHealthSummary>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct DashboardStateSummary {
+    #[schemars(required, with = "Option<String>")]
     pub last_trade_price: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub best_bid_price: Option<Decimal>,
+    #[schemars(required, with = "Option<String>")]
     pub best_ask_price: Option<Decimal>,
+    #[schemars(required)]
     pub spread_pct: Option<f64>,
+    #[schemars(required)]
     pub price_change_1m_pct: Option<f64>,
+    #[schemars(required)]
     pub trades_per_minute: Option<f64>,
+    #[schemars(required)]
     pub last_event_time: Option<DateTime<Utc>>,
+    #[schemars(required)]
     pub last_event_age_ms: Option<u64>,
     pub depth_sequence_gap_count: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct DashboardHealthSummary {
     pub score: u8,
+    #[schemars(with = "ContractHealthStatus")]
     pub status: crate::domain::HealthStatus,
     pub recent_anomaly_count: usize,
     pub evaluated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct MarketTimelinePointResponse {
     pub timestamp: DateTime<Utc>,
+    #[schemars(with = "String")]
     pub price: Decimal,
+    #[schemars(required)]
     pub spread_pct: Option<f64>,
+    #[schemars(required)]
     pub trades_per_minute: Option<f64>,
+    #[schemars(required)]
     pub last_event_age_ms: Option<u64>,
 }
 
@@ -306,15 +435,18 @@ impl AnomalyResponse {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, JsonSchema, Serialize)]
 pub struct MarketHealthResponse {
     pub symbol: String,
     pub score: u8,
     pub base_score: u8,
+    #[schemars(with = "ContractHealthStatus")]
     pub status: crate::domain::HealthStatus,
     pub evaluated_at: DateTime<Utc>,
     pub recent_anomaly_count: usize,
+    #[schemars(with = "ContractHealthSignals")]
     pub signals: crate::health::MarketHealthSignals,
+    #[schemars(with = "Vec<ContractHealthPenalty>")]
     pub penalties: Vec<crate::health::HealthPenalty>,
 }
 
