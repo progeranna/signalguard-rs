@@ -15,7 +15,8 @@ import {
   useCatalogDashboardSummaryQuery,
   useMarketTimelineQuery,
 } from "@/features/dashboard/api";
-import { isDashboardSymbolPlaceholder } from "@/features/dashboard/marketOrder";
+import { adaptMarketResourceToViewModel } from "@/features/dashboard/marketAdapters";
+import type { MarketAnomalyViewModel, MarketDetailViewModel } from "@/features/dashboard/marketViewModel";
 import {
   normalizeSelectedSymbol,
   storeSelectedSymbol,
@@ -121,7 +122,12 @@ function MarketTimelineShell({
 }) {
   const symbols = summary?.symbols ?? [];
   const selectedSymbol = selectSignalSymbol(symbols, selectedSignalSymbol);
-  const timelineQuery = useMarketTimelineQuery(selectedSymbol?.symbol ?? null, selectedUiMode);
+  const observed = selectedSymbol?.availability === "observed";
+  const timelineQuery = useMarketTimelineQuery(
+    selectedSymbol?.symbol ?? null,
+    selectedUiMode,
+    observed,
+  );
   const timelinePoints = buildTimelineChartPoints(timelineQuery.data?.points ?? []);
   const timelinePriceDomain = buildTimelinePriceDomain(timelinePoints);
   const timelineTimeDomain = buildTimelineTimeDomain(timelinePoints);
@@ -146,6 +152,9 @@ function MarketTimelineShell({
                 <div className="mb-2">
                   <div className="flex flex-wrap items-center gap-2 font-mono text-sm font-bold text-white">
                     <span>{selectedSymbol.symbol}</span>
+                    <span className="rounded-full border border-cyan-400/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200">
+                      {selectedSymbol.source === "live" ? "Live" : "Demo"}
+                    </span>
                     {timelineSeverity ? (
                       <span
                         className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
@@ -157,7 +166,9 @@ function MarketTimelineShell({
                     ) : null}
                   </div>
                 </div>
-                {timelineQuery.isError ? (
+                {!observed ? (
+                  <EmptyBlock message={availabilityMessage(selectedSymbol.availability)} />
+                ) : timelineQuery.isError ? (
                   <ErrorPanel
                     title="Market timeline unavailable"
                     message={buildErrorMessage(timelineQuery.error)}
@@ -265,7 +276,7 @@ function MarketTimelineShell({
                 />
               </div>
             </div>
-            <div className="mt-3 flex flex-1 flex-col justify-evenly gap-2">
+            {observed ? <div className="mt-3 flex flex-1 flex-col justify-evenly gap-2">
               <SignalSnapshotMetric
                 label="Price"
                 value={formatTickerPrice(selectedSymbol?.state?.last_trade_price)}
@@ -281,10 +292,10 @@ function MarketTimelineShell({
               <SignalSnapshotMetric
                 label="Freshness"
                 value={formatOptionalAge(
-                  selectedSymbol?.state?.last_event_age_ms ?? summary?.pipeline.last_message_age_ms,
+                  selectedSymbol?.state?.last_event_age_ms,
                 )}
               />
-            </div>
+            </div> : <EmptyBlock message={selectedSymbol ? availabilityMessage(selectedSymbol.availability) : "No current market state available for this market."} />}
           </aside>
         </div>
       )}
@@ -474,6 +485,7 @@ function DashboardTablesGrid({
         <SymbolDetailModal
           key={symbolPopupIdentityKey(activePopupIdentity)}
           identity={activePopupIdentity}
+          summary={summary}
           onBack={
             activePopupIdentity.returnContext === "symbols"
               ? () => setModalState({ type: "symbols" })
@@ -619,16 +631,16 @@ function SymbolHealthTableRow({
         </div>
       </td>
       <td className="px-2 py-3 pr-4">
-        <HealthScore compact score={score} status={symbol.health?.status} />
+        {symbol.availability === "observed" ? <HealthScore compact score={score} status={symbol.health?.status} /> : null}
       </td>
       <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-100 2xl:text-sm">
-        {formatTickerPrice(symbol.state?.last_trade_price)}
+        {symbol.availability === "observed" ? formatTickerPrice(symbol.state?.last_trade_price) : null}
       </td>
       <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
-        {formatTickerPercent(symbol.state?.spread_pct)}
+        {symbol.availability === "observed" ? formatTickerPercent(symbol.state?.spread_pct) : null}
       </td>
       <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
-        {formatOptionalCompact(symbol.state?.trades_per_minute)}
+        {symbol.availability === "observed" ? formatOptionalCompact(symbol.state?.trades_per_minute) : null}
       </td>
       <td className="px-2 py-3 text-right">
         <div className="flex min-w-0 justify-end overflow-hidden">
@@ -673,13 +685,13 @@ function SymbolHealthCard({
             text={statusText}
           />
         </div>
-        <div className="mt-4">
+        {symbol.availability === "observed" ? <div className="mt-4">
           <HealthScore
             score={symbol.health?.score ?? null}
             status={symbol.health?.status}
           />
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        </div> : null}
+        {symbol.availability === "observed" ? <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
           <MobileSymbolMetric
             label="Price"
             value={formatTickerPrice(symbol.state?.last_trade_price)}
@@ -696,7 +708,7 @@ function SymbolHealthCard({
             label="Age"
             value={formatOptionalAge(symbol.state?.last_event_age_ms)}
           />
-        </div>
+        </div> : <div className="mt-4"><EmptyBlock message={availabilityMessage(symbol.availability)} /></div>}
       </article>
     </button>
   );
@@ -1277,16 +1289,21 @@ function SymbolHealthTableRowShell({
 
 function SymbolDetailModal({
   identity,
+  summary,
   onBack,
   onClose,
   onOpenSymbolDetail,
 }: {
   identity: SymbolPopupIdentity;
+  summary: DashboardSummary | null;
   onBack?: () => void;
   onClose: () => void;
   onOpenSymbolDetail: (symbol: string) => void;
 }) {
-  const resourceState = useSymbolPopupResource(identity);
+  const resourceState = useSymbolPopupResource(
+    identity,
+    summary?.symbols.find((entry) => entry.symbol === identity.symbol),
+  );
   const backLabel =
     identity.returnContext === "symbols"
       ? "Back to all markets"
@@ -1348,9 +1365,11 @@ function SymbolDetailModal({
           />
         ) : (
           <SymbolPopupSuccess
-            anomalies={resourceState.resource.anomalies}
+            viewModel={adaptMarketResourceToViewModel(resourceState.resource, {
+              mode: identity.mode,
+              symbol: identity.symbol,
+            })}
             onOpenSymbolDetail={onOpenSymbolDetail}
-            symbol={resourceState.resource.summary}
           />
         )}
       </div>
@@ -1359,65 +1378,67 @@ function SymbolDetailModal({
 }
 
 function SymbolPopupSuccess({
-  anomalies,
   onOpenSymbolDetail,
-  symbol,
+  viewModel,
 }: {
-  anomalies: DashboardAnomaly[];
+  viewModel: MarketDetailViewModel;
   onOpenSymbolDetail: (symbol: string) => void;
-  symbol: DashboardSymbolSummary;
 }) {
-  const statusTone = toStatusTone(symbol.health?.status, "neutral");
-  const statusText = marketStatusLabel(symbol);
+  const { anomalies, identity, metrics, status } = viewModel;
+  const observed = viewModel.availability === "observed";
 
   return (
     <div className="space-y-6" data-testid="symbol-popup-success">
       <div className="flex flex-wrap items-center gap-3">
         <p className="font-mono text-2xl font-bold text-white">
-          {symbol.symbol}
+          {identity.symbol}
         </p>
         <StatusBadge
-          status={statusTone}
-          text={statusText}
+          status={status.tone}
+          text={status.text}
+        />
+        <StatusBadge
+          status="neutral"
+          text={viewModel.source === "live" ? "Live" : "Demo"}
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {observed ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SymbolDetailMetric
           label="Health"
-          value={symbol.health?.score?.toString() ?? "—"}
+          value={viewModel.healthScore}
         />
         <SymbolDetailMetric
           label="Price"
-          value={formatTickerPrice(symbol.state?.last_trade_price)}
+          value={metrics.lastPrice}
         />
         <SymbolDetailMetric
           label="Spread"
-          value={formatTickerPercent(symbol.state?.spread_pct)}
+          value={metrics.spread}
         />
         <SymbolDetailMetric
           label="Trades/min"
-          value={formatOptionalCompact(symbol.state?.trades_per_minute)}
+          value={metrics.tradesPerMinute}
         />
         <SymbolDetailMetric
           label="Freshness"
-          value={formatOptionalAge(symbol.state?.last_event_age_ms)}
+          value={metrics.freshness}
         />
         <SymbolDetailMetric
           label="Anomalies"
-          value={formatCompactNumber(anomalies.length)}
+          value={metrics.anomalyCount}
         />
         <SymbolDetailMetric
           label="Best bid"
-          value={formatTickerPrice(symbol.state?.best_bid_price)}
+          value={metrics.bestBid}
         />
         <SymbolDetailMetric
           label="Best ask"
-          value={formatTickerPrice(symbol.state?.best_ask_price)}
+          value={metrics.bestAsk}
         />
-      </div>
+      </div> : <EmptyBlock message={availabilityMessage(viewModel.availability)} />}
 
-      <section className="space-y-3">
+      {observed ? <section className="space-y-3">
         <SectionTitle
           title="Recent market anomalies"
           subtitle="Quality events for this market in the current summary."
@@ -1445,7 +1466,7 @@ function SymbolPopupSuccess({
             </div>
             <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
               {anomalies.map((anomaly) => (
-                <AnomalyModalCard
+                <SymbolDetailAnomalyCard
                   key={anomaly.id}
                   anomaly={anomaly}
                   onOpenSymbolDetail={onOpenSymbolDetail}
@@ -1456,7 +1477,7 @@ function SymbolPopupSuccess({
         ) : (
           <EmptyBlock message="No recent anomalies for this market." />
         )}
-      </section>
+      </section> : null}
     </div>
   );
 }
@@ -1472,30 +1493,67 @@ function SymbolDetailMetric({ label, value }: { label: string; value: string }) 
   );
 }
 
-function SymbolDetailAnomalyRow({ anomaly }: { anomaly: DashboardAnomaly }) {
-  const severityTone = toStatusTone(anomaly.severity, "neutral");
-
+function SymbolDetailAnomalyRow({ anomaly }: { anomaly: MarketAnomalyViewModel }) {
   return (
     <tr className="border-b border-white/[0.06] transition hover:bg-white/[0.025] last:border-0">
       <td className="px-2 py-3 pr-4 text-sm font-bold text-slate-100">
-        {formatAnomalyType(anomaly.anomaly_type)}
+        {anomaly.type}
       </td>
       <td className="px-2 py-3 pr-4">
-        <SeverityBadge severity={anomaly.severity} />
+        <SeverityBadge severity={anomaly.severity.key} />
       </td>
-      <td className={`px-2 py-3 pr-4 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
-        {formatAnomalyValue(anomaly.anomaly_type, anomaly.observed_value, "observed")}
-      </td>
-      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {formatAnomalyValue(anomaly.anomaly_type, anomaly.threshold_value, "threshold")}
+      <td className={`px-2 py-3 pr-4 text-sm font-bold ${anomaly.valueClassName}`}>
+        {anomaly.observed.popup}
       </td>
       <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
-        {formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
+        {anomaly.threshold.popup}
+      </td>
+      <td className="px-2 py-3 pr-4 text-sm font-semibold text-slate-300">
+        {anomaly.detected}
       </td>
       <td className="px-2 py-3 text-sm leading-5 text-slate-400">
-        {anomaly.message || "—"}
+        {anomaly.context}
       </td>
     </tr>
+  );
+}
+
+function SymbolDetailAnomalyCard({
+  anomaly,
+  onOpenSymbolDetail,
+}: {
+  anomaly: MarketAnomalyViewModel;
+  onOpenSymbolDetail: (symbol: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenSymbolDetail(anomaly.symbol)}
+      className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+      aria-label={`Open ${anomaly.symbol} market detail`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <span className="font-mono text-base font-bold text-white transition">
+            {anomaly.symbol}
+          </span>
+          <p className="mt-2 text-base font-bold text-slate-100">{anomaly.type}</p>
+        </div>
+        <SeverityBadge severity={anomaly.severity.key} />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <MobileSymbolMetric label="Observed" value={anomaly.observed.popup} />
+        <MobileSymbolMetric label="Threshold" value={anomaly.threshold.popup} />
+        <MobileSymbolMetric label="Detected" value={anomaly.detected} />
+        <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Severity</p>
+          <p className={`mt-1 text-sm font-bold ${anomaly.valueClassName}`}>
+            {anomaly.severity.text}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-slate-400">{anomaly.context}</p>
+    </button>
   );
 }
 
@@ -1992,11 +2050,21 @@ function statusLabel(value: string | null | undefined): string {
 }
 
 function marketStatusLabel(symbol: DashboardSymbolSummary): string {
-  if (isDashboardSymbolPlaceholder(symbol)) {
-    return "No data yet";
+  switch (symbol.availability) {
+    case "configured": return "Configured";
+    case "awaiting": return "Awaiting data";
+    case "unavailable": return "Unavailable";
+    case "observed": return statusLabel(symbol.health?.status);
   }
+}
 
-  return statusLabel(symbol.health?.status);
+function availabilityMessage(availability: DashboardSymbolSummary["availability"]): string {
+  switch (availability) {
+    case "configured": return "Configured for Live; Live ingestion is not active.";
+    case "awaiting": return "Awaiting first Live market data.";
+    case "unavailable": return "Live market data is unavailable.";
+    case "observed": return "No current market state available for this market.";
+  }
 }
 
 function buildErrorMessage(error: unknown): string {

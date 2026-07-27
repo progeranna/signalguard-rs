@@ -1,28 +1,16 @@
-import { useCatalogDashboardSummaryQuery } from "./api";
-import { isDashboardSymbolPlaceholder } from "./marketOrder";
-import { parseSymbolId } from "./symbolId";
 import type { SymbolPopupIdentity } from "./symbolPopup";
-import type {
-  DashboardAnomaly,
-  DashboardSummary,
-  DashboardSymbolSummary,
-  UiMode,
-} from "./types";
+import type { DashboardSymbolSummary } from "./types";
+import {
+  resolveSymbolMarketResource,
+  useSymbolMarketResource,
+  type SymbolMarketQueryBundle,
+  type SymbolMarketResourceData,
+  type SymbolMarketResourceState,
+} from "./symbolMarketResource";
 
-export type SymbolPopupResourceData = {
-  anomalies: DashboardAnomaly[];
-  mode: UiMode;
-  summary: DashboardSymbolSummary;
-  symbol: SymbolPopupIdentity["symbol"];
-};
-
-type PopupSummaryQueryState = {
-  data: DashboardSummary | null | undefined;
-  error: unknown;
-  isError: boolean;
-  isLoading: boolean;
-  refetch: () => Promise<unknown>;
-};
+export type SymbolPopupResourceData = SymbolMarketResourceData;
+export type PopupSymbolQueryBundle = SymbolMarketQueryBundle;
+type PopupResourceIdentity = SymbolPopupIdentity & { summary?: DashboardSymbolSummary };
 
 export type SymbolPopupResourceState =
   | {
@@ -48,67 +36,35 @@ export type SymbolPopupResourceState =
       status: "success";
     };
 
-export function resolveSymbolPopupResource(
+function attachPopupIdentity(
   identity: SymbolPopupIdentity,
-  query: PopupSummaryQueryState,
+  state: SymbolMarketResourceState,
 ): SymbolPopupResourceState {
-  if (query.isLoading && !query.data) {
-    return { identity, refetch: query.refetch, status: "loading" };
-  }
+  return { ...state, identity } as SymbolPopupResourceState;
+}
 
-  if (query.isError && !query.data) {
-    return {
-      error: query.error,
-      identity,
-      refetch: query.refetch,
-      status: "error",
-    };
-  }
-
-  const selectedSummary = query.data?.symbols.find(
-    (entry) => parseSymbolId(entry.symbol) === identity.symbol,
-  );
-
-  if (!selectedSummary || isDashboardSymbolPlaceholder(selectedSummary)) {
-    return { identity, refetch: query.refetch, status: "unavailable" };
-  }
-
-  const responseSymbol = parseSymbolId(selectedSummary.symbol);
-
-  if (responseSymbol !== identity.symbol) {
-    throw new TypeError(
-      `popup resource symbol mismatch: requested ${identity.symbol}, received ${selectedSummary.symbol}`,
-    );
-  }
-
-  return {
+export function resolveSymbolPopupResource(
+  identity: PopupResourceIdentity,
+  queries: PopupSymbolQueryBundle,
+): SymbolPopupResourceState {
+  return attachPopupIdentity(
     identity,
-    refetch: query.refetch,
-    resource: {
-      anomalies: (query.data?.recent_anomalies ?? []).filter(
-        (anomaly) => parseSymbolId(anomaly.symbol) === identity.symbol,
-      ),
-      mode: identity.mode,
-      summary: {
-        ...selectedSummary,
-        symbol: responseSymbol,
-      },
-      symbol: responseSymbol,
-    },
-    status: "success",
-  };
+    resolveSymbolMarketResource(
+      { mode: identity.mode, symbol: identity.symbol, summary: identity.summary },
+      queries,
+    ),
+  );
 }
 
 export function useSymbolPopupResource(
   identity: SymbolPopupIdentity,
+  summary?: DashboardSymbolSummary,
 ): SymbolPopupResourceState {
-  const query = useCatalogDashboardSummaryQuery(identity.mode);
-
-  return resolveSymbolPopupResource(identity, {
-    data: query.data,
-    error: query.error,
-    isError: query.isError,
-    isLoading: query.isLoading,
-    refetch: async () => query.refetch(),
+  const state = useSymbolMarketResource({
+    mode: identity.mode,
+    symbol: identity.symbol,
+    summary,
   });
+
+  return attachPopupIdentity(identity, state);
 }

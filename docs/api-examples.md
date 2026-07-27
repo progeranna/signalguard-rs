@@ -70,6 +70,8 @@ It combines:
 - per-symbol market health summaries derived from latest state plus recent anomalies
 - PostgreSQL-backed recent anomalies
 
+Every dashboard response carries `source` (`demo` or `live`). Each symbol carries the same source and an `availability` value: `observed` has current state/health, `configured` is configured while Replay is active, `awaiting` is configured Live data waiting for its first state, and `unavailable` has no current Live state. Non-observed entries keep `state` and `health` null. Live never falls back to Demo symbols or values.
+
 If a symbol is present in the tracked-symbol set but no latest market state is available, the symbol remains in the response while `state` and `health` are `null`.
 
 Example `mode=demo` response:

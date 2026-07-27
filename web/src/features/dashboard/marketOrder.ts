@@ -65,6 +65,8 @@ export function buildCoveredDashboardSymbols(
     symbols,
     (symbol) => symbol.symbol,
     (market) => ({
+      source: "demo",
+      availability: "unavailable",
       symbol: market,
       state: null,
       health: null,
@@ -81,7 +83,7 @@ export function isDashboardSymbolPlaceholder(
     return false;
   }
 
-  if (availability === "configured-unobserved") {
+  if (availability === "configured" || availability === "awaiting" || availability === "unavailable") {
     return true;
   }
 

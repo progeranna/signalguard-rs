@@ -15,18 +15,15 @@ export const DEMO_MARKETS = [
 ] as const;
 
 export type MarketCatalogAvailability =
-  | "demo"
   | "observed"
-  | "configured-unobserved";
+  | "configured"
+  | "awaiting"
+  | "unavailable";
 
 export type MarketCatalogEntry = {
   availability: MarketCatalogAvailability;
   summary: DashboardSymbolSummary;
   symbol: SymbolId;
-};
-
-type MarketCatalogDashboardSymbol = DashboardSymbolSummary & {
-  catalogAvailability: MarketCatalogAvailability;
 };
 
 export function buildMarketCatalog({
@@ -38,7 +35,7 @@ export function buildMarketCatalog({
   mode: UiMode;
   observedSymbols: readonly DashboardSymbolSummary[];
 }): MarketCatalogEntry[] {
-  const observedBySymbol = collectObservedSymbols(observedSymbols);
+  const summaries = collectObservedSymbols(observedSymbols, mode);
 
   if (mode === "demo") {
     return DEMO_MARKETS.map((market) => {
@@ -49,24 +46,22 @@ export function buildMarketCatalog({
       }
 
       return {
-        availability: "demo" as const,
-        summary: observedBySymbol.get(symbol) ?? emptyDashboardSymbol(symbol),
+        availability: summaries.get(symbol)?.availability ?? "unavailable",
+        summary: summaries.get(symbol) ?? emptyDashboardSymbol(symbol, mode),
         symbol,
       };
     });
   }
 
-  const configured = collectSymbolIds(configuredSymbols);
-  const symbols = new Set([...configured, ...observedBySymbol.keys()]);
-
-  return [...symbols]
+  void configuredSymbols;
+  return [...summaries.keys()]
     .sort((left, right) => left.localeCompare(right))
     .map((symbol) => {
-      const observed = observedBySymbol.get(symbol);
+      const summary = summaries.get(symbol);
 
       return {
-        availability: observed ? "observed" : "configured-unobserved",
-        summary: observed ?? emptyDashboardSymbol(symbol),
+        availability: summary?.availability ?? "unavailable",
+        summary: summary ?? emptyDashboardSymbol(symbol, mode),
         symbol,
       };
     });
@@ -79,11 +74,7 @@ export function marketCatalogSymbols(catalog: readonly MarketCatalogEntry[]): st
 export function marketCatalogDashboardSymbols(
   catalog: readonly MarketCatalogEntry[],
 ): DashboardSymbolSummary[] {
-  return catalog.map<MarketCatalogDashboardSymbol>((entry) => ({
-    ...entry.summary,
-    catalogAvailability: entry.availability,
-    symbol: entry.symbol,
-  }));
+  return catalog.map((entry) => ({ ...entry.summary, symbol: entry.symbol }));
 }
 
 export function findMarketCatalogEntry(
@@ -102,40 +93,18 @@ export function findMarketCatalogEntry(
 export function getMarketCatalogAvailability(
   symbol: DashboardSymbolSummary,
 ): MarketCatalogAvailability | null {
-  const availability = (symbol as Partial<MarketCatalogDashboardSymbol>)
-    .catalogAvailability;
-
-  return availability === "demo" ||
-    availability === "observed" ||
-    availability === "configured-unobserved"
-    ? availability
-    : null;
+  return symbol.availability;
 }
 
 export function isMarketCatalogSymbolList(
   symbols: DashboardSymbolSummary[],
 ): boolean {
-  return symbols.length === 0 || symbols.every(
-    (symbol) => getMarketCatalogAvailability(symbol) !== null,
-  );
-}
-
-function collectSymbolIds(symbols: readonly string[]): Set<SymbolId> {
-  const result = new Set<SymbolId>();
-
-  for (const symbol of symbols) {
-    const symbolId = parseSymbolId(symbol);
-
-    if (symbolId) {
-      result.add(symbolId);
-    }
-  }
-
-  return result;
+  return symbols.length === 0 || symbols.every((symbol) => getMarketCatalogAvailability(symbol) !== null);
 }
 
 function collectObservedSymbols(
   symbols: readonly DashboardSymbolSummary[],
+  mode: UiMode,
 ): Map<SymbolId, DashboardSymbolSummary> {
   const result = new Map<SymbolId, DashboardSymbolSummary>();
 
@@ -146,6 +115,9 @@ function collectObservedSymbols(
       continue;
     }
 
+    if (summary.source !== mode) {
+      throw new TypeError(`catalog symbol source mismatch: expected ${mode}, received ${summary.source}`);
+    }
     result.set(symbol, {
       ...summary,
       symbol,
@@ -155,8 +127,10 @@ function collectObservedSymbols(
   return result;
 }
 
-function emptyDashboardSymbol(symbol: SymbolId): DashboardSymbolSummary {
+function emptyDashboardSymbol(symbol: SymbolId, mode: UiMode): DashboardSymbolSummary {
   return {
+    source: mode,
+    availability: "unavailable",
     symbol,
     state: null,
     health: null,
