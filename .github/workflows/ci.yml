@@ -21,6 +21,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+      - name: Check generated API contract
+        run: cargo run --quiet --bin export-api-contract -- --check
+
       - name: Run cargo check
         run: cargo check
 

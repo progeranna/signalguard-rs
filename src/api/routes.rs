@@ -1,22 +1,25 @@
 use axum::{Router, routing::get};
 
-use super::handlers;
+use super::{contract, handlers};
 
 pub fn router() -> Router<super::AppState> {
     Router::new()
-        .route("/health", get(handlers::health))
+        .route(contract::HEALTH, get(handlers::health))
         .route(
-            "/runtime/mode",
+            contract::RUNTIME_MODE,
             get(handlers::runtime_mode).post(handlers::switch_runtime_mode),
         )
-        .route("/metrics", get(handlers::metrics))
-        .route("/pipeline/health", get(handlers::pipeline_health))
-        .route("/dashboard/summary", get(handlers::dashboard_summary))
-        .route("/symbols", get(handlers::symbols))
-        .route("/market/{symbol}/state", get(handlers::market_state))
-        .route("/market/{symbol}/health", get(handlers::market_health))
-        .route("/market/{symbol}/timeline", get(handlers::market_timeline))
-        .route("/anomalies", get(handlers::anomalies))
+        .route(contract::METRICS, get(handlers::metrics))
+        .route(contract::PIPELINE_HEALTH, get(handlers::pipeline_health))
+        .route(
+            contract::DASHBOARD_SUMMARY,
+            get(handlers::dashboard_summary),
+        )
+        .route(contract::SYMBOLS, get(handlers::symbols))
+        .route(contract::MARKET_STATE, get(handlers::market_state))
+        .route(contract::MARKET_HEALTH, get(handlers::market_health))
+        .route(contract::MARKET_TIMELINE, get(handlers::market_timeline))
+        .route(contract::ANOMALIES, get(handlers::anomalies))
 }
 
 #[cfg(test)]
