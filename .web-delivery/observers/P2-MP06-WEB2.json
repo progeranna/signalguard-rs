@@ -1,0 +1,10 @@
+{
+  "request_id": "P2-MP06-WEB2",
+  "run_id": 30264068470,
+  "status": "completed",
+  "conclusion": "failure",
+  "head_sha": "329026c6dd09fcea54c5a90e1be1db496f7a81be",
+  "html_url": "https://github.com/progeranna/signalguard-rs/actions/runs/30264068470",
+  "created_at": "2026-07-27T11:59:41Z",
+  "updated_at": "2026-07-27T12:01:53Z"
+}
