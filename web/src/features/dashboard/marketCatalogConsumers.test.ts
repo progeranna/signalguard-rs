@@ -46,8 +46,9 @@ describe("market catalog consumer wiring", () => {
 
     expect(rawHook).not.toContain("buildMarketCatalog");
     expect(rawHook).not.toContain("marketCatalogDashboardSymbols");
-    expect(catalogHook).toContain("buildMarketCatalog");
-    expect(catalogHook).toContain("marketCatalogDashboardSymbols");
+    expect(catalogHook).not.toContain("buildMarketCatalog");
+    expect(catalogHook).not.toContain("marketCatalogDashboardSymbols");
+    expect(catalogHook).not.toContain("useRuntimeModeQuery");
   });
 
   it("does not let catalog-aware pages reapply Demo coverage", () => {

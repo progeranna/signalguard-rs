@@ -1,4 +1,5 @@
 import type { SymbolPopupIdentity } from "./symbolPopup";
+import type { DashboardSymbolSummary } from "./types";
 import {
   resolveSymbolMarketResource,
   useSymbolMarketResource,
@@ -9,6 +10,7 @@ import {
 
 export type SymbolPopupResourceData = SymbolMarketResourceData;
 export type PopupSymbolQueryBundle = SymbolMarketQueryBundle;
+type PopupResourceIdentity = SymbolPopupIdentity & { summary?: DashboardSymbolSummary };
 
 export type SymbolPopupResourceState =
   | {
@@ -42,13 +44,13 @@ function attachPopupIdentity(
 }
 
 export function resolveSymbolPopupResource(
-  identity: SymbolPopupIdentity,
+  identity: PopupResourceIdentity,
   queries: PopupSymbolQueryBundle,
 ): SymbolPopupResourceState {
   return attachPopupIdentity(
     identity,
     resolveSymbolMarketResource(
-      { mode: identity.mode, symbol: identity.symbol },
+      { mode: identity.mode, symbol: identity.symbol, summary: identity.summary },
       queries,
     ),
   );
@@ -56,10 +58,12 @@ export function resolveSymbolPopupResource(
 
 export function useSymbolPopupResource(
   identity: SymbolPopupIdentity,
+  summary?: DashboardSymbolSummary,
 ): SymbolPopupResourceState {
   const state = useSymbolMarketResource({
     mode: identity.mode,
     symbol: identity.symbol,
+    summary,
   });
 
   return attachPopupIdentity(identity, state);

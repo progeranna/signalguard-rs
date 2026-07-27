@@ -89,6 +89,7 @@ vi.mock("@/features/dashboard/symbolPopupResource", () => ({
     const summary = observedSymbol(
       identity.symbol,
       `${identity.mode.toUpperCase()}-${identity.symbol}-PRICE`,
+      identity.mode,
     );
 
     return {
@@ -115,8 +116,10 @@ beforeEach(() => {
   document.body.style.overflow = "";
 });
 
-function observedSymbol(symbol: string, price: string): DashboardSymbolSummary {
+function observedSymbol(symbol: string, price: string, source: UiMode = "demo"): DashboardSymbolSummary {
   return {
+    source,
+    availability: "observed",
     health: {
       evaluated_at: "2026-07-20T10:00:00.000Z",
       recent_anomaly_count: 1,
@@ -156,14 +159,14 @@ function popupAnomaly(symbol: string): DashboardAnomaly {
 
 function summaryForMode(mode: UiMode): DashboardSummary {
   const symbols = [
-    observedSymbol("BTCUSDT", `${mode}-BTC-LIST`),
-    observedSymbol("ETHUSDT", `${mode}-ETH-LIST`),
-    observedSymbol("SOLUSDT", `${mode}-SOL-LIST`),
-    observedSymbol("XRPUSDT", `${mode}-XRP-LIST`),
-    observedSymbol("BNBUSDT", `${mode}-BNB-LIST`),
-    observedSymbol("ADAUSDT", `${mode}-ADA-LIST`),
-    observedSymbol("DOGEUSDT", `${mode}-DOGE-LIST`),
-    observedSymbol("LTCUSDT", `${mode}-LTC-LIST`),
+    observedSymbol("BTCUSDT", `${mode}-BTC-LIST`, mode),
+    observedSymbol("ETHUSDT", `${mode}-ETH-LIST`, mode),
+    observedSymbol("SOLUSDT", `${mode}-SOL-LIST`, mode),
+    observedSymbol("XRPUSDT", `${mode}-XRP-LIST`, mode),
+    observedSymbol("BNBUSDT", `${mode}-BNB-LIST`, mode),
+    observedSymbol("ADAUSDT", `${mode}-ADA-LIST`, mode),
+    observedSymbol("DOGEUSDT", `${mode}-DOGE-LIST`, mode),
+    observedSymbol("LTCUSDT", `${mode}-LTC-LIST`, mode),
   ];
   const recentAnomalies = [
     popupAnomaly("BTCUSDT"),
@@ -175,6 +178,7 @@ function summaryForMode(mode: UiMode): DashboardSummary {
   ];
 
   return {
+    source: mode,
     pipeline: {
       cache_errors: 0,
       last_message_age_ms: 20,

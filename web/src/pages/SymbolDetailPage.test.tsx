@@ -44,7 +44,7 @@ describe("symbol detail route resource ownership", () => {
   it("keeps dashboard summary usage limited to catalog choices", () => {
     expect(source).toContain("const catalogQuery = useCatalogDashboardSummaryQuery");
     expect(source).not.toContain("recentAnomalies.filter");
-    expect(source).not.toContain("availableSymbols.find");
+    expect(source).toContain("availableSymbols.find");
   });
 
   it("preserves loading, error, unavailable, and success shells", () => {

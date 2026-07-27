@@ -78,8 +78,9 @@ function jsonResponse(payload: unknown): Response {
   } as Response;
 }
 
-function dashboardSummary(symbol: string) {
+function dashboardSummary(symbol: string, source: "demo" | "live" = "demo") {
   return {
+    source,
     service: { service: "signalguard-rs", status: "ok" },
     pipeline: {
       depth_sequence_gap_count: 0,
@@ -95,14 +96,17 @@ function dashboardSummary(symbol: string) {
       {
         health: null,
         state: null,
+        source,
+        availability: "configured",
         symbol,
       },
     ],
   };
 }
 
-function marketTimeline(symbol: string) {
+function marketTimeline(symbol: string, source: "demo" | "live" = "demo") {
   return {
+    source,
     anomalies: [],
     points: [],
     symbol,
@@ -228,7 +232,7 @@ describe("mode and symbol request cancellation", () => {
     expect(obsolete?.signal?.aborted).toBe(true);
     expect(requests[1]?.signal?.aborted).toBe(false);
 
-    requests[1]?.deferred.resolve(jsonResponse(dashboardSummary("ETHUSDT")));
+    requests[1]?.deferred.resolve(jsonResponse(dashboardSummary("ETHUSDT", to)));
     await waitFor(() => expect(result.current.data?.symbols[0]?.symbol).toBe("ETHUSDT"));
   });
 
@@ -330,7 +334,7 @@ describe("disabled symbol queries", () => {
     expect(requests[0]?.url).toContain("/market/BTCUSDT/timeline?mode=live");
     expect(requests[0]?.url).not.toContain("BTCUSDTBTCUSDT");
 
-    requests[0]?.deferred.resolve(jsonResponse(marketTimeline("BTCUSDT")));
+    requests[0]?.deferred.resolve(jsonResponse(marketTimeline("BTCUSDT", "live")));
     await waitFor(() => expect(result.current.data?.symbol).toBe("BTCUSDT"));
   });
 });

@@ -17,8 +17,9 @@ use crate::{
 
 use super::dto::{
     AnomalyResponse, DashboardHealthSummary, DashboardServiceSummary, DashboardStateSummary,
-    DashboardSummaryResponse, DashboardSymbolSummary, MarketTimelinePointResponse,
-    MarketTimelineResponse, PipelineHealthResponse, PipelineHealthStatus,
+    DashboardSummaryResponse, DashboardSymbolSummary, MarketAvailability,
+    MarketTimelinePointResponse, MarketTimelineResponse, PipelineHealthResponse,
+    PipelineHealthStatus, PublicDataMode,
 };
 
 const DEMO_MARKETS: [&str; 7] = [
@@ -55,6 +56,8 @@ pub fn dashboard_summary(
             });
 
             DashboardSymbolSummary {
+                source: PublicDataMode::Demo,
+                availability: MarketAvailability::Observed,
                 symbol: symbol.as_str().to_owned(),
                 state: state.map(|market_state| {
                     DashboardStateSummary::from_market_state(market_state, now)
@@ -65,6 +68,7 @@ pub fn dashboard_summary(
         .collect();
 
     DashboardSummaryResponse {
+        source: PublicDataMode::Demo,
         service: DashboardServiceSummary {
             status: "ok",
             service: "signalguard-rs",
@@ -109,6 +113,7 @@ pub fn market_timeline(symbol: &Symbol) -> MarketTimelineResponse {
     };
 
     MarketTimelineResponse {
+        source: PublicDataMode::Demo,
         symbol: symbol.as_str().to_owned(),
         points,
         anomalies,

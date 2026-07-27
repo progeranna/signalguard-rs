@@ -23,7 +23,7 @@ use super::{
     dto::{
         AnomaliesResponse, AnomalyResponse, DashboardHealthSummary, DashboardServiceSummary,
         DashboardStateSummary, DashboardSummaryResponse, DashboardSymbolSummary, HealthResponse,
-        MarketHealthResponse, MarketStateResponse, MarketTimelinePointResponse,
+        MarketAvailability, MarketHealthResponse, MarketStateResponse, MarketTimelinePointResponse,
         MarketTimelineResponse, PipelineHealthResponse, PublicDataMode, PublicDataModeQuery,
         RuntimeModeResponse, RuntimeModeSwitchRequest, SymbolsResponse,
     },
@@ -102,11 +102,17 @@ pub async fn dashboard_summary(
 }
 
 async fn live_dashboard_summary(state: &AppState) -> Result<DashboardSummaryResponse, ApiError> {
-    let symbols = state
+    let runtime_snapshot = state.runtime_mode.snapshot();
+    let configured_symbols = runtime_snapshot.symbols.clone();
+    let registered_symbols = state
         .redis_cache
         .list_symbols()
         .await
         .map_err(|error| map_cache_error(state, error))?;
+    let mut symbols = configured_symbols;
+    symbols.extend(registered_symbols);
+    symbols.sort();
+    symbols.dedup();
     let market_states = state
         .redis_cache
         .get_market_states(&symbols)
@@ -114,8 +120,13 @@ async fn live_dashboard_summary(state: &AppState) -> Result<DashboardSummaryResp
         .map_err(|error| map_cache_error(state, error))?;
     let recent_anomalies = load_dashboard_recent_anomalies(state).await?;
     let now = state::snapshot_now();
-    let symbol_summaries =
-        build_dashboard_symbol_summaries(state, market_states, &recent_anomalies, now);
+    let symbol_summaries = build_dashboard_symbol_summaries(
+        state,
+        &runtime_snapshot,
+        market_states,
+        &recent_anomalies,
+        now,
+    );
 
     Ok(build_dashboard_summary_response(
         state,
@@ -148,7 +159,10 @@ pub async fn symbols(State(state): State<AppState>) -> Result<Json<SymbolsRespon
         .map(|symbol| symbol.as_str().to_owned())
         .collect();
 
-    Ok(Json(SymbolsResponse { symbols }))
+    Ok(Json(SymbolsResponse {
+        source: PublicDataMode::Live,
+        symbols,
+    }))
 }
 
 pub async fn market_state(
@@ -216,6 +230,7 @@ async fn live_market_timeline(
     });
 
     Ok(MarketTimelineResponse {
+        source: PublicDataMode::Live,
         symbol: symbol.as_str().to_owned(),
         points: trades
             .iter()
@@ -238,6 +253,7 @@ pub async fn anomalies(
         .map_err(|error| map_storage_error(&state, error))?;
 
     Ok(Json(AnomaliesResponse {
+        source: PublicDataMode::Live,
         anomalies: anomalies
             .into_iter()
             .map(AnomalyResponse::from_anomaly)
@@ -342,6 +358,7 @@ fn build_dashboard_summary_response(
     let pipeline = PipelineHealthResponse::from_snapshot(&state.counters.snapshot_at(now));
 
     DashboardSummaryResponse {
+        source: PublicDataMode::Live,
         service: DashboardServiceSummary {
             status: "ok",
             service: "signalguard-rs",
@@ -357,6 +374,7 @@ fn build_dashboard_summary_response(
 
 fn build_dashboard_symbol_summaries(
     state: &AppState,
+    runtime_snapshot: &crate::runtime::RuntimeModeSnapshot,
     market_states: Vec<(Symbol, Option<MarketState>)>,
     recent_anomalies: &[AnomalyEvent],
     now: chrono::DateTime<Utc>,
@@ -388,12 +406,46 @@ fn build_dashboard_symbol_summaries(
             };
 
             DashboardSymbolSummary {
+                source: PublicDataMode::Live,
+                availability: derive_live_availability(
+                    runtime_snapshot,
+                    &symbol,
+                    market_state.is_some(),
+                ),
                 symbol: symbol.as_str().to_owned(),
                 state: state_summary,
                 health: health_summary,
             }
         })
         .collect()
+}
+
+fn derive_live_availability(
+    runtime_snapshot: &crate::runtime::RuntimeModeSnapshot,
+    symbol: &Symbol,
+    observed: bool,
+) -> MarketAvailability {
+    if observed {
+        return MarketAvailability::Observed;
+    }
+
+    let configured = runtime_snapshot
+        .symbols
+        .iter()
+        .any(|candidate| candidate == symbol);
+    if !configured {
+        return MarketAvailability::Unavailable;
+    }
+
+    match (runtime_snapshot.mode, runtime_snapshot.status) {
+        (crate::runtime::RuntimeMode::Live, crate::runtime::RuntimeModeStatus::Starting)
+        | (crate::runtime::RuntimeMode::Live, crate::runtime::RuntimeModeStatus::Running)
+        | (crate::runtime::RuntimeMode::Live, crate::runtime::RuntimeModeStatus::Switching) => {
+            MarketAvailability::Awaiting
+        }
+        (crate::runtime::RuntimeMode::Replay, _) => MarketAvailability::Configured,
+        _ => MarketAvailability::Unavailable,
+    }
 }
 
 fn parse_anomalies_query(query: AnomaliesQuery) -> Result<(Option<Symbol>, u32), ApiError> {
@@ -446,12 +498,14 @@ mod tests {
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
     use super::{
-        AnomaliesQuery, anomalies, dashboard_summary, market_health, market_state, market_timeline,
-        metrics, parse_anomalies_query, pipeline_health, runtime_mode, switch_runtime_mode,
-        symbols,
+        AnomaliesQuery, anomalies, dashboard_summary, derive_live_availability, market_health,
+        market_state, market_timeline, metrics, parse_anomalies_query, pipeline_health,
+        runtime_mode, switch_runtime_mode, symbols,
     };
     use crate::api::AppState;
-    use crate::api::dto::{PublicDataMode, PublicDataModeQuery, RuntimeModeSwitchRequest};
+    use crate::api::dto::{
+        MarketAvailability, PublicDataMode, PublicDataModeQuery, RuntimeModeSwitchRequest,
+    };
     use crate::config::{
         BinanceSettings, DetectorSettings, HealthScoreSettings, HealthStatusThresholds,
         IngestionMode, IngestionSettings, SeverityPenaltySettings,
@@ -811,7 +865,10 @@ mod tests {
         assert!(body.get("pipeline").is_some());
         assert!(body["symbols"].as_array().is_some());
         assert!(body["recent_anomalies"].as_array().is_some());
-        assert!(body["symbols"].as_array().unwrap().is_empty());
+        assert_eq!(body["source"], "live");
+        assert_eq!(body["symbols"].as_array().unwrap().len(), 1);
+        assert_eq!(body["symbols"][0]["symbol"], "BTCUSDT");
+        assert_eq!(body["symbols"][0]["availability"], "configured");
         assert!(body["recent_anomalies"].as_array().unwrap().is_empty());
     }
 
@@ -1452,6 +1509,52 @@ mod tests {
         PublicDataModeQuery {
             mode: Some(PublicDataMode::Live),
         }
+    }
+
+    #[test]
+    fn live_availability_matrix_is_backend_owned_and_deterministic() {
+        use crate::runtime::{RuntimeMode, RuntimeModeStatus};
+
+        let symbol = Symbol::new("BTCUSDT").unwrap();
+        let mut snapshot = test_runtime_mode_snapshot();
+        snapshot.mode = RuntimeMode::Live;
+        snapshot.status = RuntimeModeStatus::Starting;
+        assert_eq!(
+            derive_live_availability(&snapshot, &symbol, false),
+            MarketAvailability::Awaiting
+        );
+        for status in [RuntimeModeStatus::Running, RuntimeModeStatus::Switching] {
+            snapshot.status = status;
+            assert_eq!(
+                derive_live_availability(&snapshot, &symbol, false),
+                MarketAvailability::Awaiting
+            );
+        }
+        for status in [
+            RuntimeModeStatus::Failed,
+            RuntimeModeStatus::Stopped,
+            RuntimeModeStatus::Completed,
+        ] {
+            snapshot.status = status;
+            assert_eq!(
+                derive_live_availability(&snapshot, &symbol, false),
+                MarketAvailability::Unavailable
+            );
+        }
+        snapshot.mode = RuntimeMode::Replay;
+        snapshot.status = RuntimeModeStatus::Running;
+        assert_eq!(
+            derive_live_availability(&snapshot, &symbol, false),
+            MarketAvailability::Configured
+        );
+        assert_eq!(
+            derive_live_availability(&snapshot, &symbol, true),
+            MarketAvailability::Observed
+        );
+        assert_eq!(
+            derive_live_availability(&snapshot, &Symbol::new("ETHUSDT").unwrap(), false),
+            MarketAvailability::Unavailable
+        );
     }
 
     fn test_detector_settings() -> DetectorSettings {

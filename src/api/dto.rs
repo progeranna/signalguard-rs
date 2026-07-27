@@ -101,6 +101,7 @@ pub struct HealthResponse {
 
 #[derive(Debug, JsonSchema, Serialize)]
 pub struct SymbolsResponse {
+    pub source: PublicDataMode,
     pub symbols: Vec<String>,
 }
 
@@ -139,6 +140,15 @@ pub enum PublicDataMode {
     Live,
 }
 
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MarketAvailability {
+    Observed,
+    Configured,
+    Awaiting,
+    Unavailable,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq)]
 pub struct PublicDataModeQuery {
     pub mode: Option<PublicDataMode>,
@@ -165,6 +175,8 @@ pub struct PipelineHealthResponse {
 
 #[derive(Debug, JsonSchema, Serialize)]
 pub struct MarketStateResponse {
+    pub source: PublicDataMode,
+    pub availability: MarketAvailability,
     pub symbol: String,
     #[schemars(required, with = "Option<String>")]
     pub last_trade_price: Option<Decimal>,
@@ -209,6 +221,7 @@ pub struct MarketStateResponse {
 
 #[derive(Debug, JsonSchema, Serialize)]
 pub struct AnomaliesResponse {
+    pub source: PublicDataMode,
     pub anomalies: Vec<AnomalyResponse>,
 }
 
@@ -231,6 +244,7 @@ pub struct AnomalyResponse {
 
 #[derive(Debug, JsonSchema, Serialize)]
 pub struct DashboardSummaryResponse {
+    pub source: PublicDataMode,
     pub service: DashboardServiceSummary,
     pub pipeline: PipelineHealthResponse,
     pub symbols: Vec<DashboardSymbolSummary>,
@@ -239,6 +253,7 @@ pub struct DashboardSummaryResponse {
 
 #[derive(Debug, JsonSchema, Serialize)]
 pub struct MarketTimelineResponse {
+    pub source: PublicDataMode,
     pub symbol: String,
     pub points: Vec<MarketTimelinePointResponse>,
     pub anomalies: Vec<AnomalyResponse>,
@@ -254,6 +269,8 @@ pub struct DashboardServiceSummary {
 
 #[derive(Debug, JsonSchema, Serialize)]
 pub struct DashboardSymbolSummary {
+    pub source: PublicDataMode,
+    pub availability: MarketAvailability,
     pub symbol: String,
     #[schemars(required)]
     pub state: Option<DashboardStateSummary>,
@@ -307,6 +324,8 @@ pub struct MarketTimelinePointResponse {
 impl MarketStateResponse {
     pub fn from_market_state(state: MarketState, now: DateTime<Utc>) -> Self {
         Self {
+            source: PublicDataMode::Live,
+            availability: MarketAvailability::Observed,
             symbol: state.symbol.as_str().to_owned(),
             last_trade_price: state.last_trade_price,
             last_trade_quantity: state.last_trade_quantity,
@@ -437,6 +456,8 @@ impl AnomalyResponse {
 
 #[derive(Debug, JsonSchema, Serialize)]
 pub struct MarketHealthResponse {
+    pub source: PublicDataMode,
+    pub availability: MarketAvailability,
     pub symbol: String,
     pub score: u8,
     pub base_score: u8,
@@ -453,6 +474,8 @@ pub struct MarketHealthResponse {
 impl MarketHealthResponse {
     pub fn from_evaluation(symbol: String, evaluation: crate::health::HealthEvaluation) -> Self {
         Self {
+            source: PublicDataMode::Live,
+            availability: MarketAvailability::Observed,
             symbol,
             score: evaluation.score,
             base_score: evaluation.base_score,

@@ -24,6 +24,7 @@ export function SymbolDetailPage() {
   const resourceState = useSymbolMarketResource({
     mode: selectedUiMode,
     symbol: canonicalRouteSymbol,
+    summary: availableSymbols.find((entry) => entry.symbol === canonicalRouteSymbol),
   });
   const marketViewModel =
     resourceState.status === "success"
@@ -59,6 +60,10 @@ export function SymbolDetailPage() {
               {selectedSymbol}
             </h1>
             <StatusBadge status={statusTone} text={symbolStatusText} />
+            <StatusBadge
+              status="neutral"
+              text={marketViewModel?.source === "live" ? "Live" : "Demo"}
+            />
           </div>
           <p className="max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
             Market-level market-data quality, freshness, and anomaly context.
@@ -175,7 +180,7 @@ export function SymbolDetailPage() {
                       />
                     </dl>
                   ) : (
-                    <FlatEmptyState message="No current market state available for this market." />
+              <FlatEmptyState message={availabilityMessage(marketViewModel?.availability)} />
                   )}
                 </div>
               </div>
@@ -266,6 +271,15 @@ function SymbolNotFoundState({
       )}
     </section>
   );
+}
+
+function availabilityMessage(availability: DashboardSymbolSummary["availability"] | undefined): string {
+  switch (availability) {
+    case "configured": return "Configured for Live; Live ingestion is not active.";
+    case "awaiting": return "Awaiting first Live market data.";
+    case "unavailable": return "Live market data is unavailable.";
+    default: return "No current market state available for this market.";
+  }
 }
 
 function MetricStrip({

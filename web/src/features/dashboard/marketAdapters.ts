@@ -7,7 +7,6 @@ import {
 } from "@/shared/lib/format";
 import { toStatusTone } from "@/shared/lib/status";
 
-import { isDashboardSymbolPlaceholder } from "./marketOrder";
 import { parseSymbolId, type SymbolId } from "./symbolId";
 import type { SymbolMarketResourceData } from "./symbolMarketResource";
 import type { DashboardAnomaly, DashboardSymbolSummary } from "./types";
@@ -30,6 +29,15 @@ function formatStatus(value: string | null | undefined): string {
     .split("_")
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ");
+}
+
+function availabilityStatus(availability: DashboardSymbolSummary["availability"], health: DashboardSymbolSummary["health"]): string {
+  switch (availability) {
+    case "configured": return "Configured";
+    case "awaiting": return "Awaiting data";
+    case "unavailable": return "Unavailable";
+    case "observed": return formatStatus(health?.status);
+  }
 }
 
 function formatAnomalyType(value: string | null | undefined): string {
@@ -136,6 +144,9 @@ export function adaptMarketResourceToViewModel(
   if (summary.symbol !== resource.symbol) {
     throw new TypeError(`market view-model symbol mismatch: expected ${resource.symbol}, received ${summary.symbol}`);
   }
+  if (summary.source !== resource.mode) {
+    throw new TypeError(`market view-model source mismatch: expected ${resource.mode}, received ${summary.source}`);
+  }
   for (const anomaly of resource.anomalies) {
     if (anomaly.symbol !== resource.symbol) {
       throw new TypeError(`anomaly view-model symbol mismatch: expected ${resource.symbol}, received ${anomaly.symbol}`);
@@ -144,12 +155,14 @@ export function adaptMarketResourceToViewModel(
 
   const state = summary.state;
   const health = summary.health;
-  const statusText = isDashboardSymbolPlaceholder(summary) ? "No data yet" : formatStatus(health?.status);
+  const statusText = availabilityStatus(summary.availability, health);
   return {
     identity: { mode: resource.mode, symbol: resource.symbol },
+    source: summary.source,
+    availability: summary.availability,
     status: { text: statusText, tone: toStatusTone(health?.status, "neutral") },
     healthScore: health?.score == null ? unavailable : `${health.score}`,
-    stateAvailable: state !== null,
+    stateAvailable: summary.availability === "observed" && state !== null,
     metrics: {
       bestAsk: display(formatDecimalString(state?.best_ask_price)),
       bestBid: display(formatDecimalString(state?.best_bid_price)),
@@ -162,7 +175,9 @@ export function adaptMarketResourceToViewModel(
       spread: display(formatPercent(state?.spread_pct)),
       tradesPerMinute: display(formatCompactNumber(state?.trades_per_minute)),
     },
-    anomalies: resource.anomalies.map((anomaly) => anomalyViewModel(anomaly, resource.symbol)),
+    anomalies: summary.availability === "observed"
+      ? resource.anomalies.map((anomaly) => anomalyViewModel(anomaly, resource.symbol))
+      : [],
   };
 }
 

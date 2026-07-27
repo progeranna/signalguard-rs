@@ -3,10 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/shared/api/client";
 
 import {
-  buildMarketCatalog,
-  marketCatalogDashboardSymbols,
-} from "./marketCatalog";
-import {
   dashboardSummaryQueryKeyForMode,
   marketAnomaliesQueryKey,
   marketHealthQueryKey,
@@ -62,7 +58,10 @@ export function fetchDashboardSummary(
   signal?: AbortSignal,
 ): Promise<DashboardSummary> {
   return fetchJson(withMode("/dashboard/summary", mode), {
-    schema: dashboardSummarySchema,
+    schema: dashboardSummarySchema.refine(
+      (summary) => summary.source === mode,
+      "dashboard summary source does not match requested mode",
+    ),
     signal,
   });
 }
@@ -101,7 +100,10 @@ export function fetchMarketTimeline(
   return fetchJson(
     withMode(`/market/${encodeURIComponent(symbolId)}/timeline`, mode),
     {
-      schema: marketTimelineSchema,
+      schema: marketTimelineSchema.refine(
+        (timeline) => timeline.source === mode,
+        "market timeline source does not match requested mode",
+      ),
       signal,
     },
   );
@@ -139,36 +141,20 @@ export function useDashboardSummaryQuery(mode: UiMode, enabled = true) {
 
 export function useCatalogDashboardSummaryQuery(mode: UiMode) {
   const dashboardSummaryQuery = useDashboardSummaryQuery(mode);
-  const runtimeModeQuery = useRuntimeModeQuery(mode === "live");
-  const summary = dashboardSummaryQuery.data;
-
-  return {
-    ...dashboardSummaryQuery,
-    data: summary
-      ? {
-          ...summary,
-          symbols: marketCatalogDashboardSymbols(
-            buildMarketCatalog({
-              configuredSymbols: runtimeModeQuery.data?.symbols ?? [],
-              mode,
-              observedSymbols: summary.symbols,
-            }),
-          ),
-        }
-      : summary,
-  };
+  return dashboardSummaryQuery;
 }
 
 export function useMarketStateQuery(
   symbol: string | null | undefined,
   mode: UiMode,
+  enabled = true,
 ) {
   const symbolId = parseSymbolId(symbol);
 
   return useQuery({
     queryKey: marketStateQueryKey(symbolId, mode),
     queryFn: ({ signal }) => fetchMarketState(symbolId ?? "", signal),
-    enabled: mode === "live" && symbolId !== null,
+    enabled: enabled && mode === "live" && symbolId !== null,
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
 }
@@ -176,13 +162,14 @@ export function useMarketStateQuery(
 export function useMarketHealthQuery(
   symbol: string | null | undefined,
   mode: UiMode,
+  enabled = true,
 ) {
   const symbolId = parseSymbolId(symbol);
 
   return useQuery({
     queryKey: marketHealthQueryKey(symbolId, mode),
     queryFn: ({ signal }) => fetchMarketHealth(symbolId ?? "", signal),
-    enabled: mode === "live" && symbolId !== null,
+    enabled: enabled && mode === "live" && symbolId !== null,
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
 }
@@ -206,6 +193,7 @@ export function useMarketAnomaliesQuery(
   symbol: string | null | undefined,
   mode: UiMode,
   limit = SYMBOL_ANOMALY_LIMIT,
+  enabled = true,
 ) {
   const symbolId = parseSymbolId(symbol);
 
@@ -213,7 +201,7 @@ export function useMarketAnomaliesQuery(
     queryKey: marketAnomaliesQueryKey(symbolId, mode, limit),
     queryFn: ({ signal }) =>
       fetchMarketAnomalies(symbolId ?? "", limit, signal),
-    enabled: mode === "live" && symbolId !== null,
+    enabled: enabled && mode === "live" && symbolId !== null,
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
   });
 }

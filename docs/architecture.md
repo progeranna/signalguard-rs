@@ -32,6 +32,8 @@ flowchart LR
 
 The same runtime pipeline handles replay and live events after normalization. The main split is at the source boundary, not in downstream business logic.
 
+The public API keeps that boundary explicit: response `source` is `demo` or `live`, and Live dashboard catalog entries carry `observed`, `configured`, `awaiting`, or `unavailable` availability. Backend catalog construction unions configured and Redis-registered symbols and performs one bulk state read; the frontend does not synthesize Live availability or substitute Demo values.
+
 ## Ingestion Modes
 
 ### Replay

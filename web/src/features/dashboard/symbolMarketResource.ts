@@ -23,6 +23,7 @@ import type {
 export type SymbolMarketIdentity = {
   mode: UiMode;
   symbol: SymbolId | null;
+  summary?: DashboardSymbolSummary;
 };
 
 export type SymbolMarketResourceData = {
@@ -137,9 +138,21 @@ export function resolveSymbolMarketResource(
   }
 
   if (identity.mode === "live") {
-    const notFound = relevantQueries.some(queryNotFoundWithoutData);
-
-    if (notFound) {
+    if (queryLoadingWithoutData(queries.demoSummary)) {
+      return { identity, refetch, status: "loading" };
+    }
+    const selectedSummary = queries.demoSummary.data?.symbols.find(
+      (entry) => parseSymbolId(entry.symbol) === identity.symbol,
+    ) ?? identity.summary;
+    if (selectedSummary && selectedSummary.availability !== "observed") {
+      return {
+        identity,
+        refetch,
+        resource: { anomalies: [], mode: identity.mode, summary: selectedSummary, symbol: identity.symbol },
+        status: "success",
+      };
+    }
+    if (relevantQueries.some(queryNotFoundWithoutData)) {
       return { identity, refetch, status: "unavailable" };
     }
   }
@@ -206,8 +219,10 @@ export function resolveSymbolMarketResource(
     resource: {
       anomalies: anomalies.anomalies,
       mode: identity.mode,
-      summary: {
-        health: {
+        summary: {
+          source: identity.mode,
+          availability: "observed",
+          health: {
           evaluated_at: health.evaluated_at,
           recent_anomaly_count: health.recent_anomaly_count,
           score: health.score,
@@ -235,18 +250,19 @@ export function resolveSymbolMarketResource(
 export function useSymbolMarketResource(
   identity: SymbolMarketIdentity,
 ): SymbolMarketResourceState {
-  const demoSummaryQuery = useDashboardSummaryQuery(
-    identity.mode,
-    identity.mode === "demo" && identity.symbol !== null,
-  );
+  const demoSummaryQuery = useDashboardSummaryQuery(identity.mode, identity.mode === "demo" && identity.symbol !== null);
   const timelineQuery = useMarketTimelineQuery(
     identity.symbol,
     identity.mode,
     identity.mode === "demo",
   );
-  const stateQuery = useMarketStateQuery(identity.symbol, identity.mode);
-  const healthQuery = useMarketHealthQuery(identity.symbol, identity.mode);
-  const anomaliesQuery = useMarketAnomaliesQuery(identity.symbol, identity.mode);
+  const selectedSummary = demoSummaryQuery.data?.symbols.find(
+    (entry) => parseSymbolId(entry.symbol) === identity.symbol,
+  ) ?? identity.summary;
+  const observed = identity.mode === "live" && (selectedSummary === undefined || selectedSummary.availability === "observed");
+  const stateQuery = useMarketStateQuery(identity.symbol, identity.mode, observed);
+  const healthQuery = useMarketHealthQuery(identity.symbol, identity.mode, observed);
+  const anomaliesQuery = useMarketAnomaliesQuery(identity.symbol, identity.mode, 50, observed);
 
   return resolveSymbolMarketResource(identity, {
     anomalies: anomaliesQuery,

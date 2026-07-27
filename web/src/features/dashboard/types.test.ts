@@ -31,6 +31,7 @@ function makeValidAnomaly(): DashboardAnomaly {
 
 function makeValidDashboardSummary(): DashboardSummary {
   return {
+    source: "demo",
     service: {
       status: "ok",
       service: "signalguard-rs",
@@ -45,6 +46,8 @@ function makeValidDashboardSummary(): DashboardSummary {
     },
     symbols: [
       {
+        source: "demo",
+        availability: "observed",
         symbol: "BTCUSDT",
         state: {
           last_trade_price: "63250.10",
@@ -71,6 +74,7 @@ function makeValidDashboardSummary(): DashboardSummary {
 
 function makeValidMarketTimeline(): MarketTimeline {
   return {
+    source: "demo",
     symbol: "BTCUSDT",
     points: [
       {

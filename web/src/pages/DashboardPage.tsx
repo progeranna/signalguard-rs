@@ -17,7 +17,6 @@ import {
 } from "@/features/dashboard/api";
 import { adaptMarketResourceToViewModel } from "@/features/dashboard/marketAdapters";
 import type { MarketAnomalyViewModel, MarketDetailViewModel } from "@/features/dashboard/marketViewModel";
-import { isDashboardSymbolPlaceholder } from "@/features/dashboard/marketOrder";
 import {
   normalizeSelectedSymbol,
   storeSelectedSymbol,
@@ -148,6 +147,9 @@ function MarketTimelineShell({
                 <div className="mb-2">
                   <div className="flex flex-wrap items-center gap-2 font-mono text-sm font-bold text-white">
                     <span>{selectedSymbol.symbol}</span>
+                    <span className="rounded-full border border-cyan-400/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200">
+                      {selectedSymbol.source === "live" ? "Live" : "Demo"}
+                    </span>
                     {timelineSeverity ? (
                       <span
                         className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
@@ -476,6 +478,7 @@ function DashboardTablesGrid({
         <SymbolDetailModal
           key={symbolPopupIdentityKey(activePopupIdentity)}
           identity={activePopupIdentity}
+          summary={summary}
           onBack={
             activePopupIdentity.returnContext === "symbols"
               ? () => setModalState({ type: "symbols" })
@@ -1279,16 +1282,21 @@ function SymbolHealthTableRowShell({
 
 function SymbolDetailModal({
   identity,
+  summary,
   onBack,
   onClose,
   onOpenSymbolDetail,
 }: {
   identity: SymbolPopupIdentity;
+  summary: DashboardSummary | null;
   onBack?: () => void;
   onClose: () => void;
   onOpenSymbolDetail: (symbol: string) => void;
 }) {
-  const resourceState = useSymbolPopupResource(identity);
+  const resourceState = useSymbolPopupResource(
+    identity,
+    summary?.symbols.find((entry) => entry.symbol === identity.symbol),
+  );
   const backLabel =
     identity.returnContext === "symbols"
       ? "Back to all markets"
@@ -1380,6 +1388,10 @@ function SymbolPopupSuccess({
         <StatusBadge
           status={status.tone}
           text={status.text}
+        />
+        <StatusBadge
+          status="neutral"
+          text={viewModel.source === "live" ? "Live" : "Demo"}
         />
       </div>
 
@@ -2030,11 +2042,12 @@ function statusLabel(value: string | null | undefined): string {
 }
 
 function marketStatusLabel(symbol: DashboardSymbolSummary): string {
-  if (isDashboardSymbolPlaceholder(symbol)) {
-    return "No data yet";
+  switch (symbol.availability) {
+    case "configured": return "Configured";
+    case "awaiting": return "Awaiting data";
+    case "unavailable": return "Unavailable";
+    case "observed": return statusLabel(symbol.health?.status);
   }
-
-  return statusLabel(symbol.health?.status);
 }
 
 function buildErrorMessage(error: unknown): string {
