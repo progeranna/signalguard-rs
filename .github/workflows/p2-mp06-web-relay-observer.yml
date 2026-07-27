@@ -1,0 +1,47 @@
+name: P2-MP06 Web Relay Observer
+
+on:
+  push:
+    branches:
+      - infra/p2-mp06-web-relay
+    paths:
+      - .web-delivery/observe/*.json
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: infra/p2-mp06-web-relay
+          fetch-depth: 0
+      - name: Record latest relay run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$(find .web-delivery/observe -maxdepth 1 -type f -name '*.json' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
+          request_id="$(jq -r '.request_id' "$request")"
+          run=''
+          for _ in $(seq 1 30); do
+            runs="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/p2-mp06-web-delivery-relay.yml/runs" -f branch=infra/p2-mp06-web-relay -f per_page=20)"
+            run="$(printf '%s' "$runs" | jq '[.workflow_runs[] | select(.name == "P2-MP06 Web Delivery Relay")] | first // empty')"
+            if [[ -n "$run" ]]; then
+              break
+            fi
+            sleep 2
+          done
+          test -n "$run"
+          result=".web-delivery/observers/${request_id}.json"
+          mkdir -p "$(dirname "$result")"
+          printf '%s' "$run" | jq --arg request_id "$request_id" '{request_id:$request_id, run_id:.id, status:.status, conclusion:.conclusion, head_sha:.head_sha, html_url:.html_url, created_at:.created_at, updated_at:.updated_at}' > "$result"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$result"
+          git commit -m "delivery: observe ${request_id} relay run"
+          git push origin HEAD:infra/p2-mp06-web-relay
