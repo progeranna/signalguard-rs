@@ -1,4 +1,4 @@
-use signalguard_rs::api::contract::{ARTIFACT_PATH, artifact_matches, render};
+use signalguard_rs::api::contract::{ARTIFACT_PATH, artifact_matches, render, validate_openapi};
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 fn main() -> ExitCode {
@@ -27,8 +27,21 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
+        "--validate" => match fs::read(&path) {
+            Ok(existing) => match validate_openapi(&existing) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::from(1)
+                }
+            },
+            Err(error) => {
+                eprintln!("cannot read {}: {error}", path.display());
+                ExitCode::from(1)
+            }
+        },
         _ => {
-            eprintln!("usage: export-api-contract --write|--check");
+            eprintln!("usage: export-api-contract --write|--check|--validate");
             ExitCode::from(2)
         }
     }

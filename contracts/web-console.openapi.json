@@ -372,6 +372,9 @@
         "title": "DashboardSymbolSummary",
         "type": "object"
       },
+      "ExtractorRejectionBody": {
+        "type": "string"
+      },
       "HealthResponse": {
         "properties": {
           "service": {
@@ -861,9 +864,9 @@
           },
           "400": {
             "content": {
-              "application/json": {
+              "text/plain; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
+                  "$ref": "#/components/schemas/ExtractorRejectionBody"
                 }
               }
             },
@@ -1078,6 +1081,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiErrorResponse"
                 }
+              },
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractorRejectionBody"
+                }
               }
             },
             "description": "API error"
@@ -1157,6 +1165,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiErrorResponse"
                 }
+              },
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractorRejectionBody"
+                }
               }
             },
             "description": "API error"
@@ -1176,6 +1189,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "415": {
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractorRejectionBody"
+                }
+              }
+            },
+            "description": "API error"
+          },
+          "422": {
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractorRejectionBody"
                 }
               }
             },

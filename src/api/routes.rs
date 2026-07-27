@@ -421,6 +421,137 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
+    #[tokio::test]
+    async fn extractor_rejection_probe_matrix_records_actual_http_behavior() {
+        let probes = [
+            (
+                "dashboard invalid mode",
+                get("/dashboard/summary?mode=prod", dashboard_state()).await,
+                StatusCode::BAD_REQUEST,
+                "text/plain; charset=utf-8",
+                false,
+            ),
+            (
+                "timeline invalid mode",
+                get("/market/BTCUSDT/timeline?mode=prod", timeline_state()).await,
+                StatusCode::BAD_REQUEST,
+                "text/plain; charset=utf-8",
+                false,
+            ),
+            (
+                "timeline invalid symbol",
+                get("/market/BTC-USDT/timeline?mode=demo", timeline_state()).await,
+                StatusCode::BAD_REQUEST,
+                "application/json",
+                true,
+            ),
+            (
+                "anomalies invalid limit",
+                get("/anomalies?limit=wat", unavailable_state()).await,
+                StatusCode::BAD_REQUEST,
+                "application/json",
+                true,
+            ),
+            (
+                "anomalies invalid symbol",
+                get("/anomalies?symbol=BTC-USDT", unavailable_state()).await,
+                StatusCode::BAD_REQUEST,
+                "application/json",
+                true,
+            ),
+            (
+                "post malformed json",
+                raw_post("/runtime/mode", Some("application/json"), "{").await,
+                StatusCode::BAD_REQUEST,
+                "text/plain; charset=utf-8",
+                false,
+            ),
+            (
+                "post wrong field type",
+                raw_post("/runtime/mode", Some("application/json"), r#"{"mode":42}"#).await,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "text/plain; charset=utf-8",
+                false,
+            ),
+            (
+                "post missing mode",
+                raw_post(
+                    "/runtime/mode",
+                    Some("application/json"),
+                    r#"{"symbols":[]}"#,
+                )
+                .await,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "text/plain; charset=utf-8",
+                false,
+            ),
+            (
+                "post missing content type",
+                raw_post("/runtime/mode", None, r#"{"mode":"live"}"#).await,
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "text/plain; charset=utf-8",
+                false,
+            ),
+            (
+                "post wrong content type",
+                raw_post("/runtime/mode", Some("text/plain"), r#"{"mode":"live"}"#).await,
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "text/plain; charset=utf-8",
+                false,
+            ),
+            (
+                "post unsupported mode",
+                post_with_switching(
+                    "/runtime/mode",
+                    serde_json::json!({"mode":"unsupported"}),
+                    true,
+                )
+                .await,
+                StatusCode::BAD_REQUEST,
+                "application/json",
+                true,
+            ),
+            (
+                "post switching forbidden",
+                post(
+                    "/runtime/mode",
+                    serde_json::json!({"mode":"live"}),
+                    unavailable_state(),
+                )
+                .await,
+                StatusCode::FORBIDDEN,
+                "application/json",
+                true,
+            ),
+        ];
+        for (label, response, expected_status, expected_content_type, expect_json) in probes {
+            let status = response.status();
+            let content_type = response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("<missing>")
+                .to_owned();
+            let body = String::from_utf8(
+                axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
+            )
+            .unwrap();
+            println!("{label}: status={status} content_type={content_type} body={body}");
+            assert_eq!(status, expected_status, "{label} status");
+            assert_eq!(content_type, expected_content_type, "{label} content type");
+            assert!(!body.is_empty());
+            if expect_json {
+                let body: serde_json::Value =
+                    serde_json::from_str(&body).expect("handler errors are JSON");
+                assert!(body["error"].is_string());
+                assert!(body["message"].is_string());
+            }
+        }
+    }
+
     async fn get(path: &str, state: AppState) -> Response {
         router()
             .with_state(state)
@@ -438,6 +569,31 @@ mod tests {
                     .body(Body::from(body.to_string()))
                     .unwrap(),
             )
+            .await
+            .unwrap()
+    }
+
+    async fn post_with_switching(
+        path: &str,
+        body: serde_json::Value,
+        switching_supported: bool,
+    ) -> Response {
+        post(
+            path,
+            body,
+            unavailable_state_with_switching(switching_supported),
+        )
+        .await
+    }
+
+    async fn raw_post(path: &str, content_type: Option<&str>, body: &str) -> Response {
+        let mut request = Request::post(path);
+        if let Some(content_type) = content_type {
+            request = request.header(header::CONTENT_TYPE, content_type);
+        }
+        router()
+            .with_state(unavailable_state())
+            .oneshot(request.body(Body::from(body.to_owned())).unwrap())
             .await
             .unwrap()
     }

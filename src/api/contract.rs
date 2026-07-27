@@ -102,8 +102,25 @@ fn response(name: &str) -> Value {
     json!({"description":"OK","content":{"application/json":{"schema":ref_schema(name)}}})
 }
 
-fn error_response() -> Value {
-    json!({"description":"API error","content":{"application/json":{"schema":ref_schema("ApiErrorResponse")}}})
+#[derive(Clone, Copy)]
+enum ErrorResponseKind {
+    HandlerJson,
+    ExtractorText,
+}
+
+fn error_content(kind: ErrorResponseKind) -> (&'static str, Value) {
+    match kind {
+        ErrorResponseKind::HandlerJson => ("application/json", ref_schema("ApiErrorResponse")),
+        ErrorResponseKind::ExtractorText => (
+            "text/plain; charset=utf-8",
+            ref_schema("ExtractorRejectionBody"),
+        ),
+    }
+}
+
+fn error_response(kind: ErrorResponseKind) -> Value {
+    let (media_type, schema) = error_content(kind);
+    json!({"description":"API error","content":{media_type:{"schema":schema}}})
 }
 
 fn query(name: &str, schema: Value) -> Value {
@@ -148,7 +165,7 @@ fn operation(
     method: &str,
     parameters: Vec<Value>,
     success: &str,
-    errors: &[(&str, &str)],
+    errors: &[(&str, ErrorResponseKind)],
 ) -> Value {
     let mut value = Map::new();
     value.insert("operationId".into(), Value::String(method.into()));
@@ -157,8 +174,12 @@ fn operation(
     }
     let mut responses = Map::new();
     responses.insert("200".into(), response(success));
-    for (status, _) in errors {
-        responses.insert((*status).into(), error_response());
+    for (status, kind) in errors {
+        let entry = responses
+            .entry(*status)
+            .or_insert_with(|| json!({"description":"API error","content":{}}));
+        let (media_type, schema) = error_content(*kind);
+        entry["content"][media_type] = json!({"schema":schema});
     }
     value.insert("responses".into(), Value::Object(responses));
     Value::Object(value)
@@ -317,6 +338,7 @@ pub fn document() -> Value {
     error.insert("properties".into(), json!({"error":{"type":"string","enum":["invalid_symbol","invalid_request","forbidden","conflict","not_found","cache_unavailable","internal_error"]},"message":{"type":"string"}}));
     error.insert("required".into(), json!(["error", "message"]));
     schemas.insert("ApiErrorResponse".into(), Value::Object(error));
+    schemas.insert("ExtractorRejectionBody".into(), json!({"type":"string"}));
 
     let mode = query("mode", json!({"type":"string","enum":["demo","live"]}));
     let mut paths = Map::new();
@@ -324,17 +346,17 @@ pub fn document() -> Value {
         HEALTH.into(),
         json!({"get":operation("getHealth", vec![], "HealthResponse", &[])}),
     );
-    paths.insert(RUNTIME_MODE.into(), json!({"get":operation("getRuntimeMode", vec![], "RuntimeModeResponse", &[]),"post":{"operationId":"postRuntimeMode","requestBody":{"required":true,"content":{"application/json":{"schema":ref_schema("RuntimeModeSwitchRequest")}}},"responses":{"200":response("RuntimeModeResponse"),"400":error_response(),"403":error_response(),"409":error_response(),"500":error_response()}}}));
+    paths.insert(RUNTIME_MODE.into(), json!({"get":operation("getRuntimeMode", vec![], "RuntimeModeResponse", &[]),"post":{"operationId":"postRuntimeMode","requestBody":{"required":true,"content":{"application/json":{"schema":ref_schema("RuntimeModeSwitchRequest")}}},"responses":{"200":response("RuntimeModeResponse"),"400":{"description":"API error","content":{"application/json":{"schema":ref_schema("ApiErrorResponse")},"text/plain; charset=utf-8":{"schema":ref_schema("ExtractorRejectionBody")}}},"403":error_response(ErrorResponseKind::HandlerJson),"409":error_response(ErrorResponseKind::HandlerJson),"415":error_response(ErrorResponseKind::ExtractorText),"422":error_response(ErrorResponseKind::ExtractorText),"500":error_response(ErrorResponseKind::HandlerJson)}}}));
     paths.insert(
         PIPELINE_HEALTH.into(),
         json!({"get":operation("getPipelineHealth", vec![], "PipelineHealthResponse", &[])}),
     );
-    paths.insert(DASHBOARD_SUMMARY.into(), json!({"get":operation("getDashboardSummary", vec![mode.clone()], "DashboardSummaryResponse", &[("400", "invalid mode"), ("500", "storage error"), ("503", "cache unavailable")])}));
-    paths.insert(SYMBOLS.into(), json!({"get":operation("getSymbols", vec![], "SymbolsResponse", &[("500", "storage error"), ("503", "cache unavailable")])}));
-    paths.insert(MARKET_STATE.into(), json!({"get":operation("getMarketState", vec![path_param()], "MarketStateResponse", &[("400", "invalid symbol"), ("404", "not found"), ("503", "cache unavailable")])}));
-    paths.insert(MARKET_HEALTH.into(), json!({"get":operation("getMarketHealth", vec![path_param()], "MarketHealthResponse", &[("400", "invalid symbol"), ("404", "not found"), ("500", "storage error"), ("503", "cache unavailable")])}));
-    paths.insert(MARKET_TIMELINE.into(), json!({"get":operation("getMarketTimeline", vec![path_param(), mode], "MarketTimelineResponse", &[("400", "invalid symbol or mode"), ("500", "storage error")])}));
-    paths.insert(ANOMALIES.into(), json!({"get":operation("getAnomalies", vec![query("symbol", json!({"type":"string","pattern":"^[A-Za-z0-9]+$"})), query("limit", json!({"type":"string","pattern":"^[0-9]+$"}))], "AnomaliesResponse", &[("400", "invalid query"), ("500", "storage error")])}));
+    paths.insert(DASHBOARD_SUMMARY.into(), json!({"get":operation("getDashboardSummary", vec![mode.clone()], "DashboardSummaryResponse", &[("400", ErrorResponseKind::ExtractorText), ("500", ErrorResponseKind::HandlerJson), ("503", ErrorResponseKind::HandlerJson)])}));
+    paths.insert(SYMBOLS.into(), json!({"get":operation("getSymbols", vec![], "SymbolsResponse", &[("500", ErrorResponseKind::HandlerJson), ("503", ErrorResponseKind::HandlerJson)])}));
+    paths.insert(MARKET_STATE.into(), json!({"get":operation("getMarketState", vec![path_param()], "MarketStateResponse", &[("400", ErrorResponseKind::HandlerJson), ("404", ErrorResponseKind::HandlerJson), ("503", ErrorResponseKind::HandlerJson)])}));
+    paths.insert(MARKET_HEALTH.into(), json!({"get":operation("getMarketHealth", vec![path_param()], "MarketHealthResponse", &[("400", ErrorResponseKind::HandlerJson), ("404", ErrorResponseKind::HandlerJson), ("500", ErrorResponseKind::HandlerJson), ("503", ErrorResponseKind::HandlerJson)])}));
+    paths.insert(MARKET_TIMELINE.into(), json!({"get":operation("getMarketTimeline", vec![path_param(), mode], "MarketTimelineResponse", &[("400", ErrorResponseKind::ExtractorText), ("400", ErrorResponseKind::HandlerJson), ("500", ErrorResponseKind::HandlerJson)])}));
+    paths.insert(ANOMALIES.into(), json!({"get":operation("getAnomalies", vec![query("symbol", json!({"type":"string","pattern":"^[A-Za-z0-9]+$"})), query("limit", json!({"type":"string","pattern":"^[0-9]+$"}))], "AnomaliesResponse", &[("400", ErrorResponseKind::HandlerJson), ("500", ErrorResponseKind::HandlerJson)])}));
     let mut document = json!({"openapi":"3.0.3","info":{"title":"SignalGuard web console API","version":"0.4.0"},"paths":paths,"components":{"schemas":schemas},"x-signalguard-metrics":{"path":METRICS,"method":"GET","contentType":"text/plain; version=0.0.4; charset=utf-8","description":"Prometheus text endpoint; excluded from JSON schemas."}});
     sort_object_keys(&mut document);
     document
@@ -363,6 +385,12 @@ pub fn artifact_matches(bytes: &[u8]) -> bool {
     bytes == render()
 }
 
+pub fn validate_openapi(bytes: &[u8]) -> Result<(), String> {
+    serde_json::from_slice::<openapiv3::OpenAPI>(bytes)
+        .map(|_| ())
+        .map_err(|error| format!("OpenAPI 3.0.3 validation failed: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,6 +407,15 @@ mod tests {
             "/contracts/web-console.openapi.json"
         ));
         assert!(artifact_matches(artifact));
+    }
+
+    #[test]
+    fn checked_artifact_is_valid_openapi_3_0_3() {
+        let artifact = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/contracts/web-console.openapi.json"
+        ));
+        validate_openapi(artifact).unwrap();
     }
 
     #[test]
@@ -538,7 +575,7 @@ mod tests {
         };
         assert_eq!(
             responses(RUNTIME_MODE, "post"),
-            vec!["200", "400", "403", "409", "500"]
+            vec!["200", "400", "403", "409", "415", "422", "500"]
         );
         assert_eq!(
             responses(MARKET_STATE, "get"),
@@ -556,5 +593,46 @@ mod tests {
                     || responses(path, "get").contains(&"503".into())
             );
         }
+    }
+
+    #[test]
+    fn error_media_types_match_router_probe_matrix() {
+        let document = document();
+        let content = |path: &str, method: &str, status: &str| {
+            document["paths"][path][method]["responses"][status]["content"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            content(DASHBOARD_SUMMARY, "get", "400"),
+            vec!["text/plain; charset=utf-8"]
+        );
+        assert_eq!(
+            content(MARKET_TIMELINE, "get", "400"),
+            vec!["application/json", "text/plain; charset=utf-8"]
+        );
+        assert_eq!(
+            content(RUNTIME_MODE, "post", "400"),
+            vec!["application/json", "text/plain; charset=utf-8"]
+        );
+        assert_eq!(
+            content(RUNTIME_MODE, "post", "415"),
+            vec!["text/plain; charset=utf-8"]
+        );
+        assert_eq!(
+            content(RUNTIME_MODE, "post", "422"),
+            vec!["text/plain; charset=utf-8"]
+        );
+        assert_eq!(
+            content(MARKET_STATE, "get", "400"),
+            vec!["application/json"]
+        );
+        assert_eq!(
+            document["components"]["schemas"]["ExtractorRejectionBody"]["type"],
+            "string"
+        );
     }
 }

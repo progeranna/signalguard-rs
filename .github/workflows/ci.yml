@@ -24,6 +24,9 @@ jobs:
       - name: Check generated API contract
         run: cargo run --quiet --bin export-api-contract -- --check
 
+      - name: Validate OpenAPI 3.0.3 contract
+        run: cargo run --quiet --bin export-api-contract -- --validate
+
       - name: Run cargo check
         run: cargo check
 
