@@ -107,10 +107,15 @@ async fn live_dashboard_summary(state: &AppState) -> Result<DashboardSummaryResp
         .list_symbols()
         .await
         .map_err(|error| map_cache_error(state, error))?;
+    let market_states = state
+        .redis_cache
+        .get_market_states(&symbols)
+        .await
+        .map_err(|error| map_cache_error(state, error))?;
     let recent_anomalies = load_dashboard_recent_anomalies(state).await?;
     let now = state::snapshot_now();
     let symbol_summaries =
-        load_dashboard_symbol_summaries(state, symbols, &recent_anomalies, now).await?;
+        build_dashboard_symbol_summaries(state, market_states, &recent_anomalies, now);
 
     Ok(build_dashboard_summary_response(
         state,
@@ -350,50 +355,45 @@ fn build_dashboard_summary_response(
     }
 }
 
-async fn load_dashboard_symbol_summaries(
+fn build_dashboard_symbol_summaries(
     state: &AppState,
-    symbols: Vec<Symbol>,
+    market_states: Vec<(Symbol, Option<MarketState>)>,
     recent_anomalies: &[AnomalyEvent],
     now: chrono::DateTime<Utc>,
-) -> Result<Vec<DashboardSymbolSummary>, ApiError> {
-    let mut summaries = Vec::with_capacity(symbols.len());
+) -> Vec<DashboardSymbolSummary> {
+    market_states
+        .into_iter()
+        .map(|(symbol, market_state)| {
+            let (state_summary, health_summary) = if let Some(market_state) = market_state.as_ref()
+            {
+                let symbol_anomalies = recent_anomalies
+                    .iter()
+                    .filter(|anomaly| anomaly.symbol == symbol)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let evaluation = evaluate_health(HealthScoringInput {
+                    state: market_state,
+                    anomalies: &symbol_anomalies,
+                    now,
+                    settings: &state.health_settings,
+                    stale_data_ms_threshold: state.detector_settings.stale_data_ms_threshold,
+                });
 
-    for symbol in symbols {
-        let market_state = state
-            .redis_cache
-            .get_market_state(&symbol)
-            .await
-            .map_err(|error| map_cache_error(state, error))?;
-        let (state_summary, health_summary) = if let Some(market_state) = market_state.as_ref() {
-            let symbol_anomalies = recent_anomalies
-                .iter()
-                .filter(|anomaly| anomaly.symbol == symbol)
-                .cloned()
-                .collect::<Vec<_>>();
-            let evaluation = evaluate_health(HealthScoringInput {
-                state: market_state,
-                anomalies: &symbol_anomalies,
-                now,
-                settings: &state.health_settings,
-                stale_data_ms_threshold: state.detector_settings.stale_data_ms_threshold,
-            });
+                (
+                    Some(DashboardStateSummary::from_market_state(market_state, now)),
+                    Some(DashboardHealthSummary::from_evaluation(evaluation)),
+                )
+            } else {
+                (None, None)
+            };
 
-            (
-                Some(DashboardStateSummary::from_market_state(market_state, now)),
-                Some(DashboardHealthSummary::from_evaluation(evaluation)),
-            )
-        } else {
-            (None, None)
-        };
-
-        summaries.push(DashboardSymbolSummary {
-            symbol: symbol.as_str().to_owned(),
-            state: state_summary,
-            health: health_summary,
-        });
-    }
-
-    Ok(summaries)
+            DashboardSymbolSummary {
+                symbol: symbol.as_str().to_owned(),
+                state: state_summary,
+                health: health_summary,
+            }
+        })
+        .collect()
 }
 
 fn parse_anomalies_query(query: AnomaliesQuery) -> Result<(Option<Symbol>, u32), ApiError> {
@@ -839,6 +839,97 @@ mod tests {
         assert!(symbols[0]["state"].is_object());
         assert!(symbols[0]["health"].is_object());
         assert_eq!(symbols[1]["symbol"], "ETHUSDT");
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_handler_bulk_maps_state_and_health_to_each_symbol() {
+        let mut btc = test_market_state_for("BTCUSDT");
+        btc.last_trade_price = Some(Decimal::new(100, 0));
+        let mut eth = test_market_state_for("ETHUSDT");
+        eth.last_trade_price = Some(Decimal::new(200, 0));
+        let state = AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::in_memory_with_symbols(
+                vec![eth.symbol.clone(), btc.symbol.clone()],
+                vec![eth, btc],
+            ),
+            detector_settings: test_detector_settings(),
+            health_settings: test_health_settings(),
+            runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(false),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: Some(vec![test_recent_anomaly("ETHUSDT")]),
+            test_recent_trades: None,
+        };
+
+        let response = dashboard_summary(State(state), Query(live_public_data_mode_query()))
+            .await
+            .unwrap()
+            .into_response();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let symbols = body["symbols"].as_array().unwrap();
+
+        assert_eq!(symbols[0]["symbol"], "BTCUSDT");
+        assert_eq!(symbols[0]["state"]["last_trade_price"], "100");
+        assert_eq!(symbols[0]["health"]["recent_anomaly_count"], 0);
+        assert_eq!(symbols[0]["health"]["score"], 100);
+        assert_eq!(symbols[1]["symbol"], "ETHUSDT");
+        assert_eq!(symbols[1]["state"]["last_trade_price"], "200");
+        assert_eq!(symbols[1]["health"]["recent_anomaly_count"], 1);
+        assert_eq!(symbols[1]["health"]["score"], 85);
+    }
+
+    #[tokio::test]
+    async fn dashboard_summary_handler_preserves_missing_first_middle_and_last_states() {
+        let btc = test_market_state_for("BTCUSDT");
+        let eth = test_market_state_for("ETHUSDT");
+        let symbols = vec![
+            Symbol::new("XRPUSDT").unwrap(),
+            Symbol::new("DOGEUSDT").unwrap(),
+            Symbol::new("ETHUSDT").unwrap(),
+            Symbol::new("BTCUSDT").unwrap(),
+            Symbol::new("ADAUSDT").unwrap(),
+        ];
+        let state = AppState {
+            pg_pool: unused_test_pool(),
+            redis_cache: RedisCache::in_memory_with_symbols(symbols, vec![eth, btc]),
+            detector_settings: test_detector_settings(),
+            health_settings: test_health_settings(),
+            runtime_mode: test_runtime_mode_handle(),
+            supervisor: test_supervisor(false),
+            counters: InternalCounters::default(),
+            test_recent_anomalies: Some(Vec::new()),
+            test_recent_trades: None,
+        };
+
+        let response = dashboard_summary(State(state), Query(live_public_data_mode_query()))
+            .await
+            .unwrap()
+            .into_response();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let symbols = body["symbols"].as_array().unwrap();
+
+        assert_eq!(symbols[0]["symbol"], "ADAUSDT");
+        assert!(symbols[0]["state"].is_null());
+        assert!(symbols[0]["health"].is_null());
+        assert_eq!(symbols[1]["symbol"], "BTCUSDT");
+        assert!(symbols[1]["state"].is_object());
+        assert_eq!(symbols[2]["symbol"], "DOGEUSDT");
+        assert!(symbols[2]["state"].is_null());
+        assert!(symbols[2]["health"].is_null());
+        assert_eq!(symbols[3]["symbol"], "ETHUSDT");
+        assert!(symbols[3]["state"].is_object());
+        assert_eq!(symbols[4]["symbol"], "XRPUSDT");
+        assert!(symbols[4]["state"].is_null());
+        assert!(symbols[4]["health"].is_null());
     }
 
     #[tokio::test]

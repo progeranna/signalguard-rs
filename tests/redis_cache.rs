@@ -65,6 +65,74 @@ async fn missing_symbol_returns_none() {
 
 #[tokio::test]
 #[ignore = "requires local Redis via docker compose and REDIS_URL"]
+async fn bulk_market_state_read_uses_one_mget_and_preserves_order() {
+    let _guard = redis_test_lock().lock().await;
+    let (cache, redis_url) = test_cache().await;
+    cache.clear_market_state_cache().await.unwrap();
+
+    let btc = test_market_state(test_symbol("BULKBTC"));
+    let eth = test_market_state(test_symbol("BULKETH"));
+    let missing_first = test_symbol("MISSFIRST");
+    let missing_middle = test_symbol("MISSMIDDLE");
+    let missing_last = test_symbol("MISSLAST");
+    cache.set_market_state(&btc).await.unwrap();
+    cache.set_market_state(&eth).await.unwrap();
+
+    let client = redis::Client::open(redis_url.as_str()).unwrap();
+    let mut connection = client.get_multiplexed_async_connection().await.unwrap();
+    let unrelated_key = unrelated_key();
+    let (): () = connection.set(&unrelated_key, "keep-me").await.unwrap();
+    let (): () = redis::cmd("CONFIG")
+        .arg("RESETSTAT")
+        .query_async(&mut connection)
+        .await
+        .unwrap();
+
+    let requested = vec![
+        missing_first.clone(),
+        btc.symbol.clone(),
+        missing_middle.clone(),
+        eth.symbol.clone(),
+        btc.symbol.clone(),
+        missing_last.clone(),
+    ];
+    let loaded = cache.get_market_states(&requested).await.unwrap();
+    let commandstats: String = redis::cmd("INFO")
+        .arg("commandstats")
+        .query_async(&mut connection)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        loaded,
+        vec![
+            (missing_first, None),
+            (btc.symbol.clone(), Some(btc.clone())),
+            (missing_middle, None),
+            (eth.symbol.clone(), Some(eth.clone())),
+            (btc.symbol.clone(), Some(btc)),
+            (missing_last, None),
+        ]
+    );
+    assert!(commandstats.contains("cmdstat_mget:calls=1,"));
+    assert!(!commandstats.contains("cmdstat_get:"));
+    assert_eq!(
+        connection
+            .get::<_, Option<String>>(&unrelated_key)
+            .await
+            .unwrap(),
+        Some(String::from("keep-me"))
+    );
+    let registered_count: usize = connection.scard("signalguard:symbols").await.unwrap();
+    assert_eq!(registered_count, 2);
+
+    let deleted_count: usize = connection.del(&unrelated_key).await.unwrap();
+    assert_eq!(deleted_count, 1);
+    cache.clear_market_state_cache().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires local Redis via docker compose and REDIS_URL"]
 async fn preserve_startup_policy_keeps_registered_market_state() {
     let _guard = redis_test_lock().lock().await;
     let (cache, _redis_url) = test_cache().await;

@@ -156,6 +156,64 @@ impl RedisCache {
             .transpose()
     }
 
+    pub async fn get_market_states(
+        &self,
+        symbols: &[Symbol],
+    ) -> Result<Vec<(Symbol, Option<MarketState>)>, CacheError> {
+        let operation = "get_market_states";
+        if symbols.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if let Some(states) = &self.in_memory_states {
+            let states = lock_in_memory_states(states, operation)?;
+            return symbols
+                .iter()
+                .map(|symbol| {
+                    let state = states
+                        .get(symbol)
+                        .cloned()
+                        .map(|state| validate_market_state_symbol(operation, symbol, state))
+                        .transpose()?;
+                    Ok((symbol.clone(), state))
+                })
+                .collect();
+        }
+
+        let keys = symbols.iter().map(market_state_key).collect::<Vec<_>>();
+        let mut connection = self.connection_for(operation).await?;
+        let payloads: Vec<Option<String>> = redis::cmd("MGET")
+            .arg(&keys)
+            .query_async(&mut connection)
+            .await
+            .map_err(redis_error(operation))?;
+
+        if payloads.len() != symbols.len() {
+            return Err(CacheError::InvalidData {
+                operation,
+                message: format!(
+                    "bulk market-state read returned {} values for {} requested symbols",
+                    payloads.len(),
+                    symbols.len()
+                ),
+            });
+        }
+
+        symbols
+            .iter()
+            .cloned()
+            .zip(payloads)
+            .map(|(symbol, payload)| {
+                let state = payload
+                    .map(|json| {
+                        deserialize_market_state_for_requested_symbol(operation, &symbol, &json)
+                    })
+                    .transpose()?;
+                Ok((symbol, state))
+            })
+            .collect()
+    }
+
     pub async fn list_symbols(&self) -> Result<Vec<Symbol>, CacheError> {
         let operation = "list_symbols";
         #[cfg(test)]
@@ -337,6 +395,39 @@ fn deserialize_market_state_for_validation(
         operation,
         message: format!("market state for `{symbol}` is malformed: {error}"),
     })
+}
+
+fn deserialize_market_state_for_requested_symbol(
+    operation: &'static str,
+    requested_symbol: &Symbol,
+    value: &str,
+) -> Result<MarketState, CacheError> {
+    let state = serde_json::from_str(value).map_err(|error| CacheError::InvalidData {
+        operation,
+        message: format!(
+            "market state for requested symbol `{requested_symbol}` is malformed: {error}"
+        ),
+    })?;
+
+    validate_market_state_symbol(operation, requested_symbol, state)
+}
+
+fn validate_market_state_symbol(
+    operation: &'static str,
+    requested_symbol: &Symbol,
+    state: MarketState,
+) -> Result<MarketState, CacheError> {
+    if state.symbol != *requested_symbol {
+        return Err(CacheError::InvalidData {
+            operation,
+            message: format!(
+                "market state requested for `{requested_symbol}` contains embedded symbol `{}`",
+                state.symbol
+            ),
+        });
+    }
+
+    Ok(state)
 }
 
 fn lock_in_memory_states<'a>(
@@ -521,8 +612,8 @@ mod tests {
 
     use super::{
         CacheError, RedisCache, SYMBOL_SET_KEY, deserialize,
-        deserialize_market_state_for_validation, market_state_key, market_state_pattern, serialize,
-        symbol_set_key,
+        deserialize_market_state_for_requested_symbol, deserialize_market_state_for_validation,
+        market_state_key, market_state_pattern, serialize, symbol_set_key,
     };
     use crate::domain::{MarketState, Symbol};
 
@@ -543,6 +634,152 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, CacheError::Unavailable));
+    }
+
+    #[tokio::test]
+    async fn bulk_state_read_returns_empty_without_cache_access() {
+        let cache = RedisCache::unavailable();
+
+        let states = cache.get_market_states(&[]).await.unwrap();
+
+        assert!(states.is_empty());
+    }
+
+    #[tokio::test]
+    async fn bulk_state_read_preserves_btc_eth_order_in_memory() {
+        let btc = market_state_with_price("BTCUSDT", 100);
+        let eth = market_state_with_price("ETHUSDT", 200);
+        let cache = RedisCache::in_memory(vec![eth.clone(), btc.clone()]);
+        let requested = vec![btc.symbol.clone(), eth.symbol.clone()];
+
+        let states = cache.get_market_states(&requested).await.unwrap();
+
+        assert_eq!(
+            states,
+            vec![
+                (btc.symbol.clone(), Some(btc)),
+                (eth.symbol.clone(), Some(eth))
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn bulk_state_read_preserves_eth_btc_order_in_memory() {
+        let btc = market_state_with_price("BTCUSDT", 100);
+        let eth = market_state_with_price("ETHUSDT", 200);
+        let cache = RedisCache::in_memory(vec![btc.clone(), eth.clone()]);
+        let requested = vec![eth.symbol.clone(), btc.symbol.clone()];
+
+        let states = cache.get_market_states(&requested).await.unwrap();
+
+        assert_eq!(
+            states,
+            vec![
+                (eth.symbol.clone(), Some(eth)),
+                (btc.symbol.clone(), Some(btc))
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn bulk_state_read_preserves_duplicate_symbol_order_in_memory() {
+        let btc = market_state_with_price("BTCUSDT", 100);
+        let eth = market_state_with_price("ETHUSDT", 200);
+        let cache = RedisCache::in_memory(vec![btc.clone(), eth.clone()]);
+        let requested = vec![btc.symbol.clone(), eth.symbol.clone(), btc.symbol.clone()];
+
+        let states = cache.get_market_states(&requested).await.unwrap();
+
+        assert_eq!(
+            states,
+            vec![
+                (btc.symbol.clone(), Some(btc.clone())),
+                (eth.symbol.clone(), Some(eth)),
+                (btc.symbol.clone(), Some(btc)),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn bulk_state_read_preserves_missing_first_middle_and_last_in_memory() {
+        let btc = market_state_with_price("BTCUSDT", 100);
+        let eth = market_state_with_price("ETHUSDT", 200);
+        let missing_first = Symbol::new("ADAUSDT").unwrap();
+        let missing_middle = Symbol::new("DOGEUSDT").unwrap();
+        let missing_last = Symbol::new("XRPUSDT").unwrap();
+        let cache = RedisCache::in_memory(vec![btc.clone(), eth.clone()]);
+        let requested = vec![
+            missing_first.clone(),
+            btc.symbol.clone(),
+            missing_middle.clone(),
+            eth.symbol.clone(),
+            missing_last.clone(),
+        ];
+
+        let states = cache.get_market_states(&requested).await.unwrap();
+
+        assert_eq!(
+            states,
+            vec![
+                (missing_first, None),
+                (btc.symbol.clone(), Some(btc)),
+                (missing_middle, None),
+                (eth.symbol.clone(), Some(eth)),
+                (missing_last, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn bulk_state_decode_rejects_malformed_json_for_requested_symbol() {
+        let requested = Symbol::new("BTCUSDT").unwrap();
+
+        let error = deserialize_market_state_for_requested_symbol(
+            "get_market_states",
+            &requested,
+            "{not-json",
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, CacheError::InvalidData { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("requested symbol `BTCUSDT` is malformed")
+        );
+    }
+
+    #[test]
+    fn bulk_state_decode_rejects_embedded_symbol_mismatch() {
+        let requested = Symbol::new("BTCUSDT").unwrap();
+        let embedded = MarketState::new(Symbol::new("ETHUSDT").unwrap());
+        let payload = serialize("test_bulk_state", &embedded).unwrap();
+
+        let error = deserialize_market_state_for_requested_symbol(
+            "get_market_states",
+            &requested,
+            &payload,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, CacheError::InvalidData { .. }));
+        assert!(error.to_string().contains("requested for `BTCUSDT`"));
+        assert!(error.to_string().contains("embedded symbol `ETHUSDT`"));
+    }
+
+    #[tokio::test]
+    async fn bulk_state_read_rejects_in_memory_embedded_symbol_mismatch() {
+        let requested = Symbol::new("BTCUSDT").unwrap();
+        let embedded = MarketState::new(Symbol::new("ETHUSDT").unwrap());
+        let cache = RedisCache::in_memory_with_entries(
+            vec![requested.clone()],
+            vec![(requested.clone(), embedded)],
+        );
+
+        let error = cache.get_market_states(&[requested]).await.unwrap_err();
+
+        assert!(matches!(error, CacheError::InvalidData { .. }));
+        assert!(error.to_string().contains("embedded symbol `ETHUSDT`"));
     }
 
     #[tokio::test]
@@ -848,6 +1085,12 @@ mod tests {
     fn redis_integration_test_lock() -> &'static AsyncMutex<()> {
         static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| AsyncMutex::new(()))
+    }
+
+    fn market_state_with_price(symbol: &str, price: i64) -> MarketState {
+        let mut state = MarketState::new(Symbol::new(symbol).unwrap());
+        state.last_trade_price = Some(Decimal::new(price, 0));
+        state
     }
 
     fn unique_test_symbol(prefix: &str) -> Symbol {
