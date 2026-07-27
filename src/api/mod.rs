@@ -1,3 +1,4 @@
+pub mod contract;
 mod demo_data;
 mod dto;
 mod error;
