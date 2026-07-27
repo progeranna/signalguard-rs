@@ -61,4 +61,11 @@ describe("symbol detail route resource ownership", () => {
     expect(source).toContain('to={`/symbols/${entry.symbol}`}');
     expect(source).toContain("storeSelectedSymbol(selectedUiMode");
   });
+
+  it("does not default an absent source to Demo and uses exact availability copy", () => {
+    expect(source).toContain('source === "live" ? "Live" : source === "demo" ? "Demo" : "Unavailable"');
+    expect(source).toContain("Configured for Live; Live ingestion is not active.");
+    expect(source).toContain("Awaiting first Live market data.");
+    expect(source).toContain("Live market data is unavailable.");
+  });
 });

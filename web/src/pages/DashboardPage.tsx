@@ -122,7 +122,12 @@ function MarketTimelineShell({
 }) {
   const symbols = summary?.symbols ?? [];
   const selectedSymbol = selectSignalSymbol(symbols, selectedSignalSymbol);
-  const timelineQuery = useMarketTimelineQuery(selectedSymbol?.symbol ?? null, selectedUiMode);
+  const observed = selectedSymbol?.availability === "observed";
+  const timelineQuery = useMarketTimelineQuery(
+    selectedSymbol?.symbol ?? null,
+    selectedUiMode,
+    observed,
+  );
   const timelinePoints = buildTimelineChartPoints(timelineQuery.data?.points ?? []);
   const timelinePriceDomain = buildTimelinePriceDomain(timelinePoints);
   const timelineTimeDomain = buildTimelineTimeDomain(timelinePoints);
@@ -161,7 +166,9 @@ function MarketTimelineShell({
                     ) : null}
                   </div>
                 </div>
-                {timelineQuery.isError ? (
+                {!observed ? (
+                  <EmptyBlock message={availabilityMessage(selectedSymbol.availability)} />
+                ) : timelineQuery.isError ? (
                   <ErrorPanel
                     title="Market timeline unavailable"
                     message={buildErrorMessage(timelineQuery.error)}
@@ -269,7 +276,7 @@ function MarketTimelineShell({
                 />
               </div>
             </div>
-            <div className="mt-3 flex flex-1 flex-col justify-evenly gap-2">
+            {observed ? <div className="mt-3 flex flex-1 flex-col justify-evenly gap-2">
               <SignalSnapshotMetric
                 label="Price"
                 value={formatTickerPrice(selectedSymbol?.state?.last_trade_price)}
@@ -285,10 +292,10 @@ function MarketTimelineShell({
               <SignalSnapshotMetric
                 label="Freshness"
                 value={formatOptionalAge(
-                  selectedSymbol?.state?.last_event_age_ms ?? summary?.pipeline.last_message_age_ms,
+                  selectedSymbol?.state?.last_event_age_ms,
                 )}
               />
-            </div>
+            </div> : <EmptyBlock message={selectedSymbol ? availabilityMessage(selectedSymbol.availability) : "No current market state available for this market."} />}
           </aside>
         </div>
       )}
@@ -624,16 +631,16 @@ function SymbolHealthTableRow({
         </div>
       </td>
       <td className="px-2 py-3 pr-4">
-        <HealthScore compact score={score} status={symbol.health?.status} />
+        {symbol.availability === "observed" ? <HealthScore compact score={score} status={symbol.health?.status} /> : null}
       </td>
       <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-100 2xl:text-sm">
-        {formatTickerPrice(symbol.state?.last_trade_price)}
+        {symbol.availability === "observed" ? formatTickerPrice(symbol.state?.last_trade_price) : null}
       </td>
       <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
-        {formatTickerPercent(symbol.state?.spread_pct)}
+        {symbol.availability === "observed" ? formatTickerPercent(symbol.state?.spread_pct) : null}
       </td>
       <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
-        {formatOptionalCompact(symbol.state?.trades_per_minute)}
+        {symbol.availability === "observed" ? formatOptionalCompact(symbol.state?.trades_per_minute) : null}
       </td>
       <td className="px-2 py-3 text-right">
         <div className="flex min-w-0 justify-end overflow-hidden">
@@ -678,13 +685,13 @@ function SymbolHealthCard({
             text={statusText}
           />
         </div>
-        <div className="mt-4">
+        {symbol.availability === "observed" ? <div className="mt-4">
           <HealthScore
             score={symbol.health?.score ?? null}
             status={symbol.health?.status}
           />
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        </div> : null}
+        {symbol.availability === "observed" ? <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
           <MobileSymbolMetric
             label="Price"
             value={formatTickerPrice(symbol.state?.last_trade_price)}
@@ -701,7 +708,7 @@ function SymbolHealthCard({
             label="Age"
             value={formatOptionalAge(symbol.state?.last_event_age_ms)}
           />
-        </div>
+        </div> : <div className="mt-4"><EmptyBlock message={availabilityMessage(symbol.availability)} /></div>}
       </article>
     </button>
   );
@@ -1378,6 +1385,7 @@ function SymbolPopupSuccess({
   onOpenSymbolDetail: (symbol: string) => void;
 }) {
   const { anomalies, identity, metrics, status } = viewModel;
+  const observed = viewModel.availability === "observed";
 
   return (
     <div className="space-y-6" data-testid="symbol-popup-success">
@@ -1395,7 +1403,7 @@ function SymbolPopupSuccess({
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {observed ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SymbolDetailMetric
           label="Health"
           value={viewModel.healthScore}
@@ -1428,9 +1436,9 @@ function SymbolPopupSuccess({
           label="Best ask"
           value={metrics.bestAsk}
         />
-      </div>
+      </div> : <EmptyBlock message={availabilityMessage(viewModel.availability)} />}
 
-      <section className="space-y-3">
+      {observed ? <section className="space-y-3">
         <SectionTitle
           title="Recent market anomalies"
           subtitle="Quality events for this market in the current summary."
@@ -1469,7 +1477,7 @@ function SymbolPopupSuccess({
         ) : (
           <EmptyBlock message="No recent anomalies for this market." />
         )}
-      </section>
+      </section> : null}
     </div>
   );
 }
@@ -2047,6 +2055,15 @@ function marketStatusLabel(symbol: DashboardSymbolSummary): string {
     case "awaiting": return "Awaiting data";
     case "unavailable": return "Unavailable";
     case "observed": return statusLabel(symbol.health?.status);
+  }
+}
+
+function availabilityMessage(availability: DashboardSymbolSummary["availability"]): string {
+  switch (availability) {
+    case "configured": return "Configured for Live; Live ingestion is not active.";
+    case "awaiting": return "Awaiting first Live market data.";
+    case "unavailable": return "Live market data is unavailable.";
+    case "observed": return "No current market state available for this market.";
   }
 }
 

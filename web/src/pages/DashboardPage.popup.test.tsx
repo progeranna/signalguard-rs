@@ -19,6 +19,8 @@ const testState = vi.hoisted(() => ({
     symbol: string;
   }>,
   mode: "demo" as "demo" | "live",
+  nonObserved: false,
+  timelineEnabled: [] as boolean[],
   resourceStatusByIdentity: new Map<string, "error" | "loading" | "success" | "unavailable">(),
 }));
 
@@ -51,13 +53,16 @@ vi.mock("@/features/dashboard/api", () => ({
     isLoading: false,
     refetch: vi.fn(),
   }),
-  useMarketTimelineQuery: () => ({
+  useMarketTimelineQuery: (_symbol: string | null, _mode: UiMode, enabled = true) => {
+    testState.timelineEnabled.push(enabled);
+    return {
     data: { anomalies: [], points: [], symbol: "BTCUSDT" },
     error: null,
     isError: false,
     isLoading: false,
     refetch: vi.fn(),
-  }),
+    };
+  },
 }));
 
 vi.mock("@/features/dashboard/symbolPopupResource", () => ({
@@ -86,7 +91,13 @@ vi.mock("@/features/dashboard/symbolPopupResource", () => ({
       return { identity, refetch, status };
     }
 
-    const summary = observedSymbol(
+    const summary = testState.nonObserved ? {
+      source: identity.mode,
+      availability: "configured" as const,
+      health: null,
+      state: null,
+      symbol: identity.symbol,
+    } : observedSymbol(
       identity.symbol,
       `${identity.mode.toUpperCase()}-${identity.symbol}-PRICE`,
       identity.mode,
@@ -111,6 +122,8 @@ import { DashboardPage } from "./DashboardPage";
 beforeEach(() => {
   testState.identities.splice(0);
   testState.mode = "demo";
+  testState.nonObserved = false;
+  testState.timelineEnabled.splice(0);
   testState.resourceStatusByIdentity.clear();
   window.localStorage.clear();
   document.body.style.overflow = "";
@@ -168,6 +181,15 @@ function summaryForMode(mode: UiMode): DashboardSummary {
     observedSymbol("DOGEUSDT", `${mode}-DOGE-LIST`, mode),
     observedSymbol("LTCUSDT", `${mode}-LTC-LIST`, mode),
   ];
+  if (mode === "live" && testState.nonObserved) {
+    symbols[0] = {
+      source: "live",
+      availability: "configured",
+      health: null,
+      state: null,
+      symbol: "BTCUSDT",
+    };
+  }
   const recentAnomalies = [
     popupAnomaly("BTCUSDT"),
     popupAnomaly("ETHUSDT"),
@@ -305,6 +327,20 @@ describe("dashboard popup close behavior", () => {
 });
 
 describe("dashboard popup mode ownership", () => {
+  it("uses the exact empty state and disables timeline for a configured Live market", () => {
+    testState.mode = "live";
+    testState.nonObserved = true;
+    render(<DashboardPage />);
+
+    expect(testState.timelineEnabled).toContain(false);
+    openDirectSymbol("BTCUSDT");
+    const dialog = screen.getByRole("dialog", { name: "BTCUSDT market details" });
+    expect(within(dialog).getByText("Configured for Live; Live ingestion is not active.")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Health")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Price")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Recent market anomalies")).not.toBeInTheDocument();
+  });
+
   it("detaches Demo content immediately when the mode changes to Live", () => {
     const view = render(<DashboardPage />);
     openDirectSymbol("BTCUSDT");

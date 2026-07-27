@@ -170,7 +170,9 @@ export function adaptMarketResourceToViewModel(
       freshness: display(formatAgeMs(state?.last_event_age_ms)),
       lastPrice: display(formatDecimalString(state?.last_trade_price)),
       lastEvent: display(formatTimestamp(state?.last_event_time)),
-      anomalyCount: formatCompactNumber(resource.anomalies.length),
+      anomalyCount: summary.availability === "observed"
+        ? formatCompactNumber(resource.anomalies.length)
+        : unavailable,
       priceMove: display(formatPercent(state?.price_change_1m_pct)),
       spread: display(formatPercent(state?.spread_pct)),
       tradesPerMinute: display(formatCompactNumber(state?.trades_per_minute)),

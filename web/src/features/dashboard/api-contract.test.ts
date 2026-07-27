@@ -76,6 +76,24 @@ function requireSchemaProperty(
   for (const [key, value] of Object.entries(expected)) equal(property[key], value, `${schemaName}.${propertyName}.${key}`);
 }
 
+function requireRequiredReference(
+  contract: JsonObject,
+  schemaName: string,
+  propertyName: string,
+  reference: string,
+): void {
+  const target = schema(contract, schemaName);
+  if (!array(target.required, `${schemaName}.required`).includes(propertyName)) {
+    throw new Error(`${schemaName}.${propertyName} must be required`);
+  }
+  const properties = object(target.properties, `${schemaName}.properties`);
+  const property = object(properties[propertyName], `${schemaName}.${propertyName}`);
+  if (property.nullable === true) {
+    throw new Error(`${schemaName}.${propertyName} must be non-nullable`);
+  }
+  equal(property.$ref, reference, `${schemaName}.${propertyName} reference`);
+}
+
 function validateCompatibility(input: unknown): void {
   const contract = object(input, "contract");
   equal(contract.openapi, "3.0.3", "OpenAPI version");
@@ -133,6 +151,19 @@ function validateCompatibility(input: unknown): void {
   equal(object(schema(contract, "MarketTimelineResponse").properties, "timeline schema").anomalies !== undefined, true, "timeline anomalies");
   const metrics = object(contract["x-signalguard-metrics"], "metrics disposition");
   equal(metrics.contentType, "text/plain; version=0.0.4; charset=utf-8", "metrics content type");
+  equal(schema(contract, "PublicDataMode").enum, ["demo", "live"], "source enum");
+  equal(schema(contract, "MarketAvailability").enum, ["observed", "configured", "awaiting", "unavailable"], "availability enum");
+  const sourceRef = "#/components/schemas/PublicDataMode";
+  const availabilityRef = "#/components/schemas/MarketAvailability";
+  for (const schemaName of ["DashboardSummaryResponse", "DashboardSymbolSummary", "MarketStateResponse", "MarketHealthResponse", "MarketTimelineResponse", "AnomaliesResponse", "SymbolsResponse"]) {
+    requireRequiredReference(contract, schemaName, "source", sourceRef);
+  }
+  for (const schemaName of ["DashboardSymbolSummary", "MarketStateResponse", "MarketHealthResponse"]) {
+    requireRequiredReference(contract, schemaName, "availability", availabilityRef);
+  }
+  if (JSON.stringify(contract).includes("catalogAvailability")) {
+    throw new Error("catalogAvailability is not part of the public contract");
+  }
 }
 
 function checkedArtifact(): unknown {
@@ -182,6 +213,22 @@ describe("checked backend API contract", () => {
       const paths = object(fixture.paths, "paths");
       const post = object(object(paths["/runtime/mode"], "runtime path").post, "runtime post");
       object(responseContent(post, "415")["text/plain; charset=utf-8"], "extractor media").schema = { $ref: "#/components/schemas/ApiErrorResponse" };
+    }],
+    ["missing source", (fixture: JsonObject) => {
+      const summary = schema(fixture, "DashboardSymbolSummary");
+      summary.required = array(summary.required, "required").filter((entry) => entry !== "source");
+    }],
+    ["nullable availability", (fixture: JsonObject) => {
+      object(object(schema(fixture, "MarketHealthResponse").properties, "health properties").availability, "availability").nullable = true;
+    }],
+    ["availability enum", (fixture: JsonObject) => {
+      object(schema(fixture, "MarketAvailability"), "availability").enum = ["observed", "configured"];
+    }],
+    ["source reference", (fixture: JsonObject) => {
+      object(object(schema(fixture, "MarketTimelineResponse").properties, "timeline properties").source, "source").$ref = "#/components/schemas/MarketAvailability";
+    }],
+    ["catalog availability", (fixture: JsonObject) => {
+      object(schema(fixture, "DashboardSymbolSummary").properties, "summary properties").catalogAvailability = { type: "string" };
     }],
     ["extractor status", (fixture: JsonObject) => {
       const paths = object(fixture.paths, "paths");
