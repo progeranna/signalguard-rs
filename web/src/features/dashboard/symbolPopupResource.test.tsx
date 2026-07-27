@@ -136,6 +136,8 @@ function symbolId(symbol: string) {
 
 function observedSymbol(symbol: string, price: string): DashboardSymbolSummary {
   return {
+    source: "demo",
+    availability: "observed",
     health: {
       evaluated_at: "2026-07-20T10:00:00.000Z",
       recent_anomaly_count: 0,
@@ -176,6 +178,7 @@ function dashboardSummary(
   anomalies: DashboardAnomaly[] = [],
 ): DashboardSummary {
   return {
+    source: "demo",
     pipeline: {
       cache_errors: 0,
       last_message_age_ms: 20,
@@ -192,6 +195,8 @@ function dashboardSummary(
 
 function marketState(symbol: string, price: string): MarketState {
   return {
+    source: "live",
+    availability: "observed",
     best_ask_price: price,
     best_bid_price: price,
     depth_sequence_gap_count: 0,
@@ -207,6 +212,8 @@ function marketState(symbol: string, price: string): MarketState {
 
 function marketHealth(symbol: string): MarketHealth {
   return {
+    source: "live",
+    availability: "observed",
     evaluated_at: "2026-07-20T10:00:00.000Z",
     recent_anomaly_count: 1,
     score: 95,
@@ -220,6 +227,7 @@ function marketTimeline(
   anomalies: DashboardAnomaly[] = [],
 ): MarketTimeline {
   return {
+    source: "demo",
     anomalies,
     points: [
       {
@@ -235,7 +243,7 @@ function marketTimeline(
 }
 
 function anomaliesResponse(anomalies: DashboardAnomaly[]): AnomaliesResponse {
-  return { anomalies };
+  return { source: "live", anomalies };
 }
 
 function query<T>(

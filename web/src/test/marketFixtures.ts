@@ -33,6 +33,7 @@ export function matrixSummary(
   observed: readonly MatrixSymbol[] = ["BTCUSDT", "ETHUSDT"],
 ): DashboardSummary {
   return {
+    source: mode,
     pipeline: {
       cache_errors: 0,
       last_message_age_ms: mode === "demo" ? 101 : 202,
@@ -56,6 +57,8 @@ export function matrixObservedSymbol(
   const sentinel = matrixSentinel(mode, symbol);
 
   return {
+    source: mode,
+    availability: "observed",
     health: {
       evaluated_at: "2026-07-20T10:00:00.000Z",
       recent_anomaly_count: 1,
@@ -81,6 +84,7 @@ export function matrixTimeline(mode: UiMode, symbol: MatrixSymbol): MarketTimeli
   const sentinel = matrixSentinel(mode, symbol);
 
   return {
+    source: mode,
     anomalies: [
       {
         ...matrixAnomaly(mode, symbol, 50),

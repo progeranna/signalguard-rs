@@ -8,10 +8,14 @@
               "$ref": "#/components/schemas/AnomalyResponse"
             },
             "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PublicDataMode"
           }
         },
         "required": [
-          "anomalies"
+          "anomalies",
+          "source"
         ],
         "title": "AnomaliesResponse",
         "type": "object"
@@ -326,6 +330,9 @@
           "service": {
             "$ref": "#/components/schemas/DashboardServiceSummary"
           },
+          "source": {
+            "$ref": "#/components/schemas/PublicDataMode"
+          },
           "symbols": {
             "items": {
               "$ref": "#/components/schemas/DashboardSymbolSummary"
@@ -337,6 +344,7 @@
           "pipeline",
           "recent_anomalies",
           "service",
+          "source",
           "symbols"
         ],
         "title": "DashboardSummaryResponse",
@@ -344,6 +352,9 @@
       },
       "DashboardSymbolSummary": {
         "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/MarketAvailability"
+          },
           "health": {
             "allOf": [
               {
@@ -351,6 +362,9 @@
               }
             ],
             "nullable": true
+          },
+          "source": {
+            "$ref": "#/components/schemas/PublicDataMode"
           },
           "state": {
             "allOf": [
@@ -365,7 +379,9 @@
           }
         },
         "required": [
+          "availability",
           "health",
+          "source",
           "state",
           "symbol"
         ],
@@ -391,8 +407,20 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "MarketAvailability": {
+        "enum": [
+          "observed",
+          "configured",
+          "awaiting",
+          "unavailable"
+        ],
+        "type": "string"
+      },
       "MarketHealthResponse": {
         "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/MarketAvailability"
+          },
           "base_score": {
             "format": "uint8",
             "minimum": 0.0,
@@ -421,6 +449,9 @@
           "signals": {
             "$ref": "#/components/schemas/ContractHealthSignals"
           },
+          "source": {
+            "$ref": "#/components/schemas/PublicDataMode"
+          },
           "status": {
             "$ref": "#/components/schemas/ContractHealthStatus"
           },
@@ -429,12 +460,14 @@
           }
         },
         "required": [
+          "availability",
           "base_score",
           "evaluated_at",
           "penalties",
           "recent_anomaly_count",
           "score",
           "signals",
+          "source",
           "status",
           "symbol"
         ],
@@ -443,6 +476,9 @@
       },
       "MarketStateResponse": {
         "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/MarketAvailability"
+          },
           "best_ask_price": {
             "nullable": true,
             "type": "string"
@@ -507,6 +543,9 @@
             "nullable": true,
             "type": "number"
           },
+          "source": {
+            "$ref": "#/components/schemas/PublicDataMode"
+          },
           "spread_pct": {
             "format": "double",
             "nullable": true,
@@ -538,6 +577,7 @@
           }
         },
         "required": [
+          "availability",
           "best_ask_price",
           "best_ask_quantity",
           "best_bid_price",
@@ -552,6 +592,7 @@
           "last_trade_price",
           "last_trade_quantity",
           "price_change_1m_pct",
+          "source",
           "spread_pct",
           "symbol",
           "top_ask_liquidity",
@@ -613,6 +654,9 @@
             },
             "type": "array"
           },
+          "source": {
+            "$ref": "#/components/schemas/PublicDataMode"
+          },
           "symbol": {
             "type": "string"
           }
@@ -620,6 +664,7 @@
         "required": [
           "anomalies",
           "points",
+          "source",
           "symbol"
         ],
         "title": "MarketTimelineResponse",
@@ -673,6 +718,13 @@
           "healthy",
           "degraded",
           "unhealthy"
+        ],
+        "type": "string"
+      },
+      "PublicDataMode": {
+        "enum": [
+          "demo",
+          "live"
         ],
         "type": "string"
       },
@@ -756,6 +808,9 @@
       },
       "SymbolsResponse": {
         "properties": {
+          "source": {
+            "$ref": "#/components/schemas/PublicDataMode"
+          },
           "symbols": {
             "items": {
               "type": "string"
@@ -764,6 +819,7 @@
           }
         },
         "required": [
+          "source",
           "symbols"
         ],
         "title": "SymbolsResponse",

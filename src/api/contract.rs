@@ -161,6 +161,32 @@ fn required_nullable(schemas: &mut BTreeMap<String, Value>, schema_name: &str, f
     }
 }
 
+fn required_non_nullable(
+    schemas: &mut BTreeMap<String, Value>,
+    schema_name: &str,
+    fields: &[&str],
+) {
+    let schema = schemas
+        .get_mut(schema_name)
+        .expect("generated schema exists");
+    {
+        let required = schema["required"]
+            .as_array_mut()
+            .expect("required properties");
+        for field in fields {
+            if !required.iter().any(|value| value == field) {
+                required.push(json!(field));
+            }
+        }
+    }
+    for field in fields {
+        schema["properties"][*field]
+            .as_object_mut()
+            .expect("generated property")
+            .remove("nullable");
+    }
+}
+
 fn operation(
     method: &str,
     parameters: Vec<Value>,
@@ -263,6 +289,17 @@ pub fn document() -> Value {
         "MarketTimelineResponse",
         generated::<MarketTimelineResponse>(),
     );
+    for (schema_name, fields) in [
+        ("DashboardSummaryResponse", &["source"][..]),
+        ("DashboardSymbolSummary", &["source", "availability"][..]),
+        ("MarketStateResponse", &["source", "availability"][..]),
+        ("MarketHealthResponse", &["source", "availability"][..]),
+        ("MarketTimelineResponse", &["source"][..]),
+        ("AnomaliesResponse", &["source"][..]),
+        ("SymbolsResponse", &["source"][..]),
+    ] {
+        required_non_nullable(&mut schemas, schema_name, fields);
+    }
     required_nullable(
         &mut schemas,
         "RuntimeModeResponse",
@@ -330,7 +367,7 @@ pub fn document() -> Value {
             json!({"allOf":[ref_schema("DashboardStateSummary")],"nullable":true});
         summary["properties"]["health"] =
             json!({"allOf":[ref_schema("DashboardHealthSummary")],"nullable":true});
-        summary["required"] = json!(["health", "state", "symbol"]);
+        summary["required"] = json!(["availability", "health", "source", "state", "symbol"]);
     }
     let mut error = Map::new();
     error.insert("type".into(), json!("object"));
@@ -522,6 +559,29 @@ mod tests {
             "date-time"
         );
         assert!(schemas["DashboardSummaryResponse"]["properties"]["symbols"]["type"] == "array");
+        for (schema_name, fields) in [
+            ("DashboardSummaryResponse", &["source"][..]),
+            ("DashboardSymbolSummary", &["source", "availability"][..]),
+            ("MarketStateResponse", &["source", "availability"][..]),
+            ("MarketHealthResponse", &["source", "availability"][..]),
+            ("MarketTimelineResponse", &["source"][..]),
+            ("AnomaliesResponse", &["source"][..]),
+            ("SymbolsResponse", &["source"][..]),
+        ] {
+            let required = schemas[schema_name]["required"].as_array().unwrap();
+            for field in fields {
+                assert!(required.iter().any(|value| value == field));
+                assert_ne!(
+                    schemas[schema_name]["properties"][*field].get("nullable"),
+                    Some(&json!(true))
+                );
+            }
+        }
+        assert_eq!(
+            schemas["MarketAvailability"]["enum"],
+            json!(["observed", "configured", "awaiting", "unavailable"])
+        );
+        assert_eq!(schemas["PublicDataMode"]["enum"], json!(["demo", "live"]));
         assert_eq!(
             schemas["DashboardSymbolSummary"]["properties"]["state"]["allOf"][0]["$ref"],
             "#/components/schemas/DashboardStateSummary"

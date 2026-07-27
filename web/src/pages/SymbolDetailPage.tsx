@@ -24,6 +24,7 @@ export function SymbolDetailPage() {
   const resourceState = useSymbolMarketResource({
     mode: selectedUiMode,
     symbol: canonicalRouteSymbol,
+    summary: availableSymbols.find((entry) => entry.symbol === canonicalRouteSymbol),
   });
   const marketViewModel =
     resourceState.status === "success"
@@ -40,6 +41,8 @@ export function SymbolDetailPage() {
     (resourceState.status === "unavailable" && catalogQuery.isLoading);
   const statusTone = marketViewModel?.status.tone ?? "neutral";
   const symbolStatusText = marketViewModel?.status.text ?? "Unknown";
+  const source = marketViewModel?.source ?? catalogQuery.data?.source;
+  const observed = marketViewModel?.availability === "observed";
 
   useEffect(() => {
     if (resolvedSymbol) {
@@ -59,6 +62,10 @@ export function SymbolDetailPage() {
               {selectedSymbol}
             </h1>
             <StatusBadge status={statusTone} text={symbolStatusText} />
+            <StatusBadge
+              status="neutral"
+              text={source === "live" ? "Live" : source === "demo" ? "Demo" : "Unavailable"}
+            />
           </div>
           <p className="max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
             Market-level market-data quality, freshness, and anomaly context.
@@ -69,11 +76,13 @@ export function SymbolDetailPage() {
           <div className="mt-5 border-t border-white/10 pt-4">
             {isLoading ? (
               <LoadingSkeleton className="h-20" />
-            ) : (
+            ) : observed ? (
               <MetricStrip
                 viewModel={marketViewModel}
                 statusTone={statusTone}
               />
+            ) : (
+              <FlatEmptyState message={availabilityMessage(marketViewModel?.availability)} />
             )}
           </div>
         ) : null}
@@ -108,7 +117,7 @@ export function SymbolDetailPage() {
                     title={`${selectedSymbol} signal snapshot`}
                     description="Selected-market resource snapshot."
                   />
-                  {marketViewModel ? (
+                  {marketViewModel && observed ? (
                     <dl className="mt-5 divide-y divide-white/[0.08] border-y border-white/[0.08]">
                       <InlineDataRow
                         label="Market status"
@@ -129,11 +138,11 @@ export function SymbolDetailPage() {
                       />
                     </dl>
                   ) : (
-                    <FlatEmptyState message="Market snapshot is unavailable for this market." />
+                    <FlatEmptyState message={availabilityMessage(marketViewModel?.availability)} />
                   )}
                 </div>
 
-                <div>
+                {observed ? <div>
                   <PanelHeader
                     eyebrow="Current Market State"
                     title="Latest normalized state"
@@ -175,14 +184,14 @@ export function SymbolDetailPage() {
                       />
                     </dl>
                   ) : (
-                    <FlatEmptyState message="No current market state available for this market." />
+              <FlatEmptyState message={availabilityMessage(marketViewModel?.availability)} />
                   )}
-                </div>
+                </div> : null}
               </div>
             )}
           </section>
 
-          <section className="space-y-3">
+          {observed ? <section className="space-y-3">
             <div>
               <h2 className="text-xl font-semibold tracking-tight text-white">
                 Recent anomalies for {selectedSymbol}
@@ -225,7 +234,7 @@ export function SymbolDetailPage() {
                 No recent anomalies for this market.
               </div>
             )}
-          </section>
+          </section> : null}
         </>
       ) : null}
     </section>
@@ -266,6 +275,15 @@ function SymbolNotFoundState({
       )}
     </section>
   );
+}
+
+function availabilityMessage(availability: DashboardSymbolSummary["availability"] | undefined): string {
+  switch (availability) {
+    case "configured": return "Configured for Live; Live ingestion is not active.";
+    case "awaiting": return "Awaiting first Live market data.";
+    case "unavailable": return "Live market data is unavailable.";
+    default: return "No current market state available for this market.";
+  }
 }
 
 function MetricStrip({

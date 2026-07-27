@@ -20,7 +20,8 @@ function dashboardPayload() {
       storage_errors: 0,
       cache_errors: 0,
     },
-    symbols: [{ symbol: " btcusdt ", state: null, health: null }],
+    symbols: [{ source: "demo", availability: "configured", symbol: " btcusdt ", state: null, health: null }],
+    source: "demo",
     recent_anomalies: [
       {
         id: "9cf5cf02-8cf8-4dd0-bcb0-4d3e9b949909",
@@ -41,6 +42,7 @@ describe("symbol-bearing API schemas", () => {
   it("canonicalizes dashboard, anomaly, timeline, and runtime symbols", () => {
     const dashboard = dashboardSummarySchema.parse(dashboardPayload());
     const timeline = marketTimelineSchema.parse({
+      source: "demo",
       symbol: " solusdt ",
       points: [],
       anomalies: [],

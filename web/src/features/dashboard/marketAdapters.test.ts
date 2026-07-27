@@ -13,6 +13,8 @@ function resource(overrides: Partial<SymbolMarketResourceData> = {}): SymbolMark
     symbol,
     anomalies: [],
     summary: {
+      source: "live",
+      availability: "observed",
       symbol,
       state: {
         best_ask_price: "101.00",
@@ -52,7 +54,7 @@ describe("market resource adapters", () => {
   });
 
   it("maps a complete Demo resource without Live fallback", () => {
-    const viewModel = adaptMarketResourceToViewModel(resource({ mode: "demo" }));
+    const viewModel = adaptMarketResourceToViewModel(resource({ mode: "demo", summary: { ...resource().summary, source: "demo" } }));
 
     expect(viewModel.identity.mode).toBe("demo");
     expect(viewModel.metrics.lastPrice).toBe("100.00");

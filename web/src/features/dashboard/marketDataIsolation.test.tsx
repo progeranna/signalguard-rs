@@ -20,7 +20,7 @@ import { isDashboardSymbolPlaceholder } from "./marketOrder";
 import { selectedSymbolStorageKey, useSelectedSymbol } from "./selectedSymbol";
 import { createSymbolPopupIdentity, type SymbolPopupReturnContext } from "./symbolPopup";
 import { useSymbolPopupResource } from "./symbolPopupResource";
-import type { AnomaliesResponse, MarketHealth, MarketState, UiMode } from "./types";
+import type { AnomaliesResponse, DashboardSummary, MarketHealth, MarketState, UiMode } from "./types";
 import { createDeferred, createJsonResponse, type Deferred } from "@/test/deferredFetch";
 import {
   matrixRuntimeMode,
@@ -177,7 +177,15 @@ function MarketIdentityProbe({ mode }: { mode: UiMode }) {
       </span>
       <span data-testid="availability">{availability ?? "absent"}</span>
       <span data-testid="empty-state">
-        {awaitingData ? "Waiting for market data" : "Observed market data"}
+        {selectedSummary?.availability === "configured"
+          ? "Configured for Live; Live ingestion is not active."
+          : selectedSummary?.availability === "awaiting"
+            ? "Awaiting first Live market data."
+            : selectedSummary?.availability === "unavailable"
+              ? "Live market data is unavailable."
+              : awaitingData
+                ? "Waiting for market data"
+                : "Observed market data"}
       </span>
       <span data-testid="catalog">{availableSymbols.join(",")}</span>
       <button type="button" onClick={() => setSelectedSymbol("BTCUSDT")}>Select BTC</button>
@@ -252,16 +260,23 @@ async function resolveSummary(
   mode: UiMode,
   observed: readonly MatrixSymbol[] = ["BTCUSDT", "ETHUSDT"],
 ) {
-  if (mode === "live") {
-    await waitForRequest(controlled, { endpoint: "runtime" });
-    await resolveRequest(
-      controlled,
-      { endpoint: "runtime" },
-      matrixRuntimeMode(["BTCUSDT", "ETHUSDT"]),
-    );
-  }
   await waitForRequest(controlled, { endpoint: "summary", mode });
   await resolveRequest(controlled, { endpoint: "summary", mode }, matrixSummary(mode, observed));
+}
+
+function matrixConfiguredSummary(symbols: readonly MatrixSymbol[]): DashboardSummary {
+  const summary = matrixSummary("live", []);
+  return {
+    ...summary,
+    source: "live",
+    symbols: symbols.map((symbol) => ({
+      source: "live",
+      availability: "configured" as const,
+      symbol,
+      state: null,
+      health: null,
+    })),
+  };
 }
 
 async function resolveTimeline(controlled: ControlledFetch, mode: UiMode, symbol: MatrixSymbol) {
@@ -273,19 +288,19 @@ async function resolveTimeline(controlled: ControlledFetch, mode: UiMode, symbol
 function matrixLiveState(symbol: MatrixSymbol): MarketState {
   const state = matrixSummary("live").symbols.find((entry) => entry.symbol === symbol)?.state;
   if (!state) throw new Error(`missing Live state fixture for ${symbol}`);
-  return { symbol, ...state };
+  return { source: "live", availability: "observed", symbol, ...state };
 }
 
 function matrixLiveHealth(symbol: MatrixSymbol): MarketHealth {
   const health = matrixSummary("live").symbols.find((entry) => entry.symbol === symbol)?.health;
   if (!health) throw new Error(`missing Live health fixture for ${symbol}`);
-  return { symbol, ...health };
+  return { source: "live", availability: "observed", symbol, ...health };
 }
 
 function matrixLiveAnomalies(symbol: MatrixSymbol): AnomaliesResponse {
   const anomaly = matrixSummary("live").recent_anomalies.find((entry) => entry.symbol === symbol);
   if (!anomaly) throw new Error(`missing Live anomaly fixture for ${symbol}`);
-  return { anomalies: [anomaly] };
+  return { source: "live", anomalies: [anomaly] };
 }
 
 async function resolveLiveDetail(controlled: ControlledFetch, symbol: MatrixSymbol) {
@@ -526,23 +541,17 @@ describe("mode-scoped selection and Live availability", () => {
     const controlled = installControlledFetch();
     const queryClient = createQueryClient();
     render(<MarketIdentityProbe mode="live" />, { wrapper: createWrapper(queryClient) });
-    await waitForRequest(controlled, { endpoint: "runtime" });
-    await resolveRequest(
-      controlled,
-      { endpoint: "runtime" },
-      matrixRuntimeMode(["BTCUSDT", "ETHUSDT"]),
-    );
     await waitForRequest(controlled, { endpoint: "summary", mode: "live" });
     await resolveRequest(
       controlled,
       { endpoint: "summary", mode: "live" },
-      matrixSummary("live", ["BTCUSDT"]),
+      matrixConfiguredSummary(["BTCUSDT", "ETHUSDT"]),
     );
     await waitFor(() =>
       expect(screen.getByTestId("selected-symbol")).toHaveTextContent("ETHUSDT"),
     );
-    expect(screen.getByTestId("availability")).toHaveTextContent("configured-unobserved");
-    expect(screen.getByTestId("empty-state")).toHaveTextContent("Waiting for market data");
+    expect(screen.getByTestId("availability")).toHaveTextContent("configured");
+    expect(screen.getByTestId("empty-state")).toHaveTextContent("Configured for Live; Live ingestion is not active.");
     expect(screen.getByTestId("summary-price")).toHaveTextContent("NO-SUMMARY-PRICE");
     expect(screen.getByTestId("catalog")).toHaveTextContent("BTCUSDT,ETHUSDT");
     expect(screen.getByTestId("catalog")).not.toHaveTextContent("DOGEUSDT");
@@ -556,8 +565,6 @@ describe("mode-scoped selection and Live availability", () => {
     const controlled = installControlledFetch();
     const queryClient = createQueryClient();
     render(<MarketIdentityProbe mode="live" />, { wrapper: createWrapper(queryClient) });
-    await waitForRequest(controlled, { endpoint: "runtime" });
-    await resolveRequest(controlled, { endpoint: "runtime" }, matrixRuntimeMode(["ETHUSDT"]));
     await waitForRequest(controlled, { endpoint: "summary", mode: "live" });
     await resolveRequest(
       controlled,

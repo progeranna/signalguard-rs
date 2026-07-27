@@ -44,7 +44,7 @@ describe("symbol detail route resource ownership", () => {
   it("keeps dashboard summary usage limited to catalog choices", () => {
     expect(source).toContain("const catalogQuery = useCatalogDashboardSummaryQuery");
     expect(source).not.toContain("recentAnomalies.filter");
-    expect(source).not.toContain("availableSymbols.find");
+    expect(source).toContain("availableSymbols.find");
   });
 
   it("preserves loading, error, unavailable, and success shells", () => {
@@ -60,5 +60,12 @@ describe("symbol detail route resource ownership", () => {
   it("preserves route navigation and selected-symbol storage", () => {
     expect(source).toContain('to={`/symbols/${entry.symbol}`}');
     expect(source).toContain("storeSelectedSymbol(selectedUiMode");
+  });
+
+  it("does not default an absent source to Demo and uses exact availability copy", () => {
+    expect(source).toContain('source === "live" ? "Live" : source === "demo" ? "Demo" : "Unavailable"');
+    expect(source).toContain("Configured for Live; Live ingestion is not active.");
+    expect(source).toContain("Awaiting first Live market data.");
+    expect(source).toContain("Live market data is unavailable.");
   });
 });

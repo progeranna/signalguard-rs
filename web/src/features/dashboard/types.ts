@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { parseSymbolId } from "./symbolId";
 
+export const uiModeSchema = z.enum(["demo", "live"]);
+
 export const serviceSummarySchema = z.object({
   status: z.literal("ok"),
   service: z.literal("signalguard-rs"),
@@ -68,19 +70,34 @@ export const anomalySchema = z.object({
 });
 
 export const dashboardSymbolSummarySchema = z.object({
+  source: z.enum(["demo", "live"]),
+  availability: z.enum(["observed", "configured", "awaiting", "unavailable"]),
   symbol: symbolIdSchema,
   state: dashboardStateSummarySchema.nullable(),
   health: dashboardHealthSummarySchema.nullable(),
 });
 
 export const dashboardSummarySchema = z.object({
+  source: uiModeSchema,
   service: serviceSummarySchema,
   pipeline: pipelineHealthSchema,
   symbols: z.array(dashboardSymbolSummarySchema),
   recent_anomalies: z.array(anomalySchema),
+}).superRefine((summary, context) => {
+  summary.symbols.forEach((symbol, index) => {
+    if (symbol.source !== summary.source) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["symbols", index, "source"],
+        message: "dashboard symbol source must match summary source",
+      });
+    }
+  });
 });
 
 export const marketStateSchema = z.object({
+  source: z.literal("live"),
+  availability: z.literal("observed"),
   symbol: symbolIdSchema,
   last_trade_price: z.string().nullable(),
   best_bid_price: z.string().nullable(),
@@ -94,6 +111,8 @@ export const marketStateSchema = z.object({
 });
 
 export const marketHealthSchema = z.object({
+  source: z.literal("live"),
+  availability: z.literal("observed"),
   symbol: symbolIdSchema,
   score: z.number().int().min(0).max(100),
   status: healthStatusSchema,
@@ -102,6 +121,7 @@ export const marketHealthSchema = z.object({
 });
 
 export const anomaliesResponseSchema = z.object({
+  source: z.literal("live"),
   anomalies: z.array(anomalySchema),
 });
 
@@ -114,12 +134,12 @@ export const marketTimelinePointSchema = z.object({
 });
 
 export const marketTimelineSchema = z.object({
+  source: uiModeSchema,
   symbol: symbolIdSchema,
   points: z.array(marketTimelinePointSchema),
   anomalies: z.array(anomalySchema),
 });
 
-export const uiModeSchema = z.enum(["demo", "live"]);
 export const runtimeModeSchema = z.enum(["replay", "live"]);
 export const runtimeModeStatusSchema = z.enum([
   "starting",

@@ -419,6 +419,13 @@ function buildHeaderDataStatus(
   }
 
   const symbols = summary.symbols ?? [];
+  if (!symbols.some((symbol) => symbol.availability === "observed")) {
+    return {
+      label: "Status Unknown",
+      lastUpdateLabel: "Last market event: unavailable",
+      tone: "neutral",
+    };
+  }
   const pipelineTone = toStatusTone(summary.pipeline.status, "neutral");
   const hasCriticalAnomaly = summary.recent_anomalies.some(
     (anomaly) => anomaly.severity === "critical",

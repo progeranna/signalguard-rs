@@ -1,10 +1,12 @@
 import type { StatusTone } from "@/shared/lib/status";
 
-import type { UiMode } from "./types";
+import type { DashboardSymbolSummary, UiMode } from "./types";
 import type { SymbolId } from "./symbolId";
 
 export type MarketDetailViewModel = Readonly<{
   identity: MarketDetailIdentity;
+  source: UiMode;
+  availability: DashboardSymbolSummary["availability"];
   status: Readonly<{ text: string; tone: StatusTone }>;
   healthScore: string;
   stateAvailable: boolean;
