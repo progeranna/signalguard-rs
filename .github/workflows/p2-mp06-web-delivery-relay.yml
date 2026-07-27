@@ -1,0 +1,203 @@
+name: P2-MP06 Web Delivery Relay
+
+on:
+  push:
+    branches:
+      - infra/p2-mp06-web-relay
+    paths:
+      - .web-delivery/requests/*.json
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout relay control branch
+        uses: actions/checkout@v4
+        with:
+          ref: infra/p2-mp06-web-relay
+          path: control
+          fetch-depth: 0
+
+      - name: Resolve immutable delivery request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$(find control/.web-delivery/requests -maxdepth 1 -type f -name '*.json' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
+          test -n "$request"
+          for field in delivery_id connector_commit manifest_path; do
+            value="$(jq -r --arg field "$field" '.[$field]' "$request")"
+            test -n "$value"
+            test "$value" != null
+            echo "$field=$value" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Fetch and verify durable escrow
+        id: escrow
+        shell: bash
+        env:
+          DELIVERY_ID: ${{ steps.request.outputs.delivery_id }}
+          CONNECTOR_COMMIT: ${{ steps.request.outputs.connector_commit }}
+          MANIFEST_PATH: ${{ steps.request.outputs.manifest_path }}
+        run: |
+          set -euo pipefail
+          root=/tmp/p2-mp06-delivery
+          mkdir -p "$root"
+          base="https://raw.githubusercontent.com/progeranna/connector/${CONNECTOR_COMMIT}"
+          curl -fsSL "$base/$MANIFEST_PATH" -o "$root/manifest.json"
+          test "$(jq -r '.delivery_id' "$root/manifest.json")" = "$DELIVERY_ID"
+          test "$(jq -r '.product_repository' "$root/manifest.json")" = "progeranna/signalguard-rs"
+          test "$(jq -r '.product_branch' "$root/manifest.json")" = "p2/mp06-bulk-redis-state"
+          test "$(jq -r '.product_base_sha' "$root/manifest.json")" = "1447a3ccb2fa3020738cd2dd3f8d145be6cd202a"
+          test "$(jq -r '.commit_message' "$root/manifest.json")" = "perf(api): load dashboard market states in bulk"
+          test "$(jq -r '.gate_status' "$root/manifest.json")" = "PASS"
+          chunk_prefix="$(jq -r '.chunk_prefix' "$root/manifest.json")"
+          chunk_count="$(jq -r '.chunk_count' "$root/manifest.json")"
+          expected_b64_length="$(jq -r '.archive_base64_length' "$root/manifest.json")"
+          : > "$root/archive.b64"
+          for index in $(seq 0 $((chunk_count - 1))); do
+            name="$(printf '%04d.b64' "$index")"
+            curl -fsSL "$base/$chunk_prefix/$name" >> "$root/archive.b64"
+          done
+          test "$(wc -c < "$root/archive.b64")" -eq "$expected_b64_length"
+          test "$(tr -d 'A-Za-z0-9+/=' < "$root/archive.b64" | wc -c)" -eq 0
+          base64 -d "$root/archive.b64" > "$root/candidate.tar.zst"
+          echo "$(jq -r '.archive_sha256' "$root/manifest.json")  $root/candidate.tar.zst" | sha256sum -c -
+          mkdir -p "$root/candidate"
+          tar --zstd -xf "$root/candidate.tar.zst" -C "$root/candidate"
+          mapfile -t paths < <(find "$root/candidate" -type f -printf '%P\n' | sort)
+          expected=(src/api/handlers.rs src/storage/redis.rs tests/redis_cache.rs)
+          test "${paths[*]}" = "${expected[*]}"
+          jq -c '.files[]' "$root/manifest.json" | while read -r entry; do
+            path="$(jq -r '.path' <<<"$entry")"
+            sha256="$(jq -r '.sha256' <<<"$entry")"
+            git_blob="$(jq -r '.git_blob' <<<"$entry")"
+            echo "$sha256  $root/candidate/$path" | sha256sum -c -
+            test "$(git hash-object --no-filters "$root/candidate/$path")" = "$git_blob"
+          done
+          echo "manifest=$root/manifest.json" >> "$GITHUB_OUTPUT"
+          echo "candidate=$root/candidate" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact target branch
+        uses: actions/checkout@v4
+        with:
+          ref: p2/mp06-bulk-redis-state
+          path: product
+          fetch-depth: 0
+
+      - name: Require exact unchanged target head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C product rev-parse HEAD)" = "1447a3ccb2fa3020738cd2dd3f8d145be6cd202a"
+
+      - name: Apply escrowed candidate
+        shell: bash
+        env:
+          CANDIDATE: ${{ steps.escrow.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          cp "$CANDIDATE/src/storage/redis.rs" product/src/storage/redis.rs
+          cp "$CANDIDATE/src/api/handlers.rs" product/src/api/handlers.rs
+          cp "$CANDIDATE/tests/redis_cache.rs" product/tests/redis_cache.rs
+          mapfile -t changed < <(git -C product diff --name-only | sort)
+          expected=(src/api/handlers.rs src/storage/redis.rs tests/redis_cache.rs)
+          test "${changed[*]}" = "${expected[*]}"
+          git -C product diff --check
+
+      - name: Run full Rust gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd product
+          cargo fmt --all --check
+          cargo check --locked --all-targets --all-features
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
+
+      - name: Run real Redis gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y redis-server >/dev/null
+          port=$((20000 + RANDOM % 20000))
+          dir="$(mktemp -d)"
+          redis-server --bind 127.0.0.1 --port "$port" --save '' --appendonly no --daemonize yes --dir "$dir" --pidfile "$dir/redis.pid" --logfile "$dir/redis.log"
+          trap 'redis-cli -p "$port" shutdown nosave >/dev/null 2>&1 || true; rm -rf "$dir"' EXIT
+          for _ in $(seq 1 50); do redis-cli -p "$port" ping >/dev/null 2>&1 && break; sleep 0.1; done
+          test "$(redis-cli -p "$port" ping)" = PONG
+          export REDIS_URL="redis://127.0.0.1:$port"
+          cd product
+          cargo test --locked --test redis_cache -- --ignored --test-threads=1
+          cargo test --locked --test redis_cache bulk_market_states_round_trip_preserves_order_and_missing_positions -- --ignored --test-threads=1
+          cargo test --locked --lib atomic_market_state_write -- --ignored --test-threads=1
+
+      - name: Commit and non-force push target branch
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C product fetch origin p2/mp06-bulk-redis-state
+          test "$(git -C product rev-parse origin/p2/mp06-bulk-redis-state)" = "1447a3ccb2fa3020738cd2dd3f8d145be6cd202a"
+          git -C product config user.name github-actions[bot]
+          git -C product config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C product add src/storage/redis.rs src/api/handlers.rs tests/redis_cache.rs
+          test "$(git -C product diff --cached --name-only | wc -l)" -eq 3
+          git -C product commit -m "perf(api): load dashboard market states in bulk"
+          head="$(git -C product rev-parse HEAD)"
+          test "$(git -C product rev-parse HEAD^)" = "1447a3ccb2fa3020738cd2dd3f8d145be6cd202a"
+          git -C product push origin "HEAD:refs/heads/p2/mp06-bulk-redis-state"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
+      - name: Open or reuse draft PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head p2/mp06-bulk-redis-state --base refactor/data-boundaries --state open --json number --jq '.[0].number // empty')"
+          if [[ -z "$number" ]]; then
+            url="$(gh pr create --repo "$GITHUB_REPOSITORY" --draft --head p2/mp06-bulk-redis-state --base refactor/data-boundaries --title 'perf(api): load dashboard market states in bulk' --body 'P2-MP06 durable web-worker delivery. Do not merge before independent orchestrator review.')"
+            number="${url##*/}"
+          else
+            url="https://github.com/${GITHUB_REPOSITORY}/pull/${number}"
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Record relay result
+        shell: bash
+        env:
+          DELIVERY_ID: ${{ steps.request.outputs.delivery_id }}
+          PRODUCT_HEAD: ${{ steps.publish.outputs.head }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          set -euo pipefail
+          cd control
+          git pull --rebase origin infra/p2-mp06-web-relay
+          result=".web-delivery/results/${DELIVERY_ID}.json"
+          mkdir -p "$(dirname "$result")"
+          cat > "$result" <<JSON
+          {
+            "delivery_id": "$DELIVERY_ID",
+            "product_head": "$PRODUCT_HEAD",
+            "product_branch": "p2/mp06-bulk-redis-state",
+            "product_base": "1447a3ccb2fa3020738cd2dd3f8d145be6cd202a",
+            "pull_request_number": $PR_NUMBER,
+            "pull_request_url": "$PR_URL",
+            "relay_run_id": ${GITHUB_RUN_ID},
+            "conclusion": "success"
+          }
+          JSON
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$result"
+          git commit -m "delivery: record ${DELIVERY_ID} relay result"
+          git push origin HEAD:infra/p2-mp06-web-relay
