@@ -116,7 +116,7 @@ function SeverityBadge({ row }: Readonly<{ row: RecentAnomaliesPreviewRow }>) {
   );
 }
 
-function severityBadgeClass(
+export function severityBadgeClass(
   tone: RecentAnomaliesPreviewRow["severityDescriptor"]["tone"],
 ): string {
   switch (tone) {
@@ -131,7 +131,7 @@ function severityBadgeClass(
   }
 }
 
-function anomalyValueClass(
+export function anomalyValueClass(
   tone: RecentAnomaliesPreviewRow["severityDescriptor"]["tone"],
 ): string {
   switch (tone) {
@@ -146,7 +146,7 @@ function anomalyValueClass(
   }
 }
 
-function formatAnomalyTime(value: string | null | undefined): string {
+export function formatAnomalyTime(value: string | null | undefined): string {
   if (!value) {
     return "Unavailable";
   }
@@ -165,7 +165,7 @@ function formatAnomalyTime(value: string | null | undefined): string {
   }).format(date);
 }
 
-function formatAnomalyValue(
+export function formatAnomalyValue(
   type: string,
   value: number | null | undefined,
   role: "observed" | "threshold",
