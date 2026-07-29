@@ -58,7 +58,7 @@ function RouteStatePanels({ viewModel }: { viewModel: MarketDetailViewModel }) {
             />
             <InlineDataRow
               label="Recent anomalies"
-              value={viewModel.metrics.anomalyCount}
+              value={formatRouteAnomalyCount(viewModel.anomalies.length)}
             />
             <InlineDataRow label="Price move (1m)" value={viewModel.metrics.priceMove} />
             <InlineDataRow label="Depth sequence gaps" value={viewModel.metrics.depthGaps} />
@@ -231,4 +231,8 @@ function availabilityMessage(
     default:
       return "No current market state available for this market.";
   }
+}
+
+function formatRouteAnomalyCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
 }

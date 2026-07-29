@@ -20,8 +20,12 @@ const metricValues = {
 } as const;
 
 function fixture(
-  overrides: Partial<Pick<MarketDetailViewModel, "availability" | "stateAvailable">> &
-    Partial<Pick<MarketDetailViewModel, "status">> = {},
+  overrides: Partial<
+    Pick<
+      MarketDetailViewModel,
+      "anomalies" | "availability" | "metrics" | "stateAvailable" | "status"
+    >
+  > = {},
 ): MarketDetailViewModel {
   return {
     identity: { mode: "demo", symbol: "BTCUSDT" as MarketDetailViewModel["identity"]["symbol"] },
@@ -71,6 +75,8 @@ describe("SymbolDetailMetrics", () => {
     const panels = container.firstElementChild as HTMLElement;
     const signal = panels.firstElementChild as HTMLElement;
     const state = panels.lastElementChild as HTMLElement;
+    const recentAnomaliesRow = within(signal).getByText("Recent anomalies")
+      .parentElement as HTMLElement;
 
     expect(screen.getByText("Signal Preview")).toBeInTheDocument();
     expect(screen.getByText("Current Market State")).toBeInTheDocument();
@@ -90,7 +96,8 @@ describe("SymbolDetailMetrics", () => {
       "Freshness",
       "Depth gap count",
     ]);
-    expect(signal).toHaveTextContent("ANOMALY-VALUE");
+    expect(within(recentAnomaliesRow).getByText("0")).toBeInTheDocument();
+    expect(within(recentAnomaliesRow).queryByText("ANOMALY-VALUE")).not.toBeInTheDocument();
     expect(signal).toHaveTextContent("MOVE-VALUE");
     expect(signal).toHaveTextContent("GAPS-VALUE");
     expect(state).toHaveTextContent("PRICE-VALUE");
@@ -120,6 +127,44 @@ describe("SymbolDetailMetrics", () => {
       "Best ask",
     ]);
     expect(grid).toHaveTextContent("ANOMALY-VALUE");
+  });
+
+  it("preserves the route anomaly count format while popup uses the compact metric", () => {
+    const anomalies = Object.freeze(
+      Array.from({ length: 1_000 }, (_, index) => ({
+        id: `adapted-anomaly-${index}`,
+        symbol: "BTCUSDT" as MarketDetailViewModel["identity"]["symbol"],
+        type: "Spread spike",
+        severity: { key: "warning" as const, text: "Warning", tone: "warning" as const },
+        observed: { route: "1.5", popup: "1.500%" },
+        threshold: { route: "1", popup: "1.000%" },
+        detected: "1 min ago",
+        detectedAt: "2026-07-29 18:00:00 UTC",
+        context: "Adapted anomaly fixture",
+        valueClassName: "text-amber-200",
+      })),
+    );
+    const viewModel = fixture({
+      metrics: { ...metricValues, anomalyCount: "1K" },
+      anomalies,
+    });
+    const snapshot = JSON.stringify(viewModel);
+    const route = render(
+      <SymbolDetailMetrics surface="route-state" viewModel={viewModel} />,
+    );
+    const routeRow = screen.getByText("Recent anomalies").parentElement as HTMLElement;
+
+    expect(within(routeRow).getByText("1,000")).toBeInTheDocument();
+    expect(within(routeRow).queryByText("1K")).not.toBeInTheDocument();
+
+    route.unmount();
+    render(<SymbolDetailMetrics surface="popup" viewModel={viewModel} />);
+    const popupCard = screen.getByText("Anomalies").parentElement as HTMLElement;
+
+    expect(within(popupCard).getByText("1K")).toBeInTheDocument();
+    expect(JSON.stringify(viewModel)).toBe(snapshot);
+    expect(viewModel.anomalies).toBe(anomalies);
+    expect(viewModel.anomalies).toHaveLength(1_000);
   });
 
   it.each([
