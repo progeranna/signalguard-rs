@@ -6,7 +6,7 @@ import {
   formatAnomalyTime,
   formatAnomalyValue,
   severityBadgeClass,
-} from "./RecentAnomaliesDesktopTable";
+} from "./recentAnomaliesPresentation";
 
 export type RecentAnomaliesMobileCardsProps = Readonly<{
   rows: readonly RecentAnomaliesPreviewRow[];

@@ -1,10 +1,15 @@
 import type { KeyboardEvent } from "react";
 
 import { StatusBadge } from "@/shared/components/StatusBadge";
-import { formatCompactNumber } from "@/shared/lib/format";
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 import type { MarketHealthPreviewRow } from "./marketHealthPreviewModel";
+import {
+  formatOptionalCompact,
+  formatTickerPercent,
+  formatTickerPrice,
+  statusLabel,
+} from "./marketHealthPresentation";
 
 export type MarketHealthDesktopTableProps = Readonly<{
   rows: readonly MarketHealthPreviewRow[];
@@ -159,38 +164,6 @@ export function HealthScore({
       </div>
     </div>
   );
-}
-
-export function formatTickerPrice(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  return value;
-}
-
-export function formatTickerPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return `${value.toFixed(2)}%`;
-}
-
-export function formatOptionalCompact(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return formatCompactNumber(value);
-}
-
-export function statusLabel(value: string | null | undefined): string {
-  if (!value) {
-    return "Unknown";
-  }
-
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function marketStatusLabel(row: MarketHealthPreviewRow): string {

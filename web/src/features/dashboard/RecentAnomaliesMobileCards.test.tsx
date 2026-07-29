@@ -418,7 +418,7 @@ describe("RecentAnomaliesMobileCards presentation", () => {
     expect(importSources).toEqual([
       "./recentAnomaliesPreviewModel",
       "./MarketHealthMobileCards",
-      "./RecentAnomaliesDesktopTable",
+      "./recentAnomaliesPresentation",
     ]);
     expect(source).toMatch(
       /^import type \{ RecentAnomaliesPreviewRow \} from "\.\/recentAnomaliesPreviewModel";/m,
@@ -427,7 +427,10 @@ describe("RecentAnomaliesMobileCards presentation", () => {
       /^import \{ MobileSymbolMetric \} from "\.\/MarketHealthMobileCards";/m,
     );
     expect(source).toMatch(
-      /^import \{\s*anomalyValueClass,\s*formatAnomalyTime,\s*formatAnomalyValue,\s*severityBadgeClass,\s*\} from "\.\/RecentAnomaliesDesktopTable";/ms,
+      /^import \{\s*anomalyValueClass,\s*formatAnomalyTime,\s*formatAnomalyValue,\s*severityBadgeClass,\s*\} from "\.\/recentAnomaliesPresentation";/ms,
+    );
+    expect(source).not.toMatch(
+      /from\s+["'][^"']*RecentAnomaliesDesktopTable[^"']*["']/,
     );
     expect(source).not.toMatch(
       /from\s+["'](?:react-router|@tanstack|\.\/api|\.\/symbolPopup)/,

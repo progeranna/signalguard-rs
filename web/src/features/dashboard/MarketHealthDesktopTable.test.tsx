@@ -15,6 +15,10 @@ const componentSourcePath = path.join(
   "src/features/dashboard/MarketHealthDesktopTable.tsx",
 );
 const componentSource = readFileSync(componentSourcePath, "utf8");
+const presentationSource = readFileSync(
+  path.join(process.cwd(), "src/features/dashboard/marketHealthPresentation.ts"),
+  "utf8",
+);
 
 function previewRow(
   symbol: string,
@@ -386,13 +390,16 @@ describe("MarketHealthDesktopTable ownership and regressions", () => {
       /import\s+type\s+\{\s*MarketHealthPreviewRow\s*\}\s+from\s+["']\.\/marketHealthPreviewModel["'];/,
     );
     expect(componentSource).toMatch(
+      /from\s+["']\.\/marketHealthPresentation["'];/,
+    );
+    expect(componentSource).toMatch(
       /rows:\s*readonly\s+MarketHealthPreviewRow\[\]/,
     );
     expect(componentSource).not.toMatch(rowTransformation);
     expect(rowTransformation.test("rows.slice(0, 7)")).toBe(true);
     expect(rowTransformation.test("rows.toSorted(compareRows)")).toBe(true);
     expect(rowTransformation.test("value.slice(1)")).toBe(false);
-    expect(componentSource).toContain("value.slice(1)");
+    expect(presentationSource).toContain("value.slice(1)");
     expect(componentSource).not.toMatch(
       /\brows\s*\.\s*(?:push|pop|shift|unshift|copyWithin|fill)\s*\(/,
     );
