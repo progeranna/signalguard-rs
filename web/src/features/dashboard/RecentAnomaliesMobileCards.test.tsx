@@ -411,9 +411,23 @@ describe("RecentAnomaliesMobileCards presentation", () => {
     expect(screen.queryByText(previewRow.activeLabel)).not.toBeInTheDocument();
     expect(screen.queryByText(previewRow.severityDescriptor.description)).not.toBeInTheDocument();
 
-    expect(source.match(/^import\s/mg)).toHaveLength(1);
+    const importSources = Array.from(
+      source.matchAll(/from\s+["']([^"']+)["'];/g),
+      (match) => match[1],
+    );
+    expect(importSources).toEqual([
+      "./recentAnomaliesPreviewModel",
+      "./MarketHealthMobileCards",
+      "./RecentAnomaliesDesktopTable",
+    ]);
     expect(source).toMatch(
       /^import type \{ RecentAnomaliesPreviewRow \} from "\.\/recentAnomaliesPreviewModel";/m,
+    );
+    expect(source).toMatch(
+      /^import \{ MobileSymbolMetric \} from "\.\/MarketHealthMobileCards";/m,
+    );
+    expect(source).toMatch(
+      /^import \{\s*anomalyValueClass,\s*formatAnomalyTime,\s*formatAnomalyValue,\s*severityBadgeClass,\s*\} from "\.\/RecentAnomaliesDesktopTable";/ms,
     );
     expect(source).not.toMatch(
       /from\s+["'](?:react-router|@tanstack|\.\/api|\.\/symbolPopup)/,
