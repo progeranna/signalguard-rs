@@ -120,7 +120,7 @@ function MarketHealthDesktopRow({
   );
 }
 
-function HealthScore({
+export function HealthScore({
   compact = false,
   score,
   status,
@@ -161,7 +161,7 @@ function HealthScore({
   );
 }
 
-function formatTickerPrice(value: string | null | undefined): string {
+export function formatTickerPrice(value: string | null | undefined): string {
   if (!value) {
     return "—";
   }
@@ -169,7 +169,7 @@ function formatTickerPrice(value: string | null | undefined): string {
   return value;
 }
 
-function formatTickerPercent(value: number | null | undefined): string {
+export function formatTickerPercent(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "—";
   }
@@ -177,7 +177,7 @@ function formatTickerPercent(value: number | null | undefined): string {
   return `${value.toFixed(2)}%`;
 }
 
-function formatOptionalCompact(value: number | null | undefined): string {
+export function formatOptionalCompact(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "—";
   }
@@ -185,7 +185,7 @@ function formatOptionalCompact(value: number | null | undefined): string {
   return formatCompactNumber(value);
 }
 
-function statusLabel(value: string | null | undefined): string {
+export function statusLabel(value: string | null | undefined): string {
   if (!value) {
     return "Unknown";
   }
