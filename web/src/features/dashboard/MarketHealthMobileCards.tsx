@@ -1,8 +1,16 @@
 import type { MarketHealthPreviewRow } from "./marketHealthPreviewModel";
 
 import { StatusBadge } from "@/shared/components/StatusBadge";
-import { formatAgeMs, formatCompactNumber } from "@/shared/lib/format";
-import { toStatusTone, type StatusTone } from "@/shared/lib/status";
+import { formatAgeMs } from "@/shared/lib/format";
+import { toStatusTone } from "@/shared/lib/status";
+
+import {
+  formatOptionalCompact,
+  formatTickerPercent,
+  formatTickerPrice,
+  HealthScore,
+  statusLabel,
+} from "./MarketHealthDesktopTable";
 
 export type MarketHealthMobileCardsProps = Readonly<{
   rows: readonly MarketHealthPreviewRow[];
@@ -94,34 +102,7 @@ function MarketHealthMobileCard({
   );
 }
 
-function HealthScore({
-  score,
-  status,
-}: Readonly<{
-  score: number | null;
-  status: string | null | undefined;
-}>) {
-  const tone = healthScoreTone(score, status);
-  const width = score === null ? 0 : Math.max(score, 4);
-
-  return (
-    <div className="min-w-28">
-      <div className="flex items-center gap-3">
-        <span className={`text-lg font-extrabold ${healthScoreTextClass(tone)}`}>
-          {score ?? "—"}
-        </span>
-        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/70">
-          <div
-            className={`h-full rounded-full ${healthScoreBarClass(tone)}`}
-            style={{ width: `${width}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MobileSymbolMetric({
+export function MobileSymbolMetric({
   label,
   value,
 }: Readonly<{ label: string; value: string }>) {
@@ -135,7 +116,7 @@ function MobileSymbolMetric({
   );
 }
 
-function EmptyBlock({ message }: Readonly<{ message: string }>) {
+export function EmptyBlock({ message }: Readonly<{ message: string }>) {
   return (
     <div className="border-y border-white/10 px-2 py-5 text-sm leading-6 text-slate-400">
       {message}
@@ -143,91 +124,12 @@ function EmptyBlock({ message }: Readonly<{ message: string }>) {
   );
 }
 
-function healthScoreTone(
-  score: number | null,
-  status: string | null | undefined,
-): StatusTone {
-  if (status === "healthy" || (score !== null && score >= 80)) {
-    return "healthy";
-  }
-
-  if (status === "degraded" || (score !== null && score >= 50)) {
-    return "degraded";
-  }
-
-  if (status === "unhealthy" || (score !== null && score < 50)) {
-    return "unhealthy";
-  }
-
-  return "neutral";
-}
-
-function healthScoreTextClass(tone: StatusTone): string {
-  switch (tone) {
-    case "healthy":
-      return "text-emerald-300";
-    case "degraded":
-      return "text-amber-300";
-    case "unhealthy":
-    case "critical":
-      return "text-rose-300";
-    default:
-      return "text-slate-400";
-  }
-}
-
-function healthScoreBarClass(tone: StatusTone): string {
-  switch (tone) {
-    case "healthy":
-      return "bg-emerald-300";
-    case "degraded":
-      return "bg-amber-300";
-    case "unhealthy":
-    case "critical":
-      return "bg-rose-300";
-    default:
-      return "bg-slate-500";
-  }
-}
-
-function formatTickerPrice(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  return value;
-}
-
-function formatTickerPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return `${value.toFixed(2)}%`;
-}
-
-function formatOptionalAge(value: number | null | undefined): string {
+export function formatOptionalAge(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "Unavailable";
   }
 
   return formatAgeMs(value);
-}
-
-function formatOptionalCompact(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return formatCompactNumber(value);
-}
-
-function statusLabel(value: string | null | undefined): string {
-  if (!value) {
-    return "Unknown";
-  }
-
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function marketStatusLabel(row: MarketHealthPreviewRow): string {
@@ -243,7 +145,7 @@ function marketStatusLabel(row: MarketHealthPreviewRow): string {
   }
 }
 
-function availabilityMessage(
+export function availabilityMessage(
   availability: MarketHealthPreviewRow["availability"],
 ): string {
   switch (availability) {
