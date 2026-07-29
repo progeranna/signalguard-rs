@@ -1,10 +1,15 @@
 import type { KeyboardEvent } from "react";
 
 import { StatusBadge } from "@/shared/components/StatusBadge";
-import { formatCompactNumber } from "@/shared/lib/format";
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
 
 import type { MarketHealthPreviewRow } from "./marketHealthPreviewModel";
+import {
+  formatOptionalCompact,
+  formatTickerPercent,
+  formatTickerPrice,
+  statusLabel,
+} from "./marketHealthPresentation";
 
 export type MarketHealthDesktopTableProps = Readonly<{
   rows: readonly MarketHealthPreviewRow[];
@@ -24,10 +29,10 @@ export function MarketHealthDesktopTable({
         <colgroup>
           <col className="w-[18%]" />
           <col className="w-[22%]" />
-          <col className="w-[16%]" />
+          <col className="w-[11%]" />
           <col className="w-[11%]" />
           <col className="w-[14%]" />
-          <col className="w-[19%]" />
+          <col className="w-[24%]" />
         </colgroup>
         <thead>
           <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -112,7 +117,7 @@ function MarketHealthDesktopRow({
         {row.observed ? formatOptionalCompact(row.tradesPerMinute) : null}
       </td>
       <td className="px-2 py-3 text-right">
-        <div className="flex min-w-0 justify-end overflow-hidden">
+        <div className="flex min-w-0 justify-end">
           <StatusBadge status={statusTone} text={statusText} />
         </div>
       </td>
@@ -120,7 +125,7 @@ function MarketHealthDesktopRow({
   );
 }
 
-function HealthScore({
+export function HealthScore({
   compact = false,
   score,
   status,
@@ -159,38 +164,6 @@ function HealthScore({
       </div>
     </div>
   );
-}
-
-function formatTickerPrice(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  return value;
-}
-
-function formatTickerPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return `${value.toFixed(2)}%`;
-}
-
-function formatOptionalCompact(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return formatCompactNumber(value);
-}
-
-function statusLabel(value: string | null | undefined): string {
-  if (!value) {
-    return "Unknown";
-  }
-
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function marketStatusLabel(row: MarketHealthPreviewRow): string {

@@ -494,10 +494,13 @@ describe("RecentAnomaliesDesktopTable presentation", () => {
       screen.queryByText(previewRow.severityDescriptor.description),
     ).not.toBeInTheDocument();
 
-    expect(source.match(/^import\s/mg)).toHaveLength(2);
+    expect(source.match(/^import\s/mg)).toHaveLength(3);
     expect(source).toMatch(/^import type \{ KeyboardEvent \} from "react";/m);
     expect(source).toMatch(
       /^import type \{ RecentAnomaliesPreviewRow \} from "\.\/recentAnomaliesPreviewModel";/m,
+    );
+    expect(source).toMatch(
+      /^import \{\s*anomalyValueClass,\s*formatAnomalyTime,\s*formatAnomalyValue,\s*severityBadgeClass,\s*\} from "\.\/recentAnomaliesPresentation";/ms,
     );
     expect(source).not.toMatch(
       /from\s+[#'](?:react-router|@tanstack|\.\/api|\.\/symbolPopup)/,

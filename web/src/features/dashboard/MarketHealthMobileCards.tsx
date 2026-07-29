@@ -1,8 +1,16 @@
 import type { MarketHealthPreviewRow } from "./marketHealthPreviewModel";
 
 import { StatusBadge } from "@/shared/components/StatusBadge";
-import { formatAgeMs, formatCompactNumber } from "@/shared/lib/format";
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
+
+import {
+  availabilityMessage,
+  formatOptionalCompact,
+  formatOptionalAge,
+  formatTickerPercent,
+  formatTickerPrice,
+  statusLabel,
+} from "./marketHealthPresentation";
 
 export type MarketHealthMobileCardsProps = Readonly<{
   rows: readonly MarketHealthPreviewRow[];
@@ -94,34 +102,7 @@ function MarketHealthMobileCard({
   );
 }
 
-function HealthScore({
-  score,
-  status,
-}: Readonly<{
-  score: number | null;
-  status: string | null | undefined;
-}>) {
-  const tone = healthScoreTone(score, status);
-  const width = score === null ? 0 : Math.max(score, 4);
-
-  return (
-    <div className="min-w-28">
-      <div className="flex items-center gap-3">
-        <span className={`text-lg font-extrabold ${healthScoreTextClass(tone)}`}>
-          {score ?? "—"}
-        </span>
-        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/70">
-          <div
-            className={`h-full rounded-full ${healthScoreBarClass(tone)}`}
-            style={{ width: `${width}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MobileSymbolMetric({
+export function MobileSymbolMetric({
   label,
   value,
 }: Readonly<{ label: string; value: string }>) {
@@ -135,12 +116,25 @@ function MobileSymbolMetric({
   );
 }
 
-function EmptyBlock({ message }: Readonly<{ message: string }>) {
+export function EmptyBlock({ message }: Readonly<{ message: string }>) {
   return (
     <div className="border-y border-white/10 px-2 py-5 text-sm leading-6 text-slate-400">
       {message}
     </div>
   );
+}
+
+function marketStatusLabel(row: MarketHealthPreviewRow): string {
+  switch (row.availability) {
+    case "configured":
+      return "Configured";
+    case "awaiting":
+      return "Awaiting data";
+    case "unavailable":
+      return "Unavailable";
+    case "observed":
+      return statusLabel(row.healthStatus);
+  }
 }
 
 function healthScoreTone(
@@ -190,70 +184,43 @@ function healthScoreBarClass(tone: StatusTone): string {
   }
 }
 
-function formatTickerPrice(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
+function HealthScore({
+  compact = false,
+  score,
+  status,
+}: Readonly<{
+  compact?: boolean;
+  score: number | null;
+  status: string | null | undefined;
+}>) {
+  const tone = healthScoreTone(score, status);
+  const width = score === null ? 0 : Math.max(score, 4);
 
-  return value;
-}
-
-function formatTickerPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return `${value.toFixed(2)}%`;
-}
-
-function formatOptionalAge(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "Unavailable";
-  }
-
-  return formatAgeMs(value);
-}
-
-function formatOptionalCompact(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return formatCompactNumber(value);
-}
-
-function statusLabel(value: string | null | undefined): string {
-  if (!value) {
-    return "Unknown";
-  }
-
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function marketStatusLabel(row: MarketHealthPreviewRow): string {
-  switch (row.availability) {
-    case "configured":
-      return "Configured";
-    case "awaiting":
-      return "Awaiting data";
-    case "unavailable":
-      return "Unavailable";
-    case "observed":
-      return statusLabel(row.healthStatus);
-  }
-}
-
-function availabilityMessage(
-  availability: MarketHealthPreviewRow["availability"],
-): string {
-  switch (availability) {
-    case "configured":
-      return "Configured for Live; Live ingestion is not active.";
-    case "awaiting":
-      return "Awaiting first Live market data.";
-    case "unavailable":
-      return "Live market data is unavailable.";
-    case "observed":
-      return "No current market state available for this market.";
-  }
+  return (
+    <div className={compact ? "min-w-0" : "min-w-28"}>
+      <div
+        className={
+          compact
+            ? "flex min-w-0 items-center gap-2"
+            : "flex items-center gap-3"
+        }
+      >
+        <span className={`text-lg font-extrabold ${healthScoreTextClass(tone)}`}>
+          {score ?? "—"}
+        </span>
+        <div
+          className={
+            compact
+              ? "h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-700/70"
+              : "h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/70"
+          }
+        >
+          <div
+            className={`h-full rounded-full ${healthScoreBarClass(tone)}`}
+            style={{ width: `${width}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }

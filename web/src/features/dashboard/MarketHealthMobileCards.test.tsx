@@ -468,5 +468,11 @@ describe("MarketHealthMobileCards scope boundaries", () => {
       /\b(?:useQuery|queryClient|fetch|XMLHttpRequest|WebSocket|Date\.now|new\s+Date|setTimeout|setInterval|Math\.random|window|document|navigator|localStorage|sessionStorage)\b/,
     );
     expect(source).not.toMatch(/from\s+["'][^"']*(?:api|router|popup)[^"']*["']/i);
+    expect(source).toMatch(
+      /from\s+["']\.\/marketHealthPresentation["'];/,
+    );
+    expect(source).not.toMatch(
+      /from\s+["'][^"']*MarketHealthDesktopTable[^"']*["']/,
+    );
   });
 });

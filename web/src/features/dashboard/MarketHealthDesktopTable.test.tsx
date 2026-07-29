@@ -15,6 +15,10 @@ const componentSourcePath = path.join(
   "src/features/dashboard/MarketHealthDesktopTable.tsx",
 );
 const componentSource = readFileSync(componentSourcePath, "utf8");
+const presentationSource = readFileSync(
+  path.join(process.cwd(), "src/features/dashboard/marketHealthPresentation.ts"),
+  "utf8",
+);
 
 function previewRow(
   symbol: string,
@@ -93,10 +97,10 @@ describe("MarketHealthDesktopTable structure", () => {
     expect(columns.map((column) => column.className)).toEqual([
       "w-[18%]",
       "w-[22%]",
-      "w-[16%]",
+      "w-[11%]",
       "w-[11%]",
       "w-[14%]",
-      "w-[19%]",
+      "w-[24%]",
     ]);
     expect(screen.getAllByRole("row")[0]).toHaveAttribute(
       "class",
@@ -377,6 +381,60 @@ describe("MarketHealthDesktopTable non-observed states", () => {
   );
 });
 
+describe("MarketHealthDesktopTable status badge layout regression", () => {
+  it("allocates enough width for every supported status without clipping or abbreviation", () => {
+    const rows = [
+      previewRow("HEALTHYUSDT", { healthStatus: "healthy" }),
+      previewRow("DEGRADEDUSDT", { healthStatus: "degraded" }),
+      previewRow("UNHEALTHYUSDT", { healthStatus: "unhealthy" }),
+      previewRow("CONFIGUREDUSDT", {
+        availability: "configured",
+        observed: false,
+      }),
+      previewRow("AWAITINGUSDT", {
+        availability: "awaiting",
+        observed: false,
+      }),
+      previewRow("UNAVAILABLEUSDT", {
+        availability: "unavailable",
+        observed: false,
+      }),
+      previewRow("UNKNOWNUSDT", {
+        healthStatus: null,
+      }),
+    ];
+    const labels = [
+      "Healthy",
+      "Degraded",
+      "Unhealthy",
+      "Configured",
+      "Awaiting data",
+      "Unavailable",
+      "Unknown",
+    ];
+
+    renderTable(rows);
+
+    expect(componentSource).toMatch(
+      /<col className="w-\[11%\]" \/>[\s\S]*<col className="w-\[24%\]" \/>/,
+    );
+    expect(componentSource).toMatch(
+      /<div className="flex min-w-0 justify-end">/,
+    );
+    expect(componentSource).not.toContain(
+      "flex min-w-0 justify-end overflow-hidden",
+    );
+
+    for (const [index, label] of labels.entries()) {
+      const badge = within(rowCells(rows[index].symbol)[5]).getByText(label);
+
+      expect(badge).toHaveTextContent(label);
+      expect(badge.textContent).toBe(label);
+      expect(badge).not.toHaveClass("truncate");
+    }
+  });
+});
+
 describe("MarketHealthDesktopTable ownership and regressions", () => {
   it("uses the readonly preview model and a rows-specific collection guard", () => {
     const rowTransformation =
@@ -386,13 +444,16 @@ describe("MarketHealthDesktopTable ownership and regressions", () => {
       /import\s+type\s+\{\s*MarketHealthPreviewRow\s*\}\s+from\s+["']\.\/marketHealthPreviewModel["'];/,
     );
     expect(componentSource).toMatch(
+      /from\s+["']\.\/marketHealthPresentation["'];/,
+    );
+    expect(componentSource).toMatch(
       /rows:\s*readonly\s+MarketHealthPreviewRow\[\]/,
     );
     expect(componentSource).not.toMatch(rowTransformation);
     expect(rowTransformation.test("rows.slice(0, 7)")).toBe(true);
     expect(rowTransformation.test("rows.toSorted(compareRows)")).toBe(true);
     expect(rowTransformation.test("value.slice(1)")).toBe(false);
-    expect(componentSource).toContain("value.slice(1)");
+    expect(presentationSource).toContain("value.slice(1)");
     expect(componentSource).not.toMatch(
       /\brows\s*\.\s*(?:push|pop|shift|unshift|copyWithin|fill)\s*\(/,
     );
