@@ -1,22 +1,18 @@
 import type { KeyboardEvent } from "react";
 import { useEffect, useState } from "react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 import {
   useCatalogDashboardSummaryQuery,
   useMarketTimelineQuery,
 } from "@/features/dashboard/api";
+import { MarketHealthDesktopTable } from "@/features/dashboard/MarketHealthDesktopTable";
+import { MarketHealthMobileCards } from "@/features/dashboard/MarketHealthMobileCards";
+import { buildMarketHealthPreview } from "@/features/dashboard/marketHealthPreviewModel";
 import { adaptMarketResourceToViewModel } from "@/features/dashboard/marketAdapters";
 import type { MarketAnomalyViewModel, MarketDetailViewModel } from "@/features/dashboard/marketViewModel";
+import { RecentAnomaliesDesktopTable } from "@/features/dashboard/RecentAnomaliesDesktopTable";
+import { RecentAnomaliesMobileCards } from "@/features/dashboard/RecentAnomaliesMobileCards";
+import { buildRecentAnomaliesPreview } from "@/features/dashboard/recentAnomaliesPreviewModel";
 import {
   normalizeSelectedSymbol,
   storeSelectedSymbol,
@@ -30,11 +26,11 @@ import {
   type SymbolPopupReturnContext,
 } from "@/features/dashboard/symbolPopup";
 import { useSymbolPopupResource } from "@/features/dashboard/symbolPopupResource";
+import { TimelinePanel } from "@/features/dashboard/TimelinePanel";
 import type {
   DashboardAnomaly,
   DashboardSummary,
   DashboardSymbolSummary,
-  MarketTimelinePoint,
   UiMode,
 } from "@/features/dashboard/types";
 import { useResolvedUiMode } from "@/features/dashboard/uiMode";
@@ -47,8 +43,6 @@ import {
   formatCompactNumber,
 } from "@/shared/lib/format";
 import { toStatusTone, type StatusTone } from "@/shared/lib/status";
-
-const DASHBOARD_TABLE_PREVIEW_LIMIT = 7;
 
 type DashboardModalState =
   | { type: "anomalies" }
@@ -121,261 +115,31 @@ function MarketTimelineShell({
   isLoading: boolean;
 }) {
   const symbols = summary?.symbols ?? [];
-  const selectedSymbol = selectSignalSymbol(symbols, selectedSignalSymbol);
-  const observed = selectedSymbol?.availability === "observed";
+  const selectedMarket = selectSignalSymbol(symbols, selectedSignalSymbol);
+  const observed = selectedMarket?.availability === "observed";
   const timelineQuery = useMarketTimelineQuery(
-    selectedSymbol?.symbol ?? null,
+    selectedMarket?.symbol ?? null,
     selectedUiMode,
     observed,
   );
-  const timelinePoints = buildTimelineChartPoints(timelineQuery.data?.points ?? []);
-  const timelinePriceDomain = buildTimelinePriceDomain(timelinePoints);
-  const timelineTimeDomain = buildTimelineTimeDomain(timelinePoints);
-  const timelineAnomalies = timelineQuery.data?.anomalies ?? [];
-  const visibleTimelineAnomalies = buildVisibleTimelineAnomalies(
-    timelineAnomalies,
-    timelineTimeDomain,
-  );
-  const timelineSeverity = highestAnomalySeverity(timelineAnomalies);
-  const statusText = selectedSymbol ? marketStatusLabel(selectedSymbol) : "No data yet";
-  const statusTone = toStatusTone(selectedSymbol?.health?.status, "neutral");
+  const emptyAnchorMs = Number.isFinite(timelineQuery.dataUpdatedAt)
+    ? timelineQuery.dataUpdatedAt
+    : 0;
+  const timelineErrorMessage = timelineQuery.isError
+    ? buildErrorMessage(timelineQuery.error)
+    : null;
 
   return (
-    <section>
-      {isLoading ? (
-        <LoadingSkeleton className="h-40" />
-      ) : (
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_248px]">
-          <div className="rounded-xl border border-slate-700/70 bg-slate-950/70 px-3 py-2.5 sm:px-4">
-            {selectedSymbol ? (
-              <>
-                <div className="mb-2">
-                  <div className="flex flex-wrap items-center gap-2 font-mono text-sm font-bold text-white">
-                    <span>{selectedSymbol.symbol}</span>
-                    <span className="rounded-full border border-cyan-400/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200">
-                      {selectedSymbol.source === "live" ? "Live" : "Demo"}
-                    </span>
-                    {timelineSeverity ? (
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${anomalyMarkerBadgeClass(
-                          timelineSeverity,
-                        )}`}
-                      >
-                        {statusLabel(timelineSeverity)} anomaly
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-                {!observed ? (
-                  <EmptyBlock message={availabilityMessage(selectedSymbol.availability)} />
-                ) : timelineQuery.isError ? (
-                  <ErrorPanel
-                    title="Market timeline unavailable"
-                    message={buildErrorMessage(timelineQuery.error)}
-                    onRetry={() => void timelineQuery.refetch()}
-                  />
-                ) : timelineQuery.isLoading ? (
-                  <LoadingSkeleton className="h-[320px]" />
-                ) : timelinePoints.length === 0 ? (
-                  <div className="border-y border-white/10 px-2 py-10 text-sm leading-6 text-slate-400">
-                    Waiting for market data
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex min-h-[285px] rounded-xl bg-slate-950/35">
-                      <div className="relative min-h-0 flex-1 overflow-hidden">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart
-                            data={timelinePoints}
-                            margin={{ top: 4, right: 14, bottom: 2, left: 0 }}
-                          >
-                            <defs>
-                              <linearGradient id="marketTimelineFill" x1="0" x2="0" y1="0" y2="1">
-                                <stop offset="0%" stopColor="#7EE45B" stopOpacity={0.2} />
-                                <stop offset="100%" stopColor="#7EE45B" stopOpacity={0.02} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid
-                              stroke="rgba(100,116,139,0.18)"
-                              strokeDasharray="3 8"
-                              vertical={false}
-                            />
-                            <XAxis
-                              axisLine={false}
-                              dataKey="timestampMs"
-                              domain={timelineTimeDomain}
-                              height={34}
-                              label={{
-                                value: "Time",
-                                position: "insideBottom",
-                                offset: -2,
-                                fill: "#64748b",
-                                fontSize: 11,
-                              }}
-                              tick={{ fill: "#64748b", fontSize: 11 }}
-                              tickFormatter={formatTimelineTick}
-                              tickLine={false}
-                              tickMargin={2}
-                              type="number"
-                            />
-                            <YAxis
-                              axisLine={false}
-                              domain={timelinePriceDomain}
-                              label={{
-                                value: "Price",
-                                angle: -90,
-                                position: "insideLeft",
-                                fill: "#64748b",
-                                fontSize: 11,
-                              }}
-                              tick={{ fill: "#64748b", fontSize: 11 }}
-                              tickFormatter={formatTimelinePriceTick}
-                              tickLine={false}
-                              type="number"
-                              width={58}
-                            />
-                            <Tooltip content={<TimelineTooltip anomalies={timelineAnomalies} />} />
-                            {visibleTimelineAnomalies.map((anomaly) => (
-                              <ReferenceLine
-                                key={anomaly.id}
-                                stroke={anomalySeverityColor(anomaly.severity)}
-                                strokeDasharray="3 4"
-                                strokeOpacity={0.55}
-                                x={anomaly.timestampMs}
-                              />
-                            ))}
-                            <Area
-                              dataKey="price"
-                              fill="url(#marketTimelineFill)"
-                              isAnimationActive={false}
-                              stroke="#7EE45B"
-                              strokeWidth={2.4}
-                              type="monotone"
-                            />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </>
-            ) : (
-              <EmptyBlock message="Waiting for market data" />
-            )}
-          </div>
-
-          <aside className="flex h-full min-h-[285px] flex-col rounded-xl border border-white/10 bg-white/[0.035] px-3 py-3">
-            <div className="border-b border-white/10 pb-1.5">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <p className="font-mono text-sm font-bold text-white">
-                  {selectedSymbol?.symbol ?? "Unknown market"}
-                </p>
-                <StatusBadge
-                  status={statusTone}
-                  text={statusText}
-                />
-              </div>
-            </div>
-            {observed ? <div className="mt-3 flex flex-1 flex-col justify-evenly gap-2">
-              <SignalSnapshotMetric
-                label="Price"
-                value={formatTickerPrice(selectedSymbol?.state?.last_trade_price)}
-              />
-              <SignalSnapshotMetric
-                label="Spread"
-                value={formatTickerPercent(selectedSymbol?.state?.spread_pct)}
-              />
-              <SignalSnapshotMetric
-                label="Trades/min"
-                value={formatOptionalCompact(selectedSymbol?.state?.trades_per_minute)}
-              />
-              <SignalSnapshotMetric
-                label="Freshness"
-                value={formatOptionalAge(
-                  selectedSymbol?.state?.last_event_age_ms,
-                )}
-              />
-            </div> : <EmptyBlock message={selectedSymbol ? availabilityMessage(selectedSymbol.availability) : "No current market state available for this market."} />}
-          </aside>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function TimelineTooltip({
-  active,
-  anomalies,
-  label,
-  payload,
-}: {
-  active?: boolean;
-  anomalies: DashboardAnomaly[];
-  label?: number;
-  payload?: Array<{ payload: MarketTimelineChartPoint }>;
-}) {
-  if (!active || !payload?.length) {
-    return null;
-  }
-
-  const point = payload[0]?.payload;
-
-  if (!point) {
-    return null;
-  }
-
-  const pointAnomalies = anomalies.filter((anomaly) => {
-    const anomalyTime = Date.parse(anomaly.event_time || anomaly.created_at);
-
-    return Number.isFinite(anomalyTime) && Math.abs(anomalyTime - point.timestampMs) <= 15_000;
-  });
-
-  return (
-    <div
-      style={{
-        background: "#0E1822",
-        border: "1px solid rgba(148,163,184,0.18)",
-        borderRadius: "10px",
-        color: "#e2e8f0",
-      }}
-      className="min-w-[14rem] px-3 py-2.5 text-sm"
-    >
-      <p className="font-semibold text-white">
-        {formatTimelineTooltipTimestamp(typeof label === "number" ? new Date(label).toISOString() : point.timestamp)}
-      </p>
-      <div className="mt-2 space-y-1 text-slate-300">
-        <p>Price: {point.priceLabel}</p>
-        {point.spreadPct !== null ? <p>Spread: {formatTickerPercent(point.spreadPct)}</p> : null}
-        {point.tradesPerMinute !== null ? (
-          <p>Trades/min: {formatOptionalCompact(point.tradesPerMinute)}</p>
-        ) : null}
-        {point.lastEventAgeMs !== null ? (
-          <p>Freshness: {formatOptionalAge(point.lastEventAgeMs)}</p>
-        ) : null}
-        {pointAnomalies.length > 0 ? (
-          <p>
-            Anomalies:{" "}
-            {pointAnomalies
-              .map(
-                (anomaly) =>
-                  `${formatAnomalyType(anomaly.anomaly_type)} (${statusLabel(anomaly.severity)})`,
-              )
-              .join(", ")}
-          </p>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function SignalSnapshotMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-slate-950/35 px-3 py-2.5">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-        {label}
-      </p>
-      <p className="text-sm font-bold text-white">{value}</p>
-    </div>
+    <TimelinePanel
+      selectedMarket={selectedMarket}
+      timelinePoints={timelineQuery.data?.points ?? []}
+      timelineAnomalies={timelineQuery.data?.anomalies ?? []}
+      isSummaryLoading={isLoading}
+      isTimelineLoading={timelineQuery.isLoading}
+      timelineErrorMessage={timelineErrorMessage}
+      onRetryTimeline={() => void timelineQuery.refetch()}
+      emptyAnchorMs={emptyAnchorMs}
+    />
   );
 }
 
@@ -518,7 +282,7 @@ function SymbolHealthShell({
   isLoading: boolean;
 }) {
   const symbols = summary?.symbols ?? [];
-  const previewSymbols = symbols.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
+  const preview = buildMarketHealthPreview(symbols);
 
   return (
     <section className="min-w-0 overflow-hidden space-y-3">
@@ -526,7 +290,7 @@ function SymbolHealthShell({
         title="Market Health"
         subtitle="Current health signals for monitored markets."
         action={
-          symbols.length > DASHBOARD_TABLE_PREVIEW_LIMIT ? (
+          preview.hasMore ? (
             <button
               type="button"
               onClick={onOpenAll}
@@ -539,115 +303,21 @@ function SymbolHealthShell({
       />
       {isLoading ? (
         <LoadingSkeleton className="h-44" />
-      ) : symbols.length > 0 ? (
+      ) : !preview.isEmpty ? (
         <>
-          <div className="hidden w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain border-y border-white/10 lg:block">
-            <table aria-label="Market health" className="w-full table-fixed border-collapse text-left">
-              <colgroup>
-                <col className="w-[18%]" />
-                <col className="w-[22%]" />
-                <col className="w-[16%]" />
-                <col className="w-[11%]" />
-                <col className="w-[14%]" />
-                <col className="w-[19%]" />
-              </colgroup>
-              <thead>
-                <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-2">Market</th>
-                  <th className="px-2 py-3 pr-2">Health Score</th>
-                  <th className="px-2 py-3 pr-2">Last Price</th>
-                  <th className="px-2 py-3 pr-2">Spread</th>
-                  <th className="px-2 py-3 pr-2">Trades/min</th>
-                  <th className="px-2 py-3 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {previewSymbols.map((symbol) => (
-                  <SymbolHealthTableRow
-                    key={symbol.symbol}
-                    symbol={symbol}
-                    onOpenSymbolDetail={onOpenSymbolDetail}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
-            {previewSymbols.map((symbol) => (
-              <SymbolHealthCard
-                key={symbol.symbol}
-                symbol={symbol}
-                onOpenSymbolDetail={onOpenSymbolDetail}
-              />
-            ))}
-          </div>
+          <MarketHealthDesktopTable
+            rows={preview.rows}
+            onOpenSymbolDetail={onOpenSymbolDetail}
+          />
+          <MarketHealthMobileCards
+            rows={preview.rows}
+            onOpenSymbolDetail={onOpenSymbolDetail}
+          />
         </>
       ) : (
         <EmptyBlock message="No monitored markets available." />
       )}
     </section>
-  );
-}
-
-function SymbolHealthTableRow({
-  onOpenSymbolDetail,
-  symbol,
-}: {
-  onOpenSymbolDetail: (symbol: string) => void;
-  symbol: DashboardSymbolSummary;
-}) {
-  const score = symbol.health?.score ?? null;
-  const statusTone = toStatusTone(symbol.health?.status, "neutral");
-  const statusText = marketStatusLabel(symbol);
-
-  function handleOpenSymbol() {
-    onOpenSymbolDetail(symbol.symbol);
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleOpenSymbol();
-    }
-  }
-
-  return (
-    <tr
-      tabIndex={0}
-      role="button"
-      aria-label={`Open ${symbol.symbol} market detail`}
-      onClick={handleOpenSymbol}
-      onKeyDown={handleKeyDown}
-      className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
-    >
-      <td className="min-w-0 px-2 py-3 pr-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 truncate font-mono text-sm font-bold text-slate-50">
-            {symbol.symbol}
-          </span>
-          <span className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 2xl:inline">
-            View
-          </span>
-        </div>
-      </td>
-      <td className="px-2 py-3 pr-4">
-        {symbol.availability === "observed" ? <HealthScore compact score={score} status={symbol.health?.status} /> : null}
-      </td>
-      <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-100 2xl:text-sm">
-        {symbol.availability === "observed" ? formatTickerPrice(symbol.state?.last_trade_price) : null}
-      </td>
-      <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
-        {symbol.availability === "observed" ? formatTickerPercent(symbol.state?.spread_pct) : null}
-      </td>
-      <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
-        {symbol.availability === "observed" ? formatOptionalCompact(symbol.state?.trades_per_minute) : null}
-      </td>
-      <td className="px-2 py-3 text-right">
-        <div className="flex min-w-0 justify-end overflow-hidden">
-          <StatusBadge status={statusTone} text={statusText} />
-        </div>
-      </td>
-    </tr>
   );
 }
 
@@ -772,7 +442,7 @@ function RecentAnomaliesShell({
   isLoading: boolean;
 }) {
   const anomalies = summary?.recent_anomalies ?? [];
-  const previewAnomalies = anomalies.slice(0, DASHBOARD_TABLE_PREVIEW_LIMIT);
+  const preview = buildRecentAnomaliesPreview(anomalies);
 
   return (
     <section className="min-w-0 overflow-hidden space-y-3">
@@ -780,7 +450,7 @@ function RecentAnomaliesShell({
         title="Recent Anomalies"
         subtitle="Latest data-quality events across monitored markets."
         action={
-          anomalies.length > DASHBOARD_TABLE_PREVIEW_LIMIT ? (
+          preview.hasMore ? (
             <button
               type="button"
               onClick={onOpenAll}
@@ -793,167 +463,21 @@ function RecentAnomaliesShell({
       />
       {isLoading ? (
         <LoadingSkeleton className="h-44" />
-      ) : anomalies.length > 0 ? (
+      ) : !preview.isEmpty ? (
         <>
-          <div className="hidden w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain border-y border-white/10 lg:block">
-            <table aria-label="Recent anomalies" className="w-full table-fixed border-collapse text-left">
-              <colgroup>
-                <col className="w-[15%]" />
-                <col className="w-[16%]" />
-                <col className="w-[20%]" />
-                <col className="w-[19%]" />
-                <col className="w-[15%]" />
-                <col className="w-[15%]" />
-              </colgroup>
-              <thead>
-                <tr className="border-b border-white/10 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <th className="px-2 py-3 pr-2">Time</th>
-                  <th className="px-2 py-3 pr-2">Market</th>
-                  <th className="px-2 py-3 pr-2">Type</th>
-                  <th className="px-2 py-3 pr-2">Severity</th>
-                  <th className="px-2 py-3 pr-2">Observed</th>
-                  <th className="px-2 py-3">Threshold</th>
-                </tr>
-              </thead>
-              <tbody>
-                {previewAnomalies.map((anomaly) => (
-                  <AnomalyTableRow
-                    key={anomaly.id}
-                    anomaly={anomaly}
-                    onOpenSymbolDetail={onOpenSymbolDetail}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
-            {previewAnomalies.map((anomaly) => (
-              <AnomalyCard
-                key={anomaly.id}
-                anomaly={anomaly}
-                onOpenSymbolDetail={onOpenSymbolDetail}
-              />
-            ))}
-          </div>
+          <RecentAnomaliesDesktopTable
+            rows={preview.rows}
+            onOpenSymbolDetail={onOpenSymbolDetail}
+          />
+          <RecentAnomaliesMobileCards
+            rows={preview.rows}
+            onOpenSymbolDetail={onOpenSymbolDetail}
+          />
         </>
       ) : (
         <EmptyBlock message="No anomalies detected in the current summary." />
       )}
     </section>
-  );
-}
-
-function AnomalyTableRow({
-  anomaly,
-  onOpenSymbolDetail,
-}: {
-  anomaly: DashboardAnomaly;
-  onOpenSymbolDetail: (symbol: string) => void;
-}) {
-  const severityTone = toStatusTone(anomaly.severity, "neutral");
-
-  function handleOpenSymbol() {
-    onOpenSymbolDetail(anomaly.symbol);
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleOpenSymbol();
-    }
-  }
-
-  return (
-    <tr
-      tabIndex={0}
-      role="button"
-      aria-label={`Open ${anomaly.symbol} market detail`}
-      onClick={handleOpenSymbol}
-      onKeyDown={handleKeyDown}
-      className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
-    >
-      <td className="whitespace-nowrap px-2 py-3 pr-2 text-xs font-semibold text-slate-300 2xl:text-sm">
-        {formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
-      </td>
-      <td className="min-w-0 px-2 py-3 pr-2">
-        <span className="block min-w-0 truncate font-mono text-xs font-bold text-slate-50 2xl:text-sm">
-          {anomaly.symbol}
-        </span>
-      </td>
-      <td className="min-w-0 break-words px-2 py-3 pr-2 text-xs font-bold leading-4 text-slate-100 2xl:text-sm">
-        {formatAnomalyType(anomaly.anomaly_type)}
-      </td>
-      <td className="min-w-0 px-2 py-3 pr-2">
-        <SeverityBadge compact severity={anomaly.severity} />
-      </td>
-      <td className={`whitespace-nowrap px-2 py-3 pr-2 text-xs font-bold 2xl:text-sm ${anomalyValueClass(severityTone)}`}>
-        {formatAnomalyValue(anomaly.anomaly_type, anomaly.observed_value, "observed")}
-      </td>
-      <td className="whitespace-nowrap px-2 py-3 text-xs font-semibold text-slate-300 2xl:text-sm">
-        {formatAnomalyValue(anomaly.anomaly_type, anomaly.threshold_value, "threshold")}
-      </td>
-    </tr>
-  );
-}
-
-function AnomalyCard({
-  anomaly,
-  onOpenSymbolDetail,
-}: {
-  anomaly: DashboardAnomaly;
-  onOpenSymbolDetail: (symbol: string) => void;
-}) {
-  const severityTone = toStatusTone(anomaly.severity, "neutral");
-
-  return (
-    <button
-      type="button"
-      onClick={() => onOpenSymbolDetail(anomaly.symbol)}
-      className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      aria-label={`Open ${anomaly.symbol} market detail`}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <span className="font-mono text-base font-bold text-white transition">
-            {anomaly.symbol}
-          </span>
-          <p className="mt-2 text-base font-bold text-slate-100">
-            {formatAnomalyType(anomaly.anomaly_type)}
-          </p>
-        </div>
-        <SeverityBadge severity={anomaly.severity} />
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <MobileSymbolMetric
-          label="Observed"
-          value={formatAnomalyValue(
-            anomaly.anomaly_type,
-            anomaly.observed_value,
-            "observed",
-          )}
-        />
-        <MobileSymbolMetric
-          label="Threshold"
-          value={formatAnomalyValue(
-            anomaly.anomaly_type,
-            anomaly.threshold_value,
-            "threshold",
-          )}
-        />
-        <MobileSymbolMetric
-          label="Time"
-          value={formatAnomalyTime(anomaly.event_time || anomaly.created_at)}
-        />
-        <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Severity
-          </p>
-          <p className={`mt-1 text-sm font-bold ${anomalyValueClass(severityTone)}`}>
-            {statusLabel(anomaly.severity)}
-          </p>
-        </div>
-      </div>
-    </button>
   );
 }
 
@@ -1685,153 +1209,6 @@ function selectSignalSymbol(
   );
 }
 
-type MarketTimelineChartPoint = {
-  timestamp: string;
-  timestampMs: number;
-  price: number;
-  priceLabel: string;
-  spreadPct: number | null;
-  tradesPerMinute: number | null;
-  lastEventAgeMs: number | null;
-};
-
-function buildTimelineChartPoints(points: MarketTimelinePoint[]): MarketTimelineChartPoint[] {
-  return points
-    .map((point) => {
-      const timestampMs = Date.parse(point.timestamp);
-      const price = Number(point.price);
-
-      if (!Number.isFinite(timestampMs) || !Number.isFinite(price)) {
-        return null;
-      }
-
-      return {
-        timestamp: point.timestamp,
-        timestampMs,
-        price,
-        priceLabel: point.price,
-        spreadPct: point.spread_pct,
-        tradesPerMinute: point.trades_per_minute,
-        lastEventAgeMs: point.last_event_age_ms,
-      } satisfies MarketTimelineChartPoint;
-    })
-    .filter((point): point is MarketTimelineChartPoint => point !== null);
-}
-
-function buildTimelinePriceDomain(points: MarketTimelineChartPoint[]): [number, number] {
-  if (points.length === 0) {
-    return [0, 1];
-  }
-
-  const values = points.map((point) => point.price);
-  const low = Math.min(...values);
-  const high = Math.max(...values);
-  const range = Math.max(high - low, 0.0001);
-  const padding = Math.max(range * 0.08, Math.abs(high) * 0.002, 0.01);
-
-  return [low - padding, high + padding];
-}
-
-function buildTimelineTimeDomain(points: MarketTimelineChartPoint[]): [number, number] {
-  if (points.length === 0) {
-    const now = Date.now();
-
-    return [now - 60_000, now];
-  }
-
-  if (points.length === 1) {
-    const timestamp = points[0].timestampMs;
-
-    return [timestamp - 60_000, timestamp + 60_000];
-  }
-
-  return [points[0].timestampMs, points[points.length - 1].timestampMs];
-}
-
-function buildVisibleTimelineAnomalies(
-  anomalies: DashboardAnomaly[],
-  timeDomain: [number, number],
-): Array<DashboardAnomaly & { timestampMs: number }> {
-  return anomalies
-    .map((anomaly) => {
-      const timestampMs = Date.parse(anomaly.event_time || anomaly.created_at);
-
-      if (!Number.isFinite(timestampMs)) {
-        return null;
-      }
-
-      return {
-        ...anomaly,
-        timestampMs,
-      };
-    })
-    .filter(
-      (anomaly): anomaly is DashboardAnomaly & { timestampMs: number } =>
-        anomaly !== null &&
-        anomaly.timestampMs >= timeDomain[0] &&
-        anomaly.timestampMs <= timeDomain[1],
-    );
-}
-
-function anomalySeverityColor(severity: DashboardAnomaly["severity"] | undefined): string {
-  switch (severity) {
-    case "critical":
-      return "#FF6B5F";
-    case "warning":
-      return "#F5C542";
-    case "info":
-      return "#63A7FF";
-    default:
-      return "#94A3B8";
-  }
-}
-
-function formatTimelineTick(value: number): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
-}
-
-function formatTimelinePriceTick(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: value >= 1_000 ? 0 : 2,
-  }).format(value);
-}
-
-function highestAnomalySeverity(
-  anomalies: DashboardAnomaly[],
-): DashboardAnomaly["severity"] | null {
-  if (anomalies.some((anomaly) => anomaly.severity === "critical")) {
-    return "critical";
-  }
-
-  if (anomalies.some((anomaly) => anomaly.severity === "warning")) {
-    return "warning";
-  }
-
-  if (anomalies.some((anomaly) => anomaly.severity === "info")) {
-    return "info";
-  }
-
-  return null;
-}
-
-function anomalyMarkerBadgeClass(severity: DashboardAnomaly["severity"]): string {
-  switch (severity) {
-    case "critical":
-      return "border-rose-400/35 bg-rose-400/10 text-rose-200";
-    case "warning":
-      return "border-amber-400/35 bg-amber-400/10 text-amber-200";
-    case "info":
-      return "border-sky-400/35 bg-sky-400/10 text-sky-200";
-    default:
-      return "border-slate-500/40 bg-slate-700/30 text-slate-300";
-  }
-}
-
 function SeverityBadge({
   compact = false,
   severity,
@@ -1902,28 +1279,6 @@ function formatAnomalyTime(value: string | null | undefined): string {
   }
 
   return new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(date);
-}
-
-function formatTimelineTooltipTimestamp(value: string | null | undefined): string {
-  if (!value) {
-    return "Unavailable";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
