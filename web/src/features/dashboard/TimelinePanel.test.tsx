@@ -574,8 +574,9 @@ describe("TimelinePanel deterministic ownership and scope", () => {
     expect(componentSource).not.toMatch(
       /function\s+(?:buildTimeline(?:Price|Time)?Domain|normalizeTimeline)/,
     );
-    expect(dashboardPageSource).not.toMatch(
-      /(?:import[\s\S]*TimelinePanel|<TimelinePanel\b)/,
+    expect(dashboardPageSource).toMatch(
+      /import\s+\{\s*TimelinePanel\s*\}\s+from\s+["']@\/features\/dashboard\/TimelinePanel["'];/,
     );
+    expect(dashboardPageSource).toContain("<TimelinePanel");
   });
 });
