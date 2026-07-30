@@ -1,6 +1,24 @@
 import type { MarketDetailViewModel } from "./marketViewModel";
 import type { StatusTone } from "@/shared/lib/status";
 
+const METRIC_LABEL_CLASS = "text-xs font-semibold uppercase tracking-[0.14em] text-slate-500";
+const TONE_TEXT_CLASS: Record<StatusTone, string> = {
+  ok: "text-cyan-100",
+  healthy: "text-emerald-200",
+  degraded: "text-amber-200",
+  unhealthy: "text-orange-200",
+  info: "text-cyan-100",
+  warning: "text-amber-200",
+  critical: "text-orange-200",
+  neutral: "text-white",
+};
+const AVAILABILITY_MESSAGE: Record<MarketDetailViewModel["availability"], string> = {
+  observed: "No current market state available for this market.",
+  configured: "Configured for Live; Live ingestion is not active.",
+  awaiting: "Awaiting first Live market data.",
+  unavailable: "Live market data is unavailable.",
+};
+
 export type SymbolDetailMetricsSurface = "route-strip" | "route-state" | "popup";
 
 export type SymbolDetailMetricsProps = Readonly<{
@@ -23,23 +41,48 @@ export function SymbolDetailMetrics({
 }
 
 function RouteMetricStrip({ viewModel }: { viewModel: MarketDetailViewModel }) {
+  const { metrics: marketMetrics } = viewModel;
+  const metrics = [
+    ["Health", viewModel.healthScore, TONE_TEXT_CLASS[viewModel.status.tone]],
+    ["Last price", marketMetrics.lastPrice, undefined],
+    ["Spread", marketMetrics.spread, undefined],
+    ["Trades/min", marketMetrics.tradesPerMinute, undefined],
+    ["Freshness", marketMetrics.freshness, undefined],
+  ] as const;
+
   return (
     <div className="grid gap-y-4 divide-y divide-white/10 md:grid-cols-5 md:divide-x md:divide-y-0">
-      <MetricStripItem
-        label="Health"
-        value={viewModel.healthScore}
-        valueClassName={toneTextClass(viewModel.status.tone)}
-      />
-      <MetricStripItem label="Last price" value={viewModel.metrics.lastPrice} />
-      <MetricStripItem label="Spread" value={viewModel.metrics.spread} />
-      <MetricStripItem label="Trades/min" value={viewModel.metrics.tradesPerMinute} />
-      <MetricStripItem label="Freshness" value={viewModel.metrics.freshness} />
+      {metrics.map(([label, value, valueClassName]) => (
+        <MetricStripItem
+          key={label}
+          label={label}
+          value={value}
+          valueClassName={valueClassName}
+        />
+      ))}
     </div>
   );
 }
 
 function RouteStatePanels({ viewModel }: { viewModel: MarketDetailViewModel }) {
   const observed = viewModel.availability === "observed";
+  const { metrics: marketMetrics } = viewModel;
+  const signalMetrics = [
+    ["Market status", viewModel.status.text, TONE_TEXT_CLASS[viewModel.status.tone]],
+    ["Recent anomalies", new Intl.NumberFormat("en-US").format(viewModel.anomalies.length), undefined],
+    ["Price move (1m)", marketMetrics.priceMove, undefined],
+    ["Depth sequence gaps", marketMetrics.depthGaps, undefined],
+  ] as const;
+  const stateMetrics = [
+    ["Last trade price", marketMetrics.lastPrice],
+    ["Best bid", marketMetrics.bestBid],
+    ["Best ask", marketMetrics.bestAsk],
+    ["Spread", marketMetrics.spread],
+    ["Trades/min", marketMetrics.tradesPerMinute],
+    ["Last event", marketMetrics.lastEvent],
+    ["Freshness", marketMetrics.freshness],
+    ["Depth gap count", marketMetrics.depthGaps],
+  ] as const;
 
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_1.1fr]">
@@ -51,20 +94,17 @@ function RouteStatePanels({ viewModel }: { viewModel: MarketDetailViewModel }) {
         />
         {observed ? (
           <dl className="mt-5 divide-y divide-white/[0.08] border-y border-white/[0.08]">
-            <InlineDataRow
-              label="Market status"
-              value={viewModel.status.text}
-              valueClassName={toneTextClass(viewModel.status.tone)}
-            />
-            <InlineDataRow
-              label="Recent anomalies"
-              value={formatRouteAnomalyCount(viewModel.anomalies.length)}
-            />
-            <InlineDataRow label="Price move (1m)" value={viewModel.metrics.priceMove} />
-            <InlineDataRow label="Depth sequence gaps" value={viewModel.metrics.depthGaps} />
+            {signalMetrics.map(([label, value, valueClassName]) => (
+              <InlineDataRow
+                key={label}
+                label={label}
+                value={value}
+                valueClassName={valueClassName}
+              />
+            ))}
           </dl>
         ) : (
-          <RouteEmptyState message={availabilityMessage(viewModel.availability)} />
+          <RouteEmptyState message={AVAILABILITY_MESSAGE[viewModel.availability]} />
         )}
       </div>
 
@@ -77,17 +117,12 @@ function RouteStatePanels({ viewModel }: { viewModel: MarketDetailViewModel }) {
           />
           {viewModel.stateAvailable ? (
             <dl className="mt-5 grid gap-x-8 border-y border-white/[0.08] md:grid-cols-2">
-              <InlineDataRow label="Last trade price" value={viewModel.metrics.lastPrice} />
-              <InlineDataRow label="Best bid" value={viewModel.metrics.bestBid} />
-              <InlineDataRow label="Best ask" value={viewModel.metrics.bestAsk} />
-              <InlineDataRow label="Spread" value={viewModel.metrics.spread} />
-              <InlineDataRow label="Trades/min" value={viewModel.metrics.tradesPerMinute} />
-              <InlineDataRow label="Last event" value={viewModel.metrics.lastEvent} />
-              <InlineDataRow label="Freshness" value={viewModel.metrics.freshness} />
-              <InlineDataRow label="Depth gap count" value={viewModel.metrics.depthGaps} />
+              {stateMetrics.map(([label, value]) => (
+                <InlineDataRow key={label} label={label} value={value} />
+              ))}
             </dl>
           ) : (
-            <RouteEmptyState message={availabilityMessage(viewModel.availability)} />
+            <RouteEmptyState message={AVAILABILITY_MESSAGE[viewModel.availability]} />
           )}
         </div>
       ) : null}
@@ -96,19 +131,28 @@ function RouteStatePanels({ viewModel }: { viewModel: MarketDetailViewModel }) {
 }
 
 function PopupMetricGrid({ viewModel }: { viewModel: MarketDetailViewModel }) {
-  return viewModel.availability === "observed" ? (
+  if (viewModel.availability !== "observed") {
+    return <PopupEmptyState message={AVAILABILITY_MESSAGE[viewModel.availability]} />;
+  }
+
+  const { metrics: marketMetrics } = viewModel;
+  const metrics = [
+    ["Health", viewModel.healthScore],
+    ["Price", marketMetrics.lastPrice],
+    ["Spread", marketMetrics.spread],
+    ["Trades/min", marketMetrics.tradesPerMinute],
+    ["Freshness", marketMetrics.freshness],
+    ["Anomalies", marketMetrics.anomalyCount],
+    ["Best bid", marketMetrics.bestBid],
+    ["Best ask", marketMetrics.bestAsk],
+  ] as const;
+
+  return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <PopupMetric label="Health" value={viewModel.healthScore} />
-      <PopupMetric label="Price" value={viewModel.metrics.lastPrice} />
-      <PopupMetric label="Spread" value={viewModel.metrics.spread} />
-      <PopupMetric label="Trades/min" value={viewModel.metrics.tradesPerMinute} />
-      <PopupMetric label="Freshness" value={viewModel.metrics.freshness} />
-      <PopupMetric label="Anomalies" value={viewModel.metrics.anomalyCount} />
-      <PopupMetric label="Best bid" value={viewModel.metrics.bestBid} />
-      <PopupMetric label="Best ask" value={viewModel.metrics.bestAsk} />
+      {metrics.map(([label, value]) => (
+        <PopupMetric key={label} label={label} value={value} />
+      ))}
     </div>
-  ) : (
-    <PopupEmptyState message={availabilityMessage(viewModel.availability)} />
   );
 }
 
@@ -123,9 +167,7 @@ function MetricStripItem({
 }>) {
   return (
     <div className="pt-4 first:pt-0 md:px-4 md:pt-0 md:first:pl-0 md:last:pr-0">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-        {label}
-      </p>
+      <p className={METRIC_LABEL_CLASS}>{label}</p>
       <p className={`mt-1 text-lg font-semibold tracking-tight ${valueClassName}`}>
         {value}
       </p>
@@ -136,9 +178,7 @@ function MetricStripItem({
 function PopupMetric({ label, value }: Readonly<{ label: string; value: string }>) {
   return (
     <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-        {label}
-      </p>
+      <p className={METRIC_LABEL_CLASS}>{label}</p>
       <p className="mt-1 text-sm font-bold text-slate-100">{value}</p>
     </div>
   );
@@ -197,42 +237,4 @@ function PopupEmptyState({ message }: { message: string }) {
       {message}
     </div>
   );
-}
-
-function toneTextClass(tone: StatusTone): string {
-  switch (tone) {
-    case "healthy":
-      return "text-emerald-200";
-    case "degraded":
-    case "warning":
-      return "text-amber-200";
-    case "unhealthy":
-    case "critical":
-      return "text-orange-200";
-    case "info":
-    case "ok":
-      return "text-cyan-100";
-    case "neutral":
-    default:
-      return "text-white";
-  }
-}
-
-function availabilityMessage(
-  availability: MarketDetailViewModel["availability"],
-): string {
-  switch (availability) {
-    case "configured":
-      return "Configured for Live; Live ingestion is not active.";
-    case "awaiting":
-      return "Awaiting first Live market data.";
-    case "unavailable":
-      return "Live market data is unavailable.";
-    default:
-      return "No current market state available for this market.";
-  }
-}
-
-function formatRouteAnomalyCount(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
 }

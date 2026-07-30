@@ -20,6 +20,9 @@ describe("dashboard feature compositor", () => {
       ["MarketHealthMobileCards", "@/features/dashboard/MarketHealthMobileCards"],
       ["RecentAnomaliesDesktopTable", "@/features/dashboard/RecentAnomaliesDesktopTable"],
       ["RecentAnomaliesMobileCards", "@/features/dashboard/RecentAnomaliesMobileCards"],
+      ["SymbolDetailHeader", "@/features/dashboard/SymbolDetailHeader"],
+      ["SymbolDetailMetrics", "@/features/dashboard/SymbolDetailMetrics"],
+      ["SymbolDetailAnomalies", "@/features/dashboard/SymbolDetailAnomalies"],
     ] as const) {
       expect(source).toContain(`import { ${component} } from "${modulePath}";`);
       expect(source).toContain(`<${component}`);
@@ -119,6 +122,53 @@ describe("dashboard feature compositor", () => {
     expect(source).toContain('openSymbolDetail(symbol, "dashboard")');
     expect(source).toContain('openSymbolDetail(symbol, "symbols")');
     expect(source).toContain('openSymbolDetail(symbol, "anomalies")');
+  });
+
+  it("wires the accepted shared sections into popup success presentation", () => {
+    expect(source).toContain(
+      `<div className="space-y-6" data-testid="symbol-popup-success">`,
+    );
+    expect(source).toContain(
+      `<SymbolDetailHeader
+        variant="popup"
+        symbol={viewModel.identity.symbol}
+        statusTone={viewModel.status.tone}
+        statusText={viewModel.status.text}
+        sourceLabel={viewModel.source === "live" ? "Live" : "Demo"}
+      />`,
+    );
+    expect(source).toContain(
+      `<SymbolDetailMetrics
+        surface="popup"
+        viewModel={viewModel}
+      />`,
+    );
+    expect(source).toContain(
+      `<SymbolDetailAnomalies
+          variant="popup"
+          symbol={viewModel.identity.symbol}
+          anomalies={viewModel.anomalies}
+          onOpenSymbolDetail={onOpenSymbolDetail}
+        />`,
+    );
+    expect(source).not.toContain("function SymbolDetailMetric");
+    expect(source).not.toContain("function SymbolDetailAnomalyRow");
+    expect(source).not.toContain("function SymbolDetailAnomalyCard");
+  });
+
+  it("keeps popup resource and modal lifecycle ownership in SymbolDetailModal", () => {
+    expect(source).toContain("function SymbolDetailModal(");
+    expect(source).toContain("const resourceState = useSymbolPopupResource(");
+    expect(source).toContain("resourceState.resource.mode !== identity.mode");
+    expect(source).toContain("resourceState.resource.symbol !== identity.symbol");
+    expect(source).toContain('resourceState.status === "loading"');
+    expect(source).toContain('resourceState.status === "error"');
+    expect(source).toContain('onRetry={() => void resourceState.refetch()}');
+    expect(source).toContain('resourceState.status === "unavailable"');
+    expect(source).toContain("adaptMarketResourceToViewModel(resourceState.resource");
+    expect(source).toContain(
+      'data-popup-identity={`${identity.mode}:${identity.symbol}:${identity.returnContext}`}',
+    );
   });
 
   it("keeps full raw collections in modal and detail workflows", () => {
