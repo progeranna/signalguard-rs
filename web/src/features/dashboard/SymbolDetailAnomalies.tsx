@@ -3,7 +3,6 @@ import type { MarketAnomalyViewModel, MarketDetailViewModel } from "./marketView
 import { StatusBadge } from "@/shared/components/StatusBadge";
 
 const EMPTY_MESSAGE = "No recent anomalies for this market.";
-const ANOMALY_LABEL_CLASS = "text-xs font-semibold uppercase tracking-[0.14em] text-slate-500";
 const ANOMALY_METRIC_CARD_CLASS = "rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3";
 const ANOMALY_MOBILE_DIVIDER_CLASS = "divide-y divide-white/10 border-y border-white/10 lg:hidden";
 const ANOMALY_TABLE_CELL_PADDING_CLASS = "px-2 py-3 pr-4";
@@ -234,7 +233,7 @@ function AnomalyMobileItem(
           ) : (
             <>
               <p className="text-sm font-semibold text-white">{anomaly.type}</p>
-              <p className={ANOMALY_LABEL_CLASS}>
+              <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">
                 {anomaly.detectedAt}
               </p>
             </>
@@ -285,7 +284,7 @@ function PopupMobileMetric({
 }>) {
   return (
     <div className={ANOMALY_METRIC_CARD_CLASS}>
-      <p className={ANOMALY_LABEL_CLASS}>
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
         {label}
       </p>
       <p className={`mt-1 text-sm font-bold ${valueClassName}`}>{value}</p>

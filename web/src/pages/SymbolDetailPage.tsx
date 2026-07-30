@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { useCatalogDashboardSummaryQuery } from "@/features/dashboard/api";
 import { adaptMarketResourceToViewModel } from "@/features/dashboard/marketAdapters";
 import { storeSelectedSymbol } from "@/features/dashboard/selectedSymbol";
-import { parseSymbolId } from "@/features/dashboard/symbolId";
+import { parseSymbolId, type SymbolId } from "@/features/dashboard/symbolId";
 import { useSymbolMarketResource } from "@/features/dashboard/symbolMarketResource";
 import { SymbolDetailAnomalies } from "@/features/dashboard/SymbolDetailAnomalies";
 import { SymbolDetailHeader } from "@/features/dashboard/SymbolDetailHeader";
@@ -103,7 +103,7 @@ export function SymbolDetailPage() {
           {observed && marketViewModel ? (
             <SymbolDetailAnomalies
               variant="route"
-              symbol={marketViewModel.identity.symbol}
+              symbol={selectedSymbol}
               anomalies={marketViewModel.anomalies}
             />
           ) : null}
@@ -188,8 +188,6 @@ function FlatEmptyState({ message }: { message: string }) {
   );
 }
 
-function normalizeSymbol(value: string | undefined): string {
-  const normalized = value?.trim().toUpperCase();
-
-  return normalized ? normalized : "UNKNOWN";
+function normalizeSymbol(value: string | undefined): SymbolId {
+  return (value?.trim().toUpperCase() || "UNKNOWN") as SymbolId;
 }

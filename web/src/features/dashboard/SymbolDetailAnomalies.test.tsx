@@ -167,6 +167,36 @@ describe("SymbolDetailAnomalies presentation boundary", () => {
     expect(within(table).getByText("Info")).toHaveClass("border-sky-400/35");
   });
 
+  it("preserves route timestamp and popup metric label presentation classes", () => {
+    const route = renderRoute([fixtures[0]]);
+    const routeTimestamp = Array.from(route.container.querySelectorAll("p")).find(
+      (element) => element.textContent === fixtures[0].detectedAt,
+    );
+
+    expect(routeTimestamp).toBeInstanceOf(HTMLParagraphElement);
+    if (!routeTimestamp) {
+      throw new Error("Expected the route detected timestamp paragraph");
+    }
+    expect(routeTimestamp.className).toBe(
+      "mt-1 text-xs uppercase tracking-[0.14em] text-slate-500",
+    );
+    expect(routeTimestamp).not.toHaveClass("font-semibold");
+
+    route.unmount();
+    const popup = renderPopup([fixtures[0]]);
+    const popupMetricLabel = Array.from(popup.container.querySelectorAll("p")).find(
+      (element) => element.textContent === "Observed",
+    );
+
+    expect(popupMetricLabel).toBeInstanceOf(HTMLParagraphElement);
+    if (!popupMetricLabel) {
+      throw new Error("Expected the popup observed metric label paragraph");
+    }
+    expect(popupMetricLabel.className).toBe(
+      "text-xs font-semibold uppercase tracking-[0.14em] text-slate-500",
+    );
+  });
+
   it("uses anomaly IDs for both desktop and mobile list identity", () => {
     expect(source).toContain("<AnomalyDesktopTable variant={props.variant}");
     expect(source).toContain('variant="route"');

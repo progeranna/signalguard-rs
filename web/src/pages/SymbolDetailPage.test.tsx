@@ -44,7 +44,12 @@ describe("symbol detail route resource ownership", () => {
     );
     expect(source).toContain("import { SymbolDetailAnomalies }");
     expect(source).toContain("<SymbolDetailAnomalies");
+    expect(source).toContain('variant="route"\n              symbol={selectedSymbol}');
     expect(source).toContain("anomalies={marketViewModel.anomalies}");
+    expect(source).toContain(
+      "symbol: canonicalRouteSymbol ?? resourceState.resource.symbol",
+    );
+    expect(source).not.toContain("symbol={marketViewModel.identity.symbol}");
   });
 
   it("removes the duplicated inline route presentation ownership", () => {
