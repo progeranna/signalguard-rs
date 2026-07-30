@@ -168,10 +168,11 @@ describe("SymbolDetailAnomalies presentation boundary", () => {
   });
 
   it("uses anomaly IDs for both desktop and mobile list identity", () => {
-    expect(source).toContain("<RouteAnomalyTableRow key={anomaly.id}");
-    expect(source).toContain("<RouteAnomalyMobileRow key={anomaly.id}");
-    expect(source).toContain("<PopupAnomalyTableRow key={anomaly.id}");
-    expect(source).toContain("<PopupAnomalyMobileCard");
+    expect(source).toContain("<AnomalyDesktopTable variant={props.variant}");
+    expect(source).toContain('variant="route"');
+    expect(source).toContain('variant="popup"');
+    expect(source).toContain("<AnomalyDesktopRow key={anomaly.id}");
+    expect(source).toContain("<AnomalyMobileItem key={anomaly.id}");
     expect(source).toContain("key={anomaly.id}");
   });
 
