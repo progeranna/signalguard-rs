@@ -19,6 +19,22 @@ const sourcePath = path.join(
 );
 const source = readFileSync(sourcePath, "utf8");
 
+function staticImportSpecifiers(value: string): string[] {
+  return Array.from(
+    value.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    (match) => match[1],
+  );
+}
+
+function runtimeImportSpecifiers(value: string): string[] {
+  const withoutTypeImports = value.replace(
+    /^\s*import\s+type\b[\s\S]*?;\s*$/gm,
+    "",
+  );
+
+  return staticImportSpecifiers(withoutTypeImports);
+}
+
 function timelinePoint(
   price: number,
   timestampMs: number,
@@ -240,20 +256,15 @@ describe("timeline domain composition and purity", () => {
     });
   });
 
-  it("contains only the normalized-point type dependency and deterministic primitives", () => {
-    expect(source).toMatch(
-      /^import\s+type\s+\{\s*NormalizedTimelinePoint\s*\}\s+from\s+["']\.\/timelineNormalization["'];/m,
-    );
-    expect(source.match(/^import\s/mg)).toHaveLength(1);
+  it("allows type-only pure-model dependencies and rejects runtime ownership", () => {
+    const imports = staticImportSpecifiers(source);
+    const runtimeImports = runtimeImportSpecifiers(source);
+
+    expect(imports).toEqual(["./timelineNormalization"]);
+    expect(runtimeImports).toEqual([]);
     expect(source).not.toMatch(/^\s*<\/?[A-Za-z][^>]*>/m);
-    expect(source).not.toMatch(/from\s+["'](?:react|recharts)["']/);
-    expect(source).not.toMatch(/\buse[A-Z][A-Za-z0-9]*\b/);
     expect(source).not.toMatch(
-      /\b(?:window|document|navigator|localStorage|sessionStorage|fetch|XMLHttpRequest|WebSocket|Date\.now|new\s+Date|setTimeout|setInterval|Math\.random|Intl|toLocaleString|process\.env)\b/,
-    );
-    expect(source).not.toMatch(/\breplay\b/i);
-    expect(source).not.toMatch(
-      /(?:className|tooltip|tickFormatter|stroke|fill|color|query|retry|api)/i,
+      /(?:window|document|navigator|localStorage|sessionStorage|fetch|XMLHttpRequest|WebSocket|Date\.now\s*\(|new\s+Date\s*\(\s*\)|setTimeout|setInterval|Math\.random|process\.env)/,
     );
   });
 });

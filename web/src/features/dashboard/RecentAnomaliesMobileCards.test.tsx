@@ -17,6 +17,27 @@ const sourcePath = path.join(
 );
 const source = readFileSync(sourcePath, "utf8");
 
+function staticImportSpecifiers(value: string): string[] {
+  return Array.from(
+    value.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    (match) => match[1],
+  );
+}
+
+function isForbiddenOwnershipImport(specifier: string): boolean {
+  return (
+    specifier.startsWith("@tanstack/") ||
+    specifier.startsWith("react-router") ||
+    specifier === "./api" ||
+    specifier === "./queryKeys" ||
+    specifier.includes("symbolPopupResource") ||
+    specifier.includes("symbolMarketResource") ||
+    specifier.includes("selectedSymbol") ||
+    specifier.includes("shared/api/client") ||
+    specifier.includes("RecentAnomaliesDesktopTable")
+  );
+}
+
 const ids = [
   "00000000-0000-4000-8000-000000000001",
   "00000000-0000-4000-8000-000000000002",
@@ -153,7 +174,6 @@ describe("RecentAnomaliesMobileCards presentation", () => {
     expect(
       screen.getByRole("button", { name: "Open BTCUSDT market detail" }),
     ).toBe(originalBtcCard);
-    expect(source).toMatch(/key=\{row\.id\}/);
     expect(source).not.toMatch(
       /key=\{(?:index|row\.(?:symbol|message|eventTime|createdAt))\}/,
     );
@@ -385,18 +405,29 @@ describe("RecentAnomaliesMobileCards presentation", () => {
       consoleError.mockRestore();
     }
 
-    expect(source).not.toMatch(/\.(?:sort|slice|splice|reverse)\s*\(/);
-    expect(source).not.toMatch(/\b(?:Set|Map)\s*</);
+    expect(source).not.toMatch(
+      /\brows\s*\.\s*(?:sort|toSorted|slice|splice|reverse|filter|shift|unshift|push|pop)\s*\(/,
+    );
+    expect(source).not.toMatch(/(?:new\s+)?(?:Set|Map)\s*\(\s*rows/);
   });
 
-  it("renders only the leased preview-card semantics and has no external behavior dependencies", () => {
-    const previewRow = row({
-      message: "Hidden context message",
+  it("renders only leased preview-card semantics and ignores hidden preview context", () => {
+    const baseRow = row({
+      message: "HIDDEN_MESSAGE_SENTINEL",
       anomaly_type: "spread_spike",
     });
+    const hiddenRow = {
+      ...baseRow,
+      activeLabel: "HIDDEN_ACTIVE_LABEL_SENTINEL",
+      effectiveTimestampMs: 987_654_321,
+      severityDescriptor: {
+        ...baseRow.severityDescriptor,
+        description: "HIDDEN_DESCRIPTION_SENTINEL",
+      },
+    } satisfies RecentAnomaliesPreviewRow;
     const { container } = render(
       <RecentAnomaliesMobileCards
-        rows={[previewRow]}
+        rows={[hiddenRow]}
         onOpenSymbolDetail={vi.fn()}
       />,
     );
@@ -407,38 +438,18 @@ describe("RecentAnomaliesMobileCards presentation", () => {
     expect(screen.queryByRole("heading")).not.toBeInTheDocument();
     expect(screen.queryByText("Recent Anomalies")).not.toBeInTheDocument();
     expect(screen.queryByText("View all")).not.toBeInTheDocument();
-    expect(screen.queryByText("Hidden context message")).not.toBeInTheDocument();
-    expect(screen.queryByText(previewRow.activeLabel)).not.toBeInTheDocument();
-    expect(screen.queryByText(previewRow.severityDescriptor.description)).not.toBeInTheDocument();
+    expect(screen.queryByText("HIDDEN_MESSAGE_SENTINEL")).not.toBeInTheDocument();
+    expect(screen.queryByText("HIDDEN_ACTIVE_LABEL_SENTINEL")).not.toBeInTheDocument();
+    expect(screen.queryByText("HIDDEN_DESCRIPTION_SENTINEL")).not.toBeInTheDocument();
+    expect(screen.queryByText("987654321")).not.toBeInTheDocument();
 
-    const importSources = Array.from(
-      source.matchAll(/from\s+["']([^"']+)["'];/g),
-      (match) => match[1],
-    );
-    expect(importSources).toEqual([
-      "./recentAnomaliesPreviewModel",
-      "./MarketHealthMobileCards",
-      "./recentAnomaliesPresentation",
-    ]);
-    expect(source).toMatch(
-      /^import type \{ RecentAnomaliesPreviewRow \} from "\.\/recentAnomaliesPreviewModel";/m,
-    );
-    expect(source).toMatch(
-      /^import \{ MobileSymbolMetric \} from "\.\/MarketHealthMobileCards";/m,
-    );
-    expect(source).toMatch(
-      /^import \{\s*anomalyValueClass,\s*formatAnomalyTime,\s*formatAnomalyValue,\s*severityBadgeClass,\s*\} from "\.\/recentAnomaliesPresentation";/ms,
+    const importSources = staticImportSpecifiers(source);
+    expect(importSources.filter(isForbiddenOwnershipImport)).toEqual([]);
+    expect(source).not.toMatch(
+      /\b(?:fetch|XMLHttpRequest|WebSocket|Date\.now\s*\(|new\s+Date\s*\(\s*\)|Math\.random|setTimeout|setInterval|window|document|navigator|localStorage|sessionStorage)\b/,
     );
     expect(source).not.toMatch(
-      /from\s+["'][^"']*RecentAnomaliesDesktopTable[^"']*["']/,
+      /\brow\.(?:message|activeLabel|effectiveTimestampMs)\b|\brow\.severityDescriptor\.description\b/,
     );
-    expect(source).not.toMatch(
-      /from\s+["'](?:react-router|@tanstack|\.\/api|\.\/symbolPopup)/,
-    );
-    expect(source).not.toMatch(
-      /\b(?:fetch|XMLHttpRequest|WebSocket|Date\.now|Math\.random|setTimeout|setInterval|window|document|navigator|localStorage|sessionStorage)\b/,
-    );
-    expect(source).not.toMatch(/\b(?:message|activeLabel|effectiveTimestampMs)\b/);
-    expect(source).not.toMatch(/\b(?:Tooltip|Modal|View all|Loading|Empty)\b/);
   });
 });

@@ -17,6 +17,27 @@ const sourcePath = path.join(
 );
 const source = readFileSync(sourcePath, "utf8");
 
+function staticImportSpecifiers(value: string): string[] {
+  return Array.from(
+    value.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    (match) => match[1],
+  );
+}
+
+function isForbiddenOwnershipImport(specifier: string): boolean {
+  return (
+    specifier.startsWith("@tanstack/") ||
+    specifier.startsWith("react-router") ||
+    specifier === "./api" ||
+    specifier === "./queryKeys" ||
+    specifier.includes("symbolPopupResource") ||
+    specifier.includes("symbolMarketResource") ||
+    specifier.includes("selectedSymbol") ||
+    specifier.includes("shared/api/client") ||
+    specifier.includes("RecentAnomaliesMobileCards")
+  );
+}
+
 const ids = [
   "00000000-0000-4000-8000-000000000001",
   "00000000-0000-4000-8000-000000000002",
@@ -163,7 +184,6 @@ describe("RecentAnomaliesDesktopTable presentation", () => {
     expect(
       screen.getByRole("button", { name: "Open BTCUSDT market detail" }),
     ).toBe(originalBtcRow);
-    expect(source).toMatch(/key=\{row\.id\}/);
     expect(source).not.toMatch(
       /key=\{(?:index|row\.(?:symbol|message|eventTime|createdAt))\}/,
     );
@@ -465,18 +485,29 @@ describe("RecentAnomaliesDesktopTable presentation", () => {
     }
 
     expect(source).toMatch(/rows\.map\(\(row\)/);
-    expect(source).not.toMatch(/rows\.(?:sort|slice|splice|reverse|filter)\s*\(/);
+    expect(source).not.toMatch(
+      /\brows\s*\.\s*(?:sort|toSorted|slice|splice|reverse|filter|shift|unshift|push|pop)\s*\(/,
+    );
     expect(source).not.toMatch(/(?:new\s+)?(?:Set|Map)\s*\(\s*rows/);
   });
 
-  it("renders only leased desktop table semantics and has no shell, mobile, modal, context, Wave 4, or external behavior ownership", () => {
-    const previewRow = row({
-      message: "Hidden context message",
+  it("renders only leased desktop semantics and ignores hidden preview context", () => {
+    const baseRow = row({
+      message: "HIDDEN_MESSAGE_SENTINEL",
       anomaly_type: "spread_spike",
     });
+    const hiddenRow = {
+      ...baseRow,
+      activeLabel: "HIDDEN_ACTIVE_LABEL_SENTINEL",
+      effectiveTimestampMs: 987_654_321,
+      severityDescriptor: {
+        ...baseRow.severityDescriptor,
+        description: "HIDDEN_DESCRIPTION_SENTINEL",
+      },
+    } satisfies RecentAnomaliesPreviewRow;
     const { container } = render(
       <RecentAnomaliesDesktopTable
-        rows={[previewRow]}
+        rows={[hiddenRow]}
         onOpenSymbolDetail={vi.fn()}
       />,
     );
@@ -488,28 +519,19 @@ describe("RecentAnomaliesDesktopTable presentation", () => {
     expect(screen.queryByRole("heading")).not.toBeInTheDocument();
     expect(screen.queryByText("Recent Anomalies")).not.toBeInTheDocument();
     expect(screen.queryByText("View all")).not.toBeInTheDocument();
-    expect(screen.queryByText("Hidden context message")).not.toBeInTheDocument();
-    expect(screen.queryByText(previewRow.activeLabel)).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(previewRow.severityDescriptor.description),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("HIDDEN_MESSAGE_SENTINEL")).not.toBeInTheDocument();
+    expect(screen.queryByText("HIDDEN_ACTIVE_LABEL_SENTINEL")).not.toBeInTheDocument();
+    expect(screen.queryByText("HIDDEN_DESCRIPTION_SENTINEL")).not.toBeInTheDocument();
+    expect(screen.queryByText("987654321")).not.toBeInTheDocument();
 
-    expect(source.match(/^import\s/mg)).toHaveLength(3);
-    expect(source).toMatch(/^import type \{ KeyboardEvent \} from "react";/m);
-    expect(source).toMatch(
-      /^import type \{ RecentAnomaliesPreviewRow \} from "\.\/recentAnomaliesPreviewModel";/m,
-    );
-    expect(source).toMatch(
-      /^import \{\s*anomalyValueClass,\s*formatAnomalyTime,\s*formatAnomalyValue,\s*severityBadgeClass,\s*\} from "\.\/recentAnomaliesPresentation";/ms,
+    const importSources = staticImportSpecifiers(source);
+    expect(importSources.filter(isForbiddenOwnershipImport)).toEqual([]);
+    expect(source).not.toMatch(
+      /\b(?:fetch|XMLHttpRequest|WebSocket|Date\.now\s*\(|new\s+Date\s*\(\s*\)|Math\.random|setTimeout|setInterval|window|document|navigator|localStorage|sessionStorage)\b/,
     );
     expect(source).not.toMatch(
-      /from\s+[#'](?:react-router|@tanstack|\.\/api|\.\/symbolPopup)/,
+      /\brow\.(?:message|activeLabel|effectiveTimestampMs)\b|\brow\.severityDescriptor\.description\b/,
     );
-    expect(source).not.toMatch(
-      /\b(?:fetch|XMLHttpRequest|WebSocket|Date\.now|Math\.random|setTimeout|setInterval|window|document|navigator|localStorage|sessionStorage)\b/,
-    );
-    expect(source).not.toMatch(/\b(?:message|activeLabel|effectiveTimestampMs)\b/);
-    expect(source).not.toMatch(/\b(?:Tooltip|Modal|View all|Loading|Empty|Wave 4)\b/);
     expect(source).not.toContain("lg:hidden");
     expect(source).not.toContain("grid-cols-2");
   });

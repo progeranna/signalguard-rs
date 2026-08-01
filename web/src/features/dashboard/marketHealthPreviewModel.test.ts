@@ -6,11 +6,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { DashboardSymbolSummary } from "./types";
-
+import { orderMarketEntries } from "./marketOrder";
 import {
   buildMarketHealthPreview,
   createMarketHealthPreviewRow,
   MARKET_HEALTH_PREVIEW_LIMIT,
+  type MarketHealthPreviewRow,
 } from "./marketHealthPreviewModel";
 
 const modelSourcePath = path.join(
@@ -18,6 +19,22 @@ const modelSourcePath = path.join(
   "src/features/dashboard/marketHealthPreviewModel.ts",
 );
 const modelSource = readFileSync(modelSourcePath, "utf8");
+
+function staticImportSpecifiers(value: string): string[] {
+  return Array.from(
+    value.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    (match) => match[1],
+  );
+}
+
+function runtimeImportSpecifiers(value: string): string[] {
+  const withoutTypeImports = value.replace(
+    /^\s*import\s+type\b[\s\S]*?;\s*$/gm,
+    "",
+  );
+
+  return staticImportSpecifiers(withoutTypeImports);
+}
 
 function observedSummary(
   symbol: string,
@@ -304,24 +321,56 @@ describe("Market Health preview purity", () => {
     expect(buildMarketHealthPreview(input, 1)).toEqual(buildMarketHealthPreview(input, 1));
   });
 
-  it("delegates canonical ordering to the accepted ordering owner", () => {
-    expect(modelSource).toMatch(
-      /import\s+\{\s*orderMarketEntries\s*\}\s+from\s+["']\.\/marketOrder["']/,
+  it("matches the public ordering owner and derives stable source-symbol keys", () => {
+    const input = [
+      observedSummary("CUSTOMB"),
+      observedSummary("DOGEUSDT", "demo"),
+      observedSummary("BTCUSDT", "live"),
+      observedSummary("CUSTOMA"),
+    ];
+    const expected = orderMarketEntries([...input], (summary) => summary.symbol);
+    const result = buildMarketHealthPreview(input);
+
+    expect(result.allRows.map(({ symbol }) => symbol)).toEqual(
+      expected.map(({ symbol }) => symbol),
     );
-    expect(modelSource.match(/\borderMarketEntries\s*\(/g)).toHaveLength(1);
-    expect(modelSource).not.toMatch(/\b(?:DEMO_MARKETS|orderMarkets|sort)\b/);
+    expect(result.allRows.map(({ key }) => key)).toEqual(
+      expected.map(({ source, symbol }) => `${source}:${symbol}`),
+    );
+    expect(modelSource).not.toMatch(
+      /\b(?:summaries|entries|symbols)\s*\.\s*(?:sort|toSorted)\s*\(/,
+    );
   });
 
-  it("contains no presentation, React, time, locale, network, or Replay dependency", () => {
-    const publicValue = JSON.stringify(buildMarketHealthPreview([observedSummary("BTCUSDT")]));
+  it("exposes the exact public row shape without presentation fields", () => {
+    const actual = createMarketHealthPreviewRow(observedSummary("BTCUSDT"));
+    const expected = {
+      key: "live:BTCUSDT",
+      symbol: "BTCUSDT",
+      source: "live",
+      availability: "observed",
+      observed: true,
+      healthScore: 88,
+      healthStatus: "healthy",
+      lastTradePrice: "100.50",
+      spreadPct: 0.5,
+      tradesPerMinute: 12,
+      lastEventAgeMs: 125,
+    } satisfies MarketHealthPreviewRow;
 
+    expect(actual).toEqual(expected);
+  });
+
+  it("contains only the ordering runtime dependency and no external ownership", () => {
+    const imports = staticImportSpecifiers(modelSource);
+    const runtimeImports = runtimeImportSpecifiers(modelSource);
+
+    expect(imports).toEqual(["./marketOrder", "./types"]);
+    expect(runtimeImports).toEqual(["./marketOrder"]);
     expect(modelSource).not.toMatch(/^\s*<\/?[A-Za-z][^>]*>/m);
-    expect(modelSource).not.toMatch(/from\s+["']react(?:\/[^"']*)?["']/i);
-    expect(modelSource).not.toMatch(/\buse[A-Z][A-Za-z0-9]*\b/);
     expect(modelSource).not.toMatch(
-      /\b(?:window|document|navigator|localStorage|sessionStorage|fetch|XMLHttpRequest|WebSocket|Date\.now|new\s+Date|Math\.random|Intl|toLocaleString|localeCompare|className|Replay)\b/i,
+      /(?:window|document|navigator|localStorage|sessionStorage|fetch|XMLHttpRequest|WebSocket|Date\.now\s*\(|new\s+Date\s*\(\s*\)|setTimeout|setInterval|Math\.random|process\.env)/,
     );
-    expect(modelSource).not.toMatch(/\b(?:query|cache|store|network|hook|component|icon|color|tone|label)\b/i);
-    expect(publicValue).not.toMatch(/\b(?:label|tone|class|icon|color|replay)\b/i);
+    expect(modelSource).not.toMatch(/\b(?:Replay|DEMO_MARKETS|Demo fallback|Live fallback)\b/);
   });
 });

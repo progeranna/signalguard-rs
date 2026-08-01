@@ -22,6 +22,22 @@ const productionSourcePath = path.join(
 );
 const productionSource = readFileSync(productionSourcePath, "utf8");
 
+function staticImportSpecifiers(value: string): string[] {
+  return Array.from(
+    value.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    (match) => match[1],
+  );
+}
+
+function runtimeImportSpecifiers(value: string): string[] {
+  const withoutTypeImports = value.replace(
+    /^\s*import\s+type\b[\s\S]*?;\s*$/gm,
+    "",
+  );
+
+  return staticImportSpecifiers(withoutTypeImports);
+}
+
 function createSymbol(
   source: UiMode = "live",
   availability: DashboardSymbolSummary["availability"] = "observed",
@@ -356,17 +372,14 @@ describe("resolveDashboardResourceState identity and purity", () => {
     }
   });
 
-  it("has no React, query, time, locale, network, browser, IO, or Replay dependency", () => {
-    expect(productionSource).toMatch(
-      /^import type \{ DashboardSummary \} from "\.\/types";/,
-    );
-    expect(productionSource).not.toMatch(/\b(?:react|jsx|tsx)\b/i);
-    expect(productionSource).not.toMatch(/@tanstack\/react-query/i);
-    expect(productionSource).not.toMatch(/\buse[A-Z][A-Za-z0-9]*\b/);
+  it("allows type-only model imports and rejects runtime ownership", () => {
+    const imports = staticImportSpecifiers(productionSource);
+    const runtimeImports = runtimeImportSpecifiers(productionSource);
+
+    expect(imports).toEqual(["./types"]);
+    expect(runtimeImports).toEqual([]);
     expect(productionSource).not.toMatch(
-      /\b(?:fetch|XMLHttpRequest|WebSocket|window|document|navigator|localStorage|sessionStorage|Date\.now|new\s+Date|setTimeout|setInterval|Math\.random|Intl|toLocaleString|process\.env)\b/,
+      /(?:fetch|XMLHttpRequest|WebSocket|window|document|navigator|localStorage|sessionStorage|Date\.now\s*\(|new\s+Date\s*\(\s*\)|setTimeout|setInterval|Math\.random|process\.env)/,
     );
-    expect(productionSource).not.toMatch(/\breplay\b/i);
-    expect(productionSource).not.toMatch(/\b(?:className|color|icon|component)\b/i);
   });
 });

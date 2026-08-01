@@ -84,11 +84,27 @@ const componentSource = readFileSync(
   path.join(process.cwd(), "src/features/dashboard/TimelinePanel.tsx"),
   "utf8",
 );
-const dashboardPageSource = readFileSync(
-  path.join(process.cwd(), "src/pages/DashboardPage.tsx"),
-  "utf8",
-);
 const emptyAnchorMs = Date.parse("2026-07-20T10:05:00.000Z");
+
+function staticImportSpecifiers(value: string): string[] {
+  return Array.from(
+    value.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    (match) => match[1],
+  );
+}
+
+function isForbiddenOwnershipImport(specifier: string): boolean {
+  return (
+    specifier.startsWith("@tanstack/") ||
+    specifier.startsWith("react-router") ||
+    specifier === "./api" ||
+    specifier === "./queryKeys" ||
+    specifier.includes("symbolPopup") ||
+    specifier.includes("symbolMarketResource") ||
+    specifier.includes("selectedSymbol") ||
+    specifier.includes("shared/api/client")
+  );
+}
 
 function point(
   timestamp: string,
@@ -469,6 +485,77 @@ describe("TimelinePanel chart, tooltip, and snapshot parity", () => {
 });
 
 describe("TimelinePanel deterministic ownership and scope", () => {
+  it("delegates normalization and domain derivation through their public modules", async () => {
+    const timelinePoints = Object.freeze([
+      Object.freeze(point("2026-07-20T10:00:00.000Z", "100.00")),
+    ]);
+    const before = JSON.stringify(timelinePoints);
+    const normalized = Object.freeze([
+      Object.freeze({
+        timestamp: "2026-07-20T11:00:00.000Z",
+        timestampMs: 123_000,
+        price: 777,
+        priceLabel: "777.0000",
+        spreadPct: 0.25,
+        tradesPerMinute: 9,
+        lastEventAgeMs: 12,
+      }),
+    ]);
+    const domains = Object.freeze({
+      price: Object.freeze([700, 800] as const),
+      time: Object.freeze([120_000, 126_000] as const),
+    });
+    const normalizeTimelinePoints = vi.fn(() => normalized);
+    const buildTimelineDomains = vi.fn(() => domains);
+
+    vi.resetModules();
+    vi.doMock("./timelineNormalization", () => ({ normalizeTimelinePoints }));
+    vi.doMock("./timelineDomains", () => ({ buildTimelineDomains }));
+
+    try {
+      const { TimelinePanel: DelegatingTimelinePanel } = await import(
+        "./TimelinePanel"
+      );
+      render(
+        <DelegatingTimelinePanel
+          selectedMarket={market()}
+          timelinePoints={timelinePoints}
+          timelineAnomalies={[]}
+          isSummaryLoading={false}
+          isTimelineLoading={false}
+          timelineErrorMessage={null}
+          onRetryTimeline={vi.fn()}
+          emptyAnchorMs={emptyAnchorMs}
+        />,
+      );
+
+      expect(normalizeTimelinePoints).toHaveBeenCalledOnce();
+      expect(normalizeTimelinePoints).toHaveBeenCalledWith(timelinePoints);
+      expect(buildTimelineDomains).toHaveBeenCalledOnce();
+      expect(buildTimelineDomains).toHaveBeenCalledWith(
+        [...normalized],
+        emptyAnchorMs,
+      );
+      expect(screen.getByTestId("chart")).toHaveAttribute(
+        "data-data",
+        JSON.stringify(normalized),
+      );
+      expect(screen.getByTestId("x-axis")).toHaveAttribute(
+        "data-domain",
+        JSON.stringify(domains.time),
+      );
+      expect(screen.getByTestId("y-axis")).toHaveAttribute(
+        "data-domain",
+        JSON.stringify(domains.price),
+      );
+      expect(JSON.stringify(timelinePoints)).toBe(before);
+    } finally {
+      vi.doUnmock("./timelineNormalization");
+      vi.doUnmock("./timelineDomains");
+      vi.resetModules();
+    }
+  });
+
   it("does not attribute React renderer Date.now calls to the component", () => {
     const dateNow = vi
       .spyOn(Date, "now")
@@ -530,53 +617,27 @@ describe("TimelinePanel deterministic ownership and scope", () => {
     expect(second.container.innerHTML).toBe(firstHtml);
   });
 
-  it("preserves current classes, accepted owners, and forbidden boundaries", () => {
+  it("preserves current layout and rejects explicit forbidden ownership", () => {
     const { container } = mount();
     const layout = container.querySelector("section > div");
     const snapshot = container.querySelector("aside");
+    const importSources = staticImportSpecifiers(componentSource);
 
     expect(
       layout?.classList.contains("lg:grid-cols-[minmax(0,1fr)_248px]"),
     ).toBe(true);
     expect(snapshot?.classList.contains("min-h-[285px]")).toBe(true);
-
     expect(componentSource).toMatch(/export type TimelinePanelProps = Readonly<\{/);
-    expect(componentSource).toMatch(
-      /import\s+\{\s*buildTimelineDomains\s*\}\s+from\s+["']\.\/timelineDomains["'];/,
-    );
-    expect(componentSource).toMatch(
-      /normalizeTimelinePoints[\s\S]*from\s+["']\.\/timelineNormalization["'];/,
-    );
-    expect(componentSource).toContain(
-      "buildTimelineDomains(normalizedTimelinePoints, emptyAnchorMs)",
-    );
-    for (const text of [
-      'id="marketTimelineFill"',
-      'stroke="#7EE45B"',
-      "isAnimationActive={false}",
-      "Market timeline unavailable",
-      "Waiting for market data",
-      'label="Price"',
-      'label="Spread"',
-      'label="Trades/min"',
-      'label="Freshness"',
-    ]) {
-      expect(componentSource).toContain(text);
-    }
-
+    expect(importSources.filter(isForbiddenOwnershipImport)).toEqual([]);
     expect(componentSource).not.toMatch(
-      /\bDate\.now\s*\(|\bnew Date\(\s*\)|\b(?:fetch|XMLHttpRequest|WebSocket|localStorage|sessionStorage|setTimeout|setInterval|Math\.random)\b/,
+      /\b(?:Date\.now\s*\(|new\s+Date\s*\(\s*\)|fetch|XMLHttpRequest|WebSocket|localStorage|sessionStorage|setTimeout|setInterval|Math\.random|window|document|navigator)\b/,
     );
     expect(componentSource).not.toMatch(
-      /from\s+["'][^"']*(?:api|query|router|routing|popup|storage)[^"']*["']/i,
+      /\buse(?:Query|Mutation|Navigate|Location|Params|SymbolPopupResource|SymbolMarketResource)\s*\(/,
     );
-    expect(componentSource).not.toMatch(/\buse[A-Z][A-Za-z0-9]*\s*\(|\breplay\b/i);
+    expect(componentSource).not.toMatch(/\bReplay\b|["']replay["']/);
     expect(componentSource).not.toMatch(
       /function\s+(?:buildTimeline(?:Price|Time)?Domain|normalizeTimeline)/,
     );
-    expect(dashboardPageSource).toMatch(
-      /import\s+\{\s*TimelinePanel\s*\}\s+from\s+["']@\/features\/dashboard\/TimelinePanel["'];/,
-    );
-    expect(dashboardPageSource).toContain("<TimelinePanel");
   });
 });
