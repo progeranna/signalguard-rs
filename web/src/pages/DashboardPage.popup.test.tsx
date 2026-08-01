@@ -3,8 +3,16 @@ import type { PropsWithChildren } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { MarketDetailViewModel } from "@/features/dashboard/marketViewModel";
+import {
+  getStoredSelectedSymbol,
+  storeSelectedSymbol,
+} from "@/features/dashboard/selectedSymbol";
 import type { SymbolPopupIdentity } from "@/features/dashboard/symbolPopup";
 import type { SymbolPopupResourceState } from "@/features/dashboard/symbolPopupResource";
+import type { SymbolDetailAnomaliesProps } from "@/features/dashboard/SymbolDetailAnomalies";
+import type { SymbolDetailHeaderProps } from "@/features/dashboard/SymbolDetailHeader";
+import type { SymbolDetailMetricsProps } from "@/features/dashboard/SymbolDetailMetrics";
 import type {
   DashboardAnomaly,
   DashboardSummary,
@@ -12,14 +20,25 @@ import type {
   UiMode,
 } from "@/features/dashboard/types";
 
+type PopupResourceRefetch = SymbolPopupResourceState["refetch"];
+
 const testState = vi.hoisted(() => ({
+  adapterCalls: [] as Array<{
+    identity: Readonly<{ mode: UiMode; symbol: string }>;
+    resource: unknown;
+    viewModel: MarketDetailViewModel;
+  }>,
+  anomalyProps: [] as SymbolDetailAnomaliesProps[],
+  headerProps: [] as SymbolDetailHeaderProps[],
   identities: [] as Array<{
     mode: "demo" | "live";
     returnContext: "dashboard" | "symbols" | "anomalies";
     symbol: string;
   }>,
+  metricsProps: [] as SymbolDetailMetricsProps[],
   mode: "demo" as "demo" | "live",
   nonObserved: false,
+  resourceRefetchByIdentity: new Map<string, PopupResourceRefetch>(),
   timelineEnabled: [] as boolean[],
   resourceStatusByIdentity: new Map<string, "error" | "loading" | "success" | "unavailable">(),
 }));
@@ -56,14 +75,84 @@ vi.mock("@/features/dashboard/api", () => ({
   useMarketTimelineQuery: (_symbol: string | null, _mode: UiMode, enabled = true) => {
     testState.timelineEnabled.push(enabled);
     return {
-    data: { anomalies: [], points: [], symbol: "BTCUSDT" },
-    error: null,
-    isError: false,
-    isLoading: false,
-    refetch: vi.fn(),
+      data: { anomalies: [], points: [], symbol: "BTCUSDT" },
+      error: null,
+      isError: false,
+      isLoading: false,
+      refetch: vi.fn(),
     };
   },
 }));
+
+vi.mock("@/features/dashboard/marketAdapters", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/features/dashboard/marketAdapters")
+  >();
+
+  return {
+    ...actual,
+    adaptMarketResourceToViewModel: (
+      ...args: Parameters<typeof actual.adaptMarketResourceToViewModel>
+    ) => {
+      const viewModel = actual.adaptMarketResourceToViewModel(...args);
+      const identity = args[1];
+      if (!identity) {
+        throw new Error("Expected market resource adapter identity");
+      }
+      testState.adapterCalls.push({
+        identity,
+        resource: args[0],
+        viewModel,
+      });
+      return viewModel;
+    },
+  };
+});
+
+vi.mock("@/features/dashboard/SymbolDetailHeader", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/features/dashboard/SymbolDetailHeader")
+  >();
+
+  return {
+    ...actual,
+    SymbolDetailHeader: (props: SymbolDetailHeaderProps) => {
+      const Component = actual.SymbolDetailHeader;
+      testState.headerProps.push(props);
+      return <Component {...props} />;
+    },
+  };
+});
+
+vi.mock("@/features/dashboard/SymbolDetailMetrics", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/features/dashboard/SymbolDetailMetrics")
+  >();
+
+  return {
+    ...actual,
+    SymbolDetailMetrics: (props: SymbolDetailMetricsProps) => {
+      const Component = actual.SymbolDetailMetrics;
+      testState.metricsProps.push(props);
+      return <Component {...props} />;
+    },
+  };
+});
+
+vi.mock("@/features/dashboard/SymbolDetailAnomalies", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/features/dashboard/SymbolDetailAnomalies")
+  >();
+
+  return {
+    ...actual,
+    SymbolDetailAnomalies: (props: SymbolDetailAnomaliesProps) => {
+      const Component = actual.SymbolDetailAnomalies;
+      testState.anomalyProps.push(props);
+      return <Component {...props} />;
+    },
+  };
+});
 
 vi.mock("@/features/dashboard/symbolPopupResource", () => ({
   useSymbolPopupResource: (
@@ -72,7 +161,14 @@ vi.mock("@/features/dashboard/symbolPopupResource", () => ({
     testState.identities.push(identity);
     const key = `${identity.mode}:${identity.symbol}`;
     const status = testState.resourceStatusByIdentity.get(key) ?? "success";
-    const refetch = vi.fn(async () => undefined);
+    let refetch = testState.resourceRefetchByIdentity.get(key);
+    if (!refetch) {
+      const createdRefetch: PopupResourceRefetch = vi.fn(
+        async (): Promise<unknown> => undefined,
+      );
+      refetch = createdRefetch;
+      testState.resourceRefetchByIdentity.set(key, refetch);
+    }
 
     if (status === "loading") {
       return { identity, refetch, status };
@@ -120,9 +216,14 @@ vi.mock("@/features/dashboard/symbolPopupResource", () => ({
 import { DashboardPage } from "./DashboardPage";
 
 beforeEach(() => {
+  testState.adapterCalls.splice(0);
+  testState.anomalyProps.splice(0);
+  testState.headerProps.splice(0);
   testState.identities.splice(0);
+  testState.metricsProps.splice(0);
   testState.mode = "demo";
   testState.nonObserved = false;
+  testState.resourceRefetchByIdentity.clear();
   testState.timelineEnabled.splice(0);
   testState.resourceStatusByIdentity.clear();
   window.localStorage.clear();
@@ -285,6 +386,91 @@ describe("dashboard popup identity and return context", () => {
   });
 });
 
+describe("dashboard popup state and presentation contracts", () => {
+  it.each(["loading", "error", "unavailable", "success"] as const)(
+    "renders the controlled %s state for the canonical identity",
+    (status) => {
+      testState.resourceStatusByIdentity.set("demo:ETHUSDT", status);
+      render(<DashboardPage />);
+      openDirectSymbol("ETHUSDT");
+
+      expect(latestIdentity()).toEqual({
+        mode: "demo",
+        returnContext: "dashboard",
+        symbol: "ETHUSDT",
+      });
+
+      const dialog = screen.getByRole("dialog", { name: "ETHUSDT market details" });
+      if (status === "loading") {
+        expect(
+          within(dialog).getByText("Loading ETHUSDT market details for Demo mode."),
+        ).toBeInTheDocument();
+      } else if (status === "error") {
+        expect(
+          within(dialog).getByText("ETHUSDT market details unavailable"),
+        ).toBeInTheDocument();
+      } else if (status === "unavailable") {
+        expect(
+          within(dialog).getByText("ETHUSDT is unavailable in Demo mode."),
+        ).toBeInTheDocument();
+      } else {
+        expect(within(dialog).getAllByText("DEMO-ETHUSDT-PRICE")).not.toHaveLength(0);
+      }
+    },
+  );
+
+  it("passes one shared view model and raw symbol identity to popup sections", () => {
+    render(<DashboardPage />);
+    openDirectSymbol("ETHUSDT");
+
+    const adapterCall = testState.adapterCalls.at(-1);
+    const headerProps = testState.headerProps.at(-1);
+    const metricsProps = testState.metricsProps.at(-1);
+    const anomalyProps = testState.anomalyProps.at(-1);
+
+    expect(adapterCall?.identity).toEqual({ mode: "demo", symbol: "ETHUSDT" });
+    expect(headerProps?.variant).toBe("popup");
+    expect(headerProps?.symbol).toBe("ETHUSDT");
+    expect(metricsProps?.surface).toBe("popup");
+    expect(metricsProps?.viewModel).toBe(adapterCall?.viewModel);
+    expect(anomalyProps?.variant).toBe("popup");
+    expect(anomalyProps?.symbol).toBe("ETHUSDT");
+    expect(anomalyProps?.anomalies).toBe(adapterCall?.viewModel.anomalies);
+
+    const dialog = screen.getByRole("dialog", { name: "ETHUSDT market details" });
+    const anomalyButton = within(dialog).getByRole("button", {
+      name: "Open ETHUSDT market detail",
+    });
+    expect(anomalyButton).toBeInstanceOf(HTMLButtonElement);
+    expect(anomalyButton).toHaveAttribute("type", "button");
+    anomalyButton.focus();
+    expect(anomalyButton).toHaveFocus();
+    fireEvent.click(anomalyButton);
+    expect(latestIdentity()).toEqual({
+      mode: "demo",
+      returnContext: "dashboard",
+      symbol: "ETHUSDT",
+    });
+  });
+
+  it("retries only the current mode and symbol resource", () => {
+    testState.resourceStatusByIdentity.set("demo:BTCUSDT", "error");
+    const view = render(<DashboardPage />);
+    openDirectSymbol("BTCUSDT");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(testState.resourceRefetchByIdentity.get("demo:BTCUSDT")).toHaveBeenCalledOnce();
+
+    testState.mode = "live";
+    testState.resourceStatusByIdentity.set("live:BTCUSDT", "error");
+    view.rerender(<DashboardPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(testState.resourceRefetchByIdentity.get("live:BTCUSDT")).toHaveBeenCalledOnce();
+    expect(testState.resourceRefetchByIdentity.get("demo:BTCUSDT")).toHaveBeenCalledOnce();
+  });
+});
+
 describe("dashboard popup close behavior", () => {
   it("closes with Close and reopens without old content", () => {
     render(<DashboardPage />);
@@ -339,6 +525,7 @@ describe("dashboard popup mode ownership", () => {
     expect(within(dialog).queryByText("Health")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("Price")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("Recent market anomalies")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("DEMO-BTCUSDT-PRICE")).not.toBeInTheDocument();
   });
 
   it("detaches Demo content immediately when the mode changes to Live", () => {
@@ -363,6 +550,46 @@ describe("dashboard popup mode ownership", () => {
     testState.resourceStatusByIdentity.set("live:BTCUSDT", "success");
     view.rerender(<DashboardPage />);
     expect(screen.getAllByText("LIVE-BTCUSDT-PRICE")).not.toHaveLength(0);
+  });
+
+  it("ignores late old-symbol and old-mode resolutions", () => {
+    testState.resourceStatusByIdentity.set("demo:BTCUSDT", "loading");
+    const view = render(<DashboardPage />);
+    openDirectSymbol("BTCUSDT");
+    expect(
+      screen.getByText("Loading BTCUSDT market details for Demo mode."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    testState.resourceStatusByIdentity.set("demo:ETHUSDT", "loading");
+    openDirectSymbol("ETHUSDT");
+    testState.resourceStatusByIdentity.set("demo:BTCUSDT", "success");
+    view.rerender(<DashboardPage />);
+
+    expect(
+      screen.getByText("Loading ETHUSDT market details for Demo mode."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("DEMO-BTCUSDT-PRICE")).not.toBeInTheDocument();
+
+    testState.mode = "live";
+    testState.resourceStatusByIdentity.set("live:ETHUSDT", "loading");
+    view.rerender(<DashboardPage />);
+    testState.resourceStatusByIdentity.set("demo:ETHUSDT", "success");
+    view.rerender(<DashboardPage />);
+
+    expect(latestIdentity()).toEqual({
+      mode: "live",
+      returnContext: "dashboard",
+      symbol: "ETHUSDT",
+    });
+    expect(
+      screen.getByText("Loading ETHUSDT market details for Live mode."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("DEMO-ETHUSDT-PRICE")).not.toBeInTheDocument();
+
+    testState.resourceStatusByIdentity.set("live:ETHUSDT", "success");
+    view.rerender(<DashboardPage />);
+    expect(screen.getAllByText("LIVE-ETHUSDT-PRICE")).not.toHaveLength(0);
   });
 
   it("preserves All markets return context across a mode change", () => {
@@ -398,5 +625,23 @@ describe("dashboard popup mode ownership", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("DEMO-BTCUSDT-PRICE")).not.toBeInTheDocument();
+  });
+
+  it("updates only the active mode selected-symbol key through popup interactions", () => {
+    storeSelectedSymbol("demo", "SOLUSDT");
+    storeSelectedSymbol("live", "XRPUSDT");
+
+    const view = render(<DashboardPage />);
+    openDirectSymbol("BTCUSDT");
+    expect(getStoredSelectedSymbol("demo")).toBe("BTCUSDT");
+    expect(getStoredSelectedSymbol("live")).toBe("XRPUSDT");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    testState.mode = "live";
+    view.rerender(<DashboardPage />);
+    openDirectSymbol("ETHUSDT");
+
+    expect(getStoredSelectedSymbol("live")).toBe("ETHUSDT");
+    expect(getStoredSelectedSymbol("demo")).toBe("BTCUSDT");
   });
 });

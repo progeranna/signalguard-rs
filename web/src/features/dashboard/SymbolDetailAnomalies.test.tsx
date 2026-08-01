@@ -17,13 +17,14 @@ const symbol = requireSymbolId("BTCUSDT");
 function anomaly(
   id: string,
   severity: MarketAnomalyViewModel["severity"]["key"],
+  anomalySymbol = symbol,
 ): MarketAnomalyViewModel {
   const text = severity[0].toUpperCase() + severity.slice(1);
 
   return {
     id,
-    symbol,
-    type: `${text} anomaly type`,
+    symbol: anomalySymbol,
+    type: `${text} anomaly type ${id}`,
     severity: { key: severity, text, tone: severity },
     observed: { route: `${id} route observed`, popup: `${id} popup observed` },
     threshold: { route: `${id} route threshold`, popup: `${id} popup threshold` },
@@ -68,6 +69,43 @@ function tableHeaders(): string[] {
   const table = screen.getByRole("table");
   return Array.from(table.querySelectorAll("thead th"), (header) =>
     header.textContent?.trim() ?? "",
+  );
+}
+
+function desktopRowFor(item: MarketAnomalyViewModel): HTMLTableRowElement {
+  const row = within(screen.getByRole("table")).getByText(item.type).closest("tr");
+
+  if (!(row instanceof HTMLTableRowElement)) {
+    throw new Error(`Expected desktop row for ${item.id}`);
+  }
+
+  return row;
+}
+
+function routeMobileItemFor(item: MarketAnomalyViewModel): HTMLElement {
+  const article = screen
+    .getAllByRole("article")
+    .find((candidate) => within(candidate).queryByText(item.type));
+
+  if (!article) {
+    throw new Error(`Expected route mobile item for ${item.id}`);
+  }
+
+  return article;
+}
+
+function popupMobileItemFor(item: MarketAnomalyViewModel): HTMLButtonElement {
+  return screen.getByRole("button", {
+    name: `Open ${item.symbol} market detail`,
+  });
+}
+
+function staticImportSpecifiers(componentSource: string): string[] {
+  return Array.from(
+    componentSource.matchAll(
+      /\bimport\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?["']([^"']+)["'];?/g,
+    ),
+    (match) => match[1]!,
   );
 }
 
@@ -197,26 +235,97 @@ describe("SymbolDetailAnomalies presentation boundary", () => {
     );
   });
 
-  it("uses anomaly IDs for both desktop and mobile list identity", () => {
-    expect(source).toContain("<AnomalyDesktopTable variant={props.variant}");
-    expect(source).toContain('variant="route"');
-    expect(source).toContain('variant="popup"');
-    expect(source).toContain("<AnomalyDesktopRow key={anomaly.id}");
-    expect(source).toContain("<AnomalyMobileItem key={anomaly.id}");
-    expect(source).toContain("key={anomaly.id}");
-  });
+  it.each(["route", "popup"] as const)(
+    "keeps %s desktop and mobile nodes attached to anomaly IDs across reordering",
+    (variant) => {
+      const first = Object.freeze(
+        anomaly("identity-btc", "critical", requireSymbolId("BTCUSDT")),
+      );
+      const second = Object.freeze(
+        anomaly("identity-eth", "warning", requireSymbolId("ETHUSDT")),
+      );
+      const input = Object.freeze([first, second]);
+      const reversed = Object.freeze([second, first]);
 
-  it("preserves input order without mutating the anomaly array", () => {
-    const input = fixtures.map((fixture) => Object.freeze({ ...fixture }));
-    const inputSnapshot = input.map((fixture) => ({ ...fixture }));
+      if (variant === "route") {
+        const view = renderRoute(input);
+        const firstDesktop = desktopRowFor(first);
+        const secondDesktop = desktopRowFor(second);
+        const firstMobile = routeMobileItemFor(first);
+        const secondMobile = routeMobileItemFor(second);
 
-    renderRoute(input);
+        view.rerender(
+          <SymbolDetailAnomalies
+            variant="route"
+            symbol={symbol}
+            anomalies={reversed}
+          />,
+        );
 
-    const rows = Array.from(screen.getByRole("table").querySelectorAll("tbody tr"));
-    expect(rows.map((row) => row.querySelector("td")?.textContent)).toEqual(
+        expect(desktopRowFor(first)).toBe(firstDesktop);
+        expect(desktopRowFor(second)).toBe(secondDesktop);
+        expect(routeMobileItemFor(first)).toBe(firstMobile);
+        expect(routeMobileItemFor(second)).toBe(secondMobile);
+        expect(screen.getAllByRole("article")).toEqual([secondMobile, firstMobile]);
+      } else {
+        const onOpenSymbolDetail = vi.fn();
+        const view = renderPopup(input, onOpenSymbolDetail);
+        const firstDesktop = desktopRowFor(first);
+        const secondDesktop = desktopRowFor(second);
+        const firstMobile = popupMobileItemFor(first);
+        const secondMobile = popupMobileItemFor(second);
+
+        view.rerender(
+          <SymbolDetailAnomalies
+            variant="popup"
+            symbol={symbol}
+            anomalies={reversed}
+            onOpenSymbolDetail={onOpenSymbolDetail}
+          />,
+        );
+
+        expect(desktopRowFor(first)).toBe(firstDesktop);
+        expect(desktopRowFor(second)).toBe(secondDesktop);
+        expect(popupMobileItemFor(first)).toBe(firstMobile);
+        expect(popupMobileItemFor(second)).toBe(secondMobile);
+        expect(screen.getAllByRole("button")).toEqual([secondMobile, firstMobile]);
+      }
+    },
+  );
+
+  it("preserves every frozen anomaly in input order without limiting, deduplicating, or mutation", () => {
+    const input = Object.freeze(
+      Array.from({ length: 8 }, (_, index) =>
+        Object.freeze(
+          anomaly(
+            `ordered-${index}`,
+            index % 2 === 0 ? "warning" : "info",
+          ),
+        ),
+      ),
+    );
+    const snapshot = JSON.stringify(input);
+
+    const route = renderRoute(input);
+    const routeRows = Array.from(
+      screen.getByRole("table").querySelectorAll("tbody tr"),
+    );
+    expect(routeRows.map((row) => row.querySelector("td")?.textContent)).toEqual(
       input.map((fixture) => fixture.type),
     );
-    expect(input).toEqual(inputSnapshot);
+    expect(screen.getAllByRole("article")).toHaveLength(input.length);
+    expect(JSON.stringify(input)).toBe(snapshot);
+
+    route.unmount();
+    renderPopup(input);
+    const popupRows = Array.from(
+      screen.getByRole("table").querySelectorAll("tbody tr"),
+    );
+    expect(popupRows.map((row) => row.querySelector("td")?.textContent)).toEqual(
+      input.map((fixture) => fixture.type),
+    );
+    expect(screen.getAllByRole("button")).toHaveLength(input.length);
+    expect(JSON.stringify(input)).toBe(snapshot);
   });
 
   it("renders the exact empty state for both variants", () => {
@@ -243,6 +352,7 @@ describe("SymbolDetailAnomalies presentation boundary", () => {
     const card = screen.getByRole("button", {
       name: "Open BTCUSDT market detail",
     });
+    expect(card).toBeInstanceOf(HTMLButtonElement);
     expect(card).toHaveAttribute("type", "button");
     card.focus();
     expect(card).toHaveFocus();
@@ -251,23 +361,30 @@ describe("SymbolDetailAnomalies presentation boundary", () => {
     expect(onOpenSymbolDetail).toHaveBeenCalledWith(fixtures[0].symbol);
   });
 
-  it("does not own data, routing, popup state, mode, or browser-storage concerns", () => {
-    for (const forbidden of [
-      "fetch(",
-      "useQuery",
-      "filter(",
-      "sort(",
-      ".slice(",
-      "adaptMarket",
-      "useNavigate",
-      "navigate(",
-      "useState",
-      "useEffect",
-      "localStorage",
-      "sessionStorage",
-      "mode",
-    ]) {
-      expect(source).not.toContain(forbidden);
+  it("keeps collection operations scoped and rejects external data ownership", () => {
+    expect(source).not.toMatch(
+      /\banomalies\s*\.\s*(?:filter|sort|toSorted|slice|splice|reverse|shift|unshift|push|pop)\s*\(/,
+    );
+    expect(source).not.toMatch(
+      /Array\.from\(\s*anomalies\s*\)\s*\.\s*(?:filter|sort|toSorted|slice|splice|reverse)\s*\(/,
+    );
+    expect(source).not.toMatch(/new\s+(?:Set|Map)\s*\(\s*anomalies\s*\)/);
+
+    for (const specifier of staticImportSpecifiers(source)) {
+      expect(specifier).not.toMatch(/react-router|@tanstack\/react-query/i);
+      expect(specifier).not.toMatch(/(?:^|\/)(?:api|queryKeys)$/i);
+      expect(specifier).not.toMatch(
+        /selectedSymbol|symbolPopup|symbolPopupResource|symbolMarketResource|shared\/api/i,
+      );
     }
+
+    expect(source).not.toMatch(
+      /\b(?:useQuery|useMutation|useNavigate|useLocation|useParams|useSymbol(?:Popup|Market)Resource)\s*\(/,
+    );
+    expect(source).not.toMatch(/\b(?:fetch|setTimeout|setInterval)\s*\(/);
+    expect(source).not.toMatch(
+      /\b(?:localStorage|sessionStorage|WebSocket|XMLHttpRequest|Date\.now)\b/,
+    );
+    expect(source).not.toMatch(/\bnew\s+Date\s*\(/);
   });
 });

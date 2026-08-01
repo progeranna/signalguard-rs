@@ -24,6 +24,15 @@ function badgeText(container: HTMLElement): string[] {
   );
 }
 
+function staticImportSpecifiers(source: string): string[] {
+  return Array.from(
+    source.matchAll(
+      /\bimport\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?["']([^"']+)["'];?/g,
+    ),
+    (match) => match[1]!,
+  );
+}
+
 describe("SymbolDetailHeader route variant", () => {
   it("preserves the route symbol, copy, hierarchy, and badge order", () => {
     const { container } = renderHeader({
@@ -140,14 +149,23 @@ describe("SymbolDetailHeader status presentation", () => {
 });
 
 describe("SymbolDetailHeader ownership boundary", () => {
-  it("has no route, query, popup-controller, storage, or resource ownership", () => {
-    expect(componentSource).not.toContain("react-router");
-    expect(componentSource).not.toMatch(/use[A-Za-z]+Query/);
-    expect(componentSource).not.toContain("localStorage");
-    expect(componentSource).not.toContain("sessionStorage");
-    expect(componentSource).not.toContain("selectedSymbol");
-    expect(componentSource).not.toContain("Resource");
-    expect(componentSource).not.toContain("Controller");
+  it("rejects explicit route, query, resource, storage, browser, network, and time ownership", () => {
+    for (const specifier of staticImportSpecifiers(componentSource)) {
+      expect(specifier).not.toMatch(/react-router|@tanstack\/react-query/i);
+      expect(specifier).not.toMatch(/(?:^|\/)(?:api|queryKeys)$/i);
+      expect(specifier).not.toMatch(
+        /selectedSymbol|symbolPopup|symbolPopupResource|symbolMarketResource|shared\/api/i,
+      );
+    }
+
+    expect(componentSource).not.toMatch(
+      /\b(?:useQuery|useMutation|useNavigate|useLocation|useParams|useSymbol(?:Popup|Market)Resource)\s*\(/,
+    );
+    expect(componentSource).not.toMatch(/\b(?:fetch|setTimeout|setInterval)\s*\(/);
+    expect(componentSource).not.toMatch(
+      /\b(?:localStorage|sessionStorage|WebSocket|XMLHttpRequest|Date\.now)\b/,
+    );
+    expect(componentSource).not.toMatch(/\bnew\s+Date\s*\(/);
   });
 
   it("leaves links, controls, and focus behavior to the surrounding container", () => {
