@@ -29,6 +29,36 @@ describe("dashboard feature compositor", () => {
     }
   });
 
+  it("uses the canonical anomaly presentation owner without page-local helper copies", () => {
+    expect(source).toContain(
+      `import {
+  anomalyValueClass,
+  formatAnomalyTime,
+  formatAnomalyType,
+  formatAnomalyValue,
+  severityBadgeClass,
+} from "@/features/dashboard/recentAnomaliesPresentation";`,
+    );
+    expect(source).toContain("function SeverityBadge(");
+
+    for (const helper of [
+      "severityBadgeClass",
+      "anomalyValueClass",
+      "formatAnomalyType",
+      "formatAnomalyTime",
+      "formatAnomalyValue",
+      "formatDurationValue",
+      "formatIntegerValue",
+      "formatNumericValue",
+    ]) {
+      expect(source).not.toContain(`function ${helper}(`);
+    }
+
+    expect(
+      count("formatAnomalyTime(anomaly.event_time || anomaly.created_at)"),
+    ).toBe(2);
+  });
+
   it("uses each accepted preview builder exactly once in its preview owner", () => {
     expect(source).toContain(
       'import { buildMarketHealthPreview } from "@/features/dashboard/marketHealthPreviewModel";',

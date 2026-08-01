@@ -1,5 +1,17 @@
 import type { RecentAnomaliesPreviewRow } from "./recentAnomaliesPreviewModel";
 
+export function formatAnomalyType(type: string | null | undefined): string {
+  if (!type) {
+    return "Unknown";
+  }
+
+  return type
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function severityBadgeClass(
   tone: RecentAnomaliesPreviewRow["severityDescriptor"]["tone"],
 ): string {
