@@ -1,7 +1,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
+
+import {
+  getStoredSelectedSymbol,
+  selectedSymbolStorageKey,
+  storeSelectedSymbol,
+  useSelectedSymbol,
+} from "./selectedSymbol";
+import type { UiMode } from "./types";
 
 function readSource(repositoryPath: string): string {
   return readFileSync(path.join(process.cwd(), repositoryPath), "utf8");
@@ -11,46 +20,91 @@ const appShellSource = readSource("src/app/AppShell.tsx");
 const dashboardSource = readSource("src/pages/DashboardPage.tsx");
 const symbolDetailSource = readSource("src/pages/SymbolDetailPage.tsx");
 
-describe("mode-scoped selected-symbol consumer wiring", () => {
-  it("passes the resolved UI mode into every selected-symbol hook", () => {
-    expect(appShellSource).toMatch(
-      /useSelectedSymbol\(\s*selectedUiMode,\s*availableSymbols/,
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
+describe("mode-scoped selected-symbol consumers", () => {
+  it("switches modes without leaking the inactive selection", () => {
+    storeSelectedSymbol("demo", "BTCUSDT");
+    storeSelectedSymbol("live", "ETHUSDT");
+
+    const { result, rerender } = renderHook(
+      ({ mode, symbols }: { mode: UiMode; symbols: readonly string[] }) =>
+        useSelectedSymbol(mode, symbols),
+      {
+        initialProps: {
+          mode: "demo" as UiMode,
+          symbols: ["BTCUSDT", "SOLUSDT"] as readonly string[],
+        },
+      },
     );
-    expect(dashboardSource).toMatch(
-      /useSelectedSymbol\(\s*selectedUiMode,\s*availableSymbols/,
+
+    expect(result.current.selectedSymbol).toBe("BTCUSDT");
+
+    rerender({
+      mode: "live",
+      symbols: ["ETHUSDT", "XRPUSDT"],
+    });
+    expect(result.current.selectedSymbol).toBe("ETHUSDT");
+
+    act(() => {
+      result.current.setSelectedSymbol("XRPUSDT");
+    });
+
+    expect(getStoredSelectedSymbol("live")).toBe("XRPUSDT");
+    expect(getStoredSelectedSymbol("demo")).toBe("BTCUSDT");
+    expect(window.localStorage.getItem(selectedSymbolStorageKey("live"))).toBe(
+      "XRPUSDT",
     );
-    expect(appShellSource).not.toContain("useSelectedSymbol(availableSymbols)");
-    expect(dashboardSource).not.toContain("useSelectedSymbol(availableSymbols)");
+    expect(window.localStorage.getItem(selectedSymbolStorageKey("demo"))).toBe(
+      "BTCUSDT",
+    );
+
+    rerender({
+      mode: "demo",
+      symbols: ["BTCUSDT", "SOLUSDT"],
+    });
+    expect(result.current.selectedSymbol).toBe("BTCUSDT");
   });
 
-  it("scopes dashboard popup and table writes to the active mode", () => {
-    expect(dashboardSource).toContain(
-      "storeSelectedSymbol(identity.mode, identity.symbol)",
+  it("updates only consumers subscribed to the changed mode", () => {
+    storeSelectedSymbol("demo", "BTCUSDT");
+    storeSelectedSymbol("live", "ETHUSDT");
+
+    const demo = renderHook(() =>
+      useSelectedSymbol("demo", ["BTCUSDT", "SOLUSDT"]),
     );
-    expect(dashboardSource).not.toMatch(/storeSelectedSymbol\(symbol\)/);
+    const live = renderHook(() =>
+      useSelectedSymbol("live", ["ETHUSDT", "XRPUSDT"]),
+    );
+
+    act(() => {
+      storeSelectedSymbol("demo", "SOLUSDT");
+    });
+
+    expect(demo.result.current.selectedSymbol).toBe("SOLUSDT");
+    expect(live.result.current.selectedSymbol).toBe("ETHUSDT");
+
+    act(() => {
+      storeSelectedSymbol("live", "XRPUSDT");
+    });
+
+    expect(demo.result.current.selectedSymbol).toBe("SOLUSDT");
+    expect(live.result.current.selectedSymbol).toBe("XRPUSDT");
   });
 
-  it("scopes known route and route-link writes to the active mode", () => {
-    expect(symbolDetailSource).toContain(
-      "storeSelectedSymbol(selectedUiMode, resolvedSymbol)",
-    );
-    expect(symbolDetailSource).toContain(
-      "storeSelectedSymbol(selectedUiMode, entry.symbol)",
-    );
-    expect(symbolDetailSource).toContain(
-      "[resolvedSymbol, selectedUiMode]",
-    );
+  it("returns no selected market for an empty catalog", () => {
+    const { result } = renderHook(() => useSelectedSymbol("demo", []));
+
+    expect(result.current.selectedSymbol).toBeNull();
+    expect(appShellSource).toMatch(/selectedSymbol\s*\?\?\s*["']No market["']/);
   });
 
-  it("handles an empty current catalog without fabricating a header market", () => {
-    expect(appShellSource).toContain('selectedSymbol ?? "No market"');
-    expect(dashboardSource).toContain("selectedSignalSymbol: string | null");
-  });
-
-  it("does not reintroduce the legacy global storage API in consumers", () => {
+  it("does not reintroduce the legacy one-argument storage API", () => {
     for (const source of [appShellSource, dashboardSource, symbolDetailSource]) {
       expect(source).not.toContain("SELECTED_SYMBOL_STORAGE_KEY");
-      expect(source).not.toMatch(/storeSelectedSymbol\([^,()]+\)/);
+      expect(source).not.toMatch(/\bstoreSelectedSymbol\s*\(\s*[^,\n()]+\s*\)/);
     }
   });
 });
