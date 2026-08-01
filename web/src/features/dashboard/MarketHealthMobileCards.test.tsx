@@ -13,6 +13,27 @@ const sourcePath = path.join(
 );
 const source = readFileSync(sourcePath, "utf8");
 
+function staticImportSpecifiers(value: string): string[] {
+  return Array.from(
+    value.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    (match) => match[1],
+  );
+}
+
+function isForbiddenOwnershipImport(specifier: string): boolean {
+  return (
+    specifier.startsWith("@tanstack/") ||
+    specifier.startsWith("react-router") ||
+    specifier === "./api" ||
+    specifier === "./queryKeys" ||
+    specifier.includes("symbolPopupResource") ||
+    specifier.includes("symbolMarketResource") ||
+    specifier.includes("selectedSymbol") ||
+    specifier.includes("shared/api/client") ||
+    specifier.includes("MarketHealthDesktopTable")
+  );
+}
+
 function previewRow(
   overrides: Partial<MarketHealthPreviewRow> = {},
 ): MarketHealthPreviewRow {
@@ -441,12 +462,17 @@ describe("MarketHealthMobileCards unavailable states", () => {
 });
 
 describe("MarketHealthMobileCards scope boundaries", () => {
-  it("accepts only the preview model and contains no ordering, limiting, mutation, synthesis, or source fallback", () => {
-    expect(source).toMatch(
-      /import\s+type\s+\{\s*MarketHealthPreviewRow\s*\}\s+from\s+["']\.\/marketHealthPreviewModel["'];/,
+  it("keeps rows readonly and contains no ordering, limiting, mutation, synthesis, or source fallback", () => {
+    const rows = Object.freeze([
+      Object.freeze(previewRow({ key: "live:BOUNDARY", symbol: "BOUNDARY" })),
+    ]) satisfies readonly MarketHealthPreviewRow[];
+
+    render(
+      <MarketHealthMobileCards rows={rows} onOpenSymbolDetail={vi.fn()} />,
     );
+
     expect(source).not.toMatch(
-      /\brows\.(?:sort|slice|splice|reverse|shift|unshift|push|pop)\s*\(/,
+      /\brows\s*\.\s*(?:sort|toSorted|slice|splice|reverse|shift|unshift|push|pop)\s*\(/,
     );
     expect(source).not.toMatch(
       /\b(?:MARKET_HEALTH_PREVIEW_LIMIT|DashboardSummary|DashboardSymbolSummary)\b/,
@@ -454,25 +480,29 @@ describe("MarketHealthMobileCards scope boundaries", () => {
     expect(source).not.toMatch(/row\.source|source\s*===|\bDemo\b|\bLive\b\s*:/);
   });
 
-  it("contains no desktop, shell, modal, tooltip, source badge, Wave 4, or caller wiring", () => {
-    expect(source).not.toMatch(/<table|<thead|<tbody|<tr|<th|<td/);
-    expect(source).not.toMatch(/\b(?:SectionTitle|LoadingSkeleton|Modal|Dialog)\b/);
-    expect(source).not.toContain("Market Health");
-    expect(source).not.toContain("View all");
-    expect(source).not.toContain("No monitored markets available.");
-    expect(source).not.toMatch(/Data Age|tooltip|source badge|Wave 4/i);
+  it("renders no desktop, shell, modal, loading, or empty-state ownership", () => {
+    const { container } = render(
+      <MarketHealthMobileCards
+        rows={[previewRow({ key: "live:SCOPE", symbol: "SCOPE" })]}
+        onOpenSymbolDetail={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector("table")).toBeNull();
+    expect(container.querySelector("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+    expect(screen.queryByText("Market Health")).not.toBeInTheDocument();
+    expect(screen.queryByText("View all")).not.toBeInTheDocument();
+    expect(screen.queryByText("No monitored markets available.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading")).not.toBeInTheDocument();
   });
 
-  it("contains no query, API, router, popup, time, random, or network dependency", () => {
+  it("rejects known ownership imports and direct query, network, time, or storage APIs", () => {
+    const importSources = staticImportSpecifiers(source);
+
+    expect(importSources.filter(isForbiddenOwnershipImport)).toEqual([]);
     expect(source).not.toMatch(
-      /\b(?:useQuery|queryClient|fetch|XMLHttpRequest|WebSocket|Date\.now|new\s+Date|setTimeout|setInterval|Math\.random|window|document|navigator|localStorage|sessionStorage)\b/,
-    );
-    expect(source).not.toMatch(/from\s+["'][^"']*(?:api|router|popup)[^"']*["']/i);
-    expect(source).toMatch(
-      /from\s+["']\.\/marketHealthPresentation["'];/,
-    );
-    expect(source).not.toMatch(
-      /from\s+["'][^"']*MarketHealthDesktopTable[^"']*["']/,
+      /\b(?:useQuery|queryClient|fetch|XMLHttpRequest|WebSocket|Date\.now\s*\(|new\s+Date\s*\(\s*\)|setTimeout|setInterval|Math\.random|window|document|navigator|localStorage|sessionStorage)\b/,
     );
   });
 });

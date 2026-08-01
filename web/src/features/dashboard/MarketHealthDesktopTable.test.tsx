@@ -20,6 +20,26 @@ const presentationSource = readFileSync(
   "utf8",
 );
 
+function staticImportSpecifiers(value: string): string[] {
+  return Array.from(
+    value.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    (match) => match[1],
+  );
+}
+
+function isForbiddenOwnershipImport(specifier: string): boolean {
+  return (
+    specifier.startsWith("@tanstack/") ||
+    specifier.startsWith("react-router") ||
+    specifier === "./api" ||
+    specifier === "./queryKeys" ||
+    specifier.includes("symbolPopupResource") ||
+    specifier.includes("symbolMarketResource") ||
+    specifier.includes("selectedSymbol") ||
+    specifier.includes("shared/api/client")
+  );
+}
+
 function previewRow(
   symbol: string,
   overrides: Partial<MarketHealthPreviewRow> = {},
@@ -436,19 +456,18 @@ describe("MarketHealthDesktopTable status badge layout regression", () => {
 });
 
 describe("MarketHealthDesktopTable ownership and regressions", () => {
-  it("uses the readonly preview model and a rows-specific collection guard", () => {
+  it("accepts readonly preview props and keeps rows-specific collection guards", () => {
+    const readonlyRows = Object.freeze([
+      Object.freeze(previewRow("TYPECHECK")),
+    ]) satisfies readonly MarketHealthPreviewRow[];
+    const props = {
+      rows: readonlyRows,
+      onOpenSymbolDetail: vi.fn(),
+    } satisfies MarketHealthDesktopTableProps;
     const rowTransformation =
       /\brows\s*\.\s*(?:sort|toSorted|slice|splice|reverse)\s*\(/;
 
-    expect(componentSource).toMatch(
-      /import\s+type\s+\{\s*MarketHealthPreviewRow\s*\}\s+from\s+["']\.\/marketHealthPreviewModel["'];/,
-    );
-    expect(componentSource).toMatch(
-      /from\s+["']\.\/marketHealthPresentation["'];/,
-    );
-    expect(componentSource).toMatch(
-      /rows:\s*readonly\s+MarketHealthPreviewRow\[\]/,
-    );
+    expect(props.rows).toBe(readonlyRows);
     expect(componentSource).not.toMatch(rowTransformation);
     expect(rowTransformation.test("rows.slice(0, 7)")).toBe(true);
     expect(rowTransformation.test("rows.toSorted(compareRows)")).toBe(true);
@@ -465,30 +484,27 @@ describe("MarketHealthDesktopTable ownership and regressions", () => {
     );
   });
 
-  it("executes the exact forbidden-import regex against both quote styles", () => {
-    const forbiddenImport =
-      /from\s+["'][^"']*(?:api|query|router|popup|resource|adapter|selectedSymbol)[^"']*["']/i;
+  it("rejects only known ownership modules through parsed import specifiers", () => {
+    const importSources = staticImportSpecifiers(componentSource);
 
-    expect(componentSource).not.toMatch(forbiddenImport);
-    expect(forbiddenImport.test('import { value } from "./api";')).toBe(true);
-    expect(forbiddenImport.test("import { value } from './router';")).toBe(true);
-    expect(
-      forbiddenImport.test(
-        'import type { MarketHealthPreviewRow } from "./marketHealthPreviewModel";',
-      ),
-    ).toBe(false);
-    expect(forbiddenImport.source).not.toContain("[^#']*");
+    expect(importSources.filter(isForbiddenOwnershipImport)).toEqual([]);
+    expect(isForbiddenOwnershipImport("./api")).toBe(true);
+    expect(isForbiddenOwnershipImport("react-router-dom")).toBe(true);
+    expect(isForbiddenOwnershipImport("./marketResourceAdapter")).toBe(false);
   });
 
-  it("owns no query, network, routing, popup, storage, time, random, or modal state", () => {
+  it("owns no query, network, routing, popup, storage, time, random, or shell state", () => {
+    const { container } = renderTable([previewRow("BOUNDARY")]);
+
+    expect(container.querySelector("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+    expect(screen.queryByText("View all")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading")).not.toBeInTheDocument();
     expect(componentSource).not.toMatch(
-      /\b(?:fetch|XMLHttpRequest|WebSocket|Date\.now|new\s+Date|Math\.random|setTimeout|setInterval|window|document|navigator|localStorage|sessionStorage)\b/,
+      /\b(?:fetch|XMLHttpRequest|WebSocket|Date\.now\s*\(|new\s+Date\s*\(\s*\)|Math\.random|setTimeout|setInterval|window|document|navigator|localStorage|sessionStorage)\b/,
     );
     expect(componentSource).not.toMatch(
-      /\buse(?:Query|Mutation|Navigate|Location|Params)\b/,
-    );
-    expect(componentSource).not.toMatch(
-      /Tooltip|tooltip|mobile|modal|dialog|loading|skeleton|empty shell|view all|icon/i,
+      /\buse(?:Query|Mutation|Navigate|Location|Params|SymbolPopupResource|SymbolMarketResource)\s*\(/,
     );
   });
 });

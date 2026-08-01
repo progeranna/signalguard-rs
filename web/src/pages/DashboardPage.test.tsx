@@ -1,7 +1,264 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type {
+  DashboardAnomaly,
+  DashboardSummary,
+  DashboardSymbolSummary,
+  UiMode,
+} from "@/features/dashboard/types";
+
+const testState = vi.hoisted(() => ({
+  anomalyBuilderCalls: [] as Array<readonly unknown[]>,
+  anomalyPreview: null as null | {
+    allRows: readonly { id: string; symbol: string }[];
+    rows: readonly { id: string; symbol: string }[];
+    hasMore: boolean;
+    isEmpty: boolean;
+  },
+  marketBuilderCalls: [] as Array<readonly unknown[]>,
+  marketDesktopProps: [] as Array<{
+    rows: readonly { symbol: string }[];
+    onOpenSymbolDetail: (symbol: string) => void;
+  }>,
+  marketMobileProps: [] as Array<{
+    rows: readonly { symbol: string }[];
+    onOpenSymbolDetail: (symbol: string) => void;
+  }>,
+  marketPreview: null as null | {
+    allRows: readonly { key: string; symbol: string }[];
+    rows: readonly { key: string; symbol: string }[];
+    hasMore: boolean;
+    isEmpty: boolean;
+  },
+  mode: "demo" as "demo" | "live",
+  popupIdentities: [] as Array<{
+    mode: "demo" | "live";
+    returnContext: "dashboard" | "symbols" | "anomalies";
+    symbol: string;
+  }>,
+  recentDesktopProps: [] as Array<{
+    rows: readonly { id: string; symbol: string }[];
+    onOpenSymbolDetail: (symbol: string) => void;
+  }>,
+  recentMobileProps: [] as Array<{
+    rows: readonly { id: string; symbol: string }[];
+    onOpenSymbolDetail: (symbol: string) => void;
+  }>,
+  selectedSymbol: "BTCUSDT" as string | null,
+  storedSelections: [] as Array<{ mode: "demo" | "live"; symbol: string }>,
+  summaryCalls: [] as Array<"demo" | "live">,
+  summaryQuery: null as null | Record<string, unknown>,
+  timelineCalls: [] as Array<{
+    symbol: string | null;
+    mode: "demo" | "live";
+    enabled: boolean;
+  }>,
+  timelineProps: [] as Array<{
+    selectedMarket: { symbol: string; availability: string } | null;
+    timelinePoints: readonly unknown[];
+    timelineAnomalies: readonly unknown[];
+    isSummaryLoading: boolean;
+    isTimelineLoading: boolean;
+    timelineErrorMessage: string | null;
+    onRetryTimeline: () => void;
+    emptyAnchorMs: number;
+  }>,
+  timelineQuery: null as null | Record<string, unknown>,
+}));
+
+vi.mock("@/features/dashboard/uiMode", () => ({
+  useResolvedUiMode: () => testState.mode,
+}));
+
+vi.mock("@/features/dashboard/selectedSymbol", () => ({
+  normalizeSelectedSymbol: (value: string | null | undefined) => {
+    const normalized = value?.trim().toUpperCase() ?? "";
+    return normalized.length > 0 ? normalized : null;
+  },
+  storeSelectedSymbol: (mode: "demo" | "live", symbol: string) => {
+    testState.storedSelections.push({ mode, symbol });
+  },
+  useSelectedSymbol: () => ({ selectedSymbol: testState.selectedSymbol }),
+}));
+
+vi.mock("@/features/dashboard/api", () => ({
+  useCatalogDashboardSummaryQuery: (mode: "demo" | "live") => {
+    testState.summaryCalls.push(mode);
+    return testState.summaryQuery;
+  },
+  useMarketTimelineQuery: (
+    symbol: string | null,
+    mode: "demo" | "live",
+    enabled = true,
+  ) => {
+    testState.timelineCalls.push({ symbol, mode, enabled });
+    return testState.timelineQuery;
+  },
+}));
+
+vi.mock("@/features/dashboard/marketHealthPreviewModel", () => ({
+  buildMarketHealthPreview: (symbols: readonly unknown[]) => {
+    testState.marketBuilderCalls.push(symbols);
+    return testState.marketPreview;
+  },
+}));
+
+vi.mock("@/features/dashboard/recentAnomaliesPreviewModel", () => ({
+  buildRecentAnomaliesPreview: (anomalies: readonly unknown[]) => {
+    testState.anomalyBuilderCalls.push(anomalies);
+    return testState.anomalyPreview;
+  },
+}));
+
+vi.mock("@/features/dashboard/MarketHealthDesktopTable", () => ({
+  MarketHealthDesktopTable: ({
+    rows,
+    onOpenSymbolDetail,
+  }: {
+    rows: readonly { symbol: string }[];
+    onOpenSymbolDetail: (symbol: string) => void;
+  }) => {
+    testState.marketDesktopProps.push({ rows, onOpenSymbolDetail });
+    return (
+      <div data-testid="market-health-desktop">
+        {rows.map((row) => (
+          <button
+            key={`desktop:${row.symbol}`}
+            type="button"
+            onClick={() => onOpenSymbolDetail(row.symbol)}
+          >
+            {row.symbol}
+          </button>
+        ))}
+      </div>
+    );
+  },
+}));
+
+vi.mock("@/features/dashboard/MarketHealthMobileCards", () => ({
+  MarketHealthMobileCards: ({
+    rows,
+    onOpenSymbolDetail,
+  }: {
+    rows: readonly { symbol: string }[];
+    onOpenSymbolDetail: (symbol: string) => void;
+  }) => {
+    testState.marketMobileProps.push({ rows, onOpenSymbolDetail });
+    return (
+      <div data-testid="market-health-mobile">
+        {rows.map((row) => (
+          <button
+            key={`mobile:${row.symbol}`}
+            type="button"
+            onClick={() => onOpenSymbolDetail(row.symbol)}
+          >
+            {row.symbol}
+          </button>
+        ))}
+      </div>
+    );
+  },
+}));
+
+vi.mock("@/features/dashboard/RecentAnomaliesDesktopTable", () => ({
+  RecentAnomaliesDesktopTable: ({
+    rows,
+    onOpenSymbolDetail,
+  }: {
+    rows: readonly { id: string; symbol: string }[];
+    onOpenSymbolDetail: (symbol: string) => void;
+  }) => {
+    testState.recentDesktopProps.push({ rows, onOpenSymbolDetail });
+    return (
+      <div data-testid="recent-anomalies-desktop">
+        {rows.map((row) => (
+          <button
+            key={`desktop:${row.id}`}
+            type="button"
+            onClick={() => onOpenSymbolDetail(row.symbol)}
+          >
+            {row.symbol}
+          </button>
+        ))}
+      </div>
+    );
+  },
+}));
+
+vi.mock("@/features/dashboard/RecentAnomaliesMobileCards", () => ({
+  RecentAnomaliesMobileCards: ({
+    rows,
+    onOpenSymbolDetail,
+  }: {
+    rows: readonly { id: string; symbol: string }[];
+    onOpenSymbolDetail: (symbol: string) => void;
+  }) => {
+    testState.recentMobileProps.push({ rows, onOpenSymbolDetail });
+    return (
+      <div data-testid="recent-anomalies-mobile">
+        {rows.map((row) => (
+          <button
+            key={`mobile:${row.id}`}
+            type="button"
+            onClick={() => onOpenSymbolDetail(row.symbol)}
+          >
+            {row.symbol}
+          </button>
+        ))}
+      </div>
+    );
+  },
+}));
+
+vi.mock("@/features/dashboard/TimelinePanel", () => ({
+  TimelinePanel: (props: {
+    selectedMarket: { symbol: string; availability: string } | null;
+    timelinePoints: readonly unknown[];
+    timelineAnomalies: readonly unknown[];
+    isSummaryLoading: boolean;
+    isTimelineLoading: boolean;
+    timelineErrorMessage: string | null;
+    onRetryTimeline: () => void;
+    emptyAnchorMs: number;
+  }) => {
+    testState.timelineProps.push(props);
+    const state = props.isSummaryLoading
+      ? "summary-loading"
+      : props.timelineErrorMessage !== null
+        ? "error"
+        : props.isTimelineLoading
+          ? "loading"
+          : props.timelinePoints.length === 0
+            ? "empty"
+            : "success";
+
+    return (
+      <div data-testid="timeline-panel" data-state={state}>
+        <span>{props.selectedMarket?.symbol ?? "none"}</span>
+        <button type="button" onClick={props.onRetryTimeline}>
+          Retry timeline recorder
+        </button>
+      </div>
+    );
+  },
+}));
+
+vi.mock("@/features/dashboard/symbolPopupResource", () => ({
+  useSymbolPopupResource: (identity: {
+    mode: "demo" | "live";
+    returnContext: "dashboard" | "symbols" | "anomalies";
+    symbol: string;
+  }) => {
+    testState.popupIdentities.push(identity);
+    return { identity, refetch: vi.fn(), status: "unavailable" as const };
+  },
+}));
+
+import { DashboardPage } from "./DashboardPage";
 
 const source = readFileSync(
   path.join(process.cwd(), "src/pages/DashboardPage.tsx"),
@@ -12,23 +269,379 @@ function count(fragment: string): number {
   return source.split(fragment).length - 1;
 }
 
-describe("dashboard feature compositor", () => {
-  it("imports and renders every accepted dashboard component", () => {
-    for (const [component, modulePath] of [
-      ["TimelinePanel", "@/features/dashboard/TimelinePanel"],
-      ["MarketHealthDesktopTable", "@/features/dashboard/MarketHealthDesktopTable"],
-      ["MarketHealthMobileCards", "@/features/dashboard/MarketHealthMobileCards"],
-      ["RecentAnomaliesDesktopTable", "@/features/dashboard/RecentAnomaliesDesktopTable"],
-      ["RecentAnomaliesMobileCards", "@/features/dashboard/RecentAnomaliesMobileCards"],
-      ["SymbolDetailHeader", "@/features/dashboard/SymbolDetailHeader"],
-      ["SymbolDetailMetrics", "@/features/dashboard/SymbolDetailMetrics"],
-      ["SymbolDetailAnomalies", "@/features/dashboard/SymbolDetailAnomalies"],
-    ] as const) {
-      expect(source).toContain(`import { ${component} } from "${modulePath}";`);
-      expect(source).toContain(`<${component}`);
-    }
+function observedSymbol(
+  symbol: string,
+  sourceMode: UiMode = "demo",
+  availability: DashboardSymbolSummary["availability"] = "observed",
+): DashboardSymbolSummary {
+  return {
+    source: sourceMode,
+    availability,
+    health:
+      availability === "observed"
+        ? {
+            evaluated_at: "2026-07-20T10:00:00.000Z",
+            recent_anomaly_count: 1,
+            score: 95,
+            status: "healthy",
+          }
+        : null,
+    state:
+      availability === "observed"
+        ? {
+            best_ask_price: "101.00",
+            best_bid_price: "100.00",
+            depth_sequence_gap_count: 0,
+            last_event_age_ms: 100,
+            last_event_time: "2026-07-20T10:00:00.000Z",
+            last_trade_price: "100.50",
+            price_change_1m_pct: 0.1,
+            spread_pct: 0.01,
+            trades_per_minute: 12,
+          }
+        : null,
+    symbol,
+  };
+}
+
+function dashboardAnomaly(symbol: string, index = 1): DashboardAnomaly {
+  return {
+    anomaly_type: "spread_spike",
+    created_at: `2026-07-20T10:00:0${index}.000Z`,
+    event_time: `2026-07-20T10:00:0${index}.000Z`,
+    id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    message: `${symbol} anomaly ${index}`,
+    observed_value: 1,
+    severity: "warning",
+    symbol,
+    threshold_value: 0.5,
+  };
+}
+
+function summary(
+  mode: UiMode = "demo",
+  symbols: DashboardSymbolSummary[] = [observedSymbol("BTCUSDT", mode)],
+  anomalies: DashboardAnomaly[] = [dashboardAnomaly("BTCUSDT")],
+): DashboardSummary {
+  return {
+    source: mode,
+    pipeline: {
+      cache_errors: 0,
+      last_message_age_ms: 20,
+      parse_errors: 0,
+      reconnect_attempts: 0,
+      status: "healthy",
+      storage_errors: 0,
+    },
+    recent_anomalies: anomalies,
+    service: { service: "signalguard-rs", status: "ok" },
+    symbols,
+  };
+}
+
+function marketRows(symbols: readonly DashboardSymbolSummary[]) {
+  return symbols.map((entry) => ({
+    key: `${entry.source}:${entry.symbol}`,
+    symbol: entry.symbol,
+  }));
+}
+
+function anomalyRows(anomalies: readonly DashboardAnomaly[]) {
+  return anomalies.map((entry) => ({ id: entry.id, symbol: entry.symbol }));
+}
+
+function setSummaryQuery(
+  data: DashboardSummary | null,
+  isLoading = false,
+  isError = false,
+) {
+  testState.summaryQuery = {
+    data: data ?? undefined,
+    error: isError ? new Error("summary failed") : null,
+    isError,
+    isLoading,
+    refetch: vi.fn(),
+  };
+}
+
+function setTimelineQuery({
+  points = [{ timestamp: "2026-07-20T10:00:00.000Z", price: "100" }],
+  anomalies = [],
+  dataUpdatedAt = 123_456,
+  isLoading = false,
+  isError = false,
+  refetch = vi.fn(),
+}: {
+  points?: readonly unknown[];
+  anomalies?: readonly unknown[];
+  dataUpdatedAt?: number;
+  isLoading?: boolean;
+  isError?: boolean;
+  refetch?: ReturnType<typeof vi.fn>;
+} = {}) {
+  testState.timelineQuery = {
+    data: isError || isLoading ? undefined : { points, anomalies },
+    dataUpdatedAt,
+    error: isError ? new Error("timeline failed") : null,
+    isError,
+    isLoading,
+    refetch,
+  };
+}
+
+function setPreviews(currentSummary: DashboardSummary) {
+  const allMarketRows = marketRows(currentSummary.symbols);
+  const allAnomalyRows = anomalyRows(currentSummary.recent_anomalies);
+  testState.marketPreview = {
+    allRows: allMarketRows,
+    rows: allMarketRows.slice(0, 7),
+    hasMore: allMarketRows.length > 7,
+    isEmpty: allMarketRows.length === 0,
+  };
+  testState.anomalyPreview = {
+    allRows: allAnomalyRows,
+    rows: allAnomalyRows.slice(0, 7),
+    hasMore: allAnomalyRows.length > 7,
+    isEmpty: allAnomalyRows.length === 0,
+  };
+}
+
+function latestTimelineProps() {
+  const props = testState.timelineProps.at(-1);
+  if (!props) {
+    throw new Error("TimelinePanel recorder was not called");
+  }
+  return props;
+}
+
+beforeEach(() => {
+  testState.anomalyBuilderCalls.splice(0);
+  testState.marketBuilderCalls.splice(0);
+  testState.marketDesktopProps.splice(0);
+  testState.marketMobileProps.splice(0);
+  testState.popupIdentities.splice(0);
+  testState.recentDesktopProps.splice(0);
+  testState.recentMobileProps.splice(0);
+  testState.storedSelections.splice(0);
+  testState.summaryCalls.splice(0);
+  testState.timelineCalls.splice(0);
+  testState.timelineProps.splice(0);
+  testState.mode = "demo";
+  testState.selectedSymbol = "BTCUSDT";
+  const currentSummary = summary();
+  setSummaryQuery(currentSummary);
+  setTimelineQuery();
+  setPreviews(currentSummary);
+  window.localStorage.clear();
+  document.body.style.overflow = "";
+});
+
+describe("dashboard behavior-level composition", () => {
+  it("delegates accepted preview rows to both responsive surfaces and preserves callback identity", () => {
+    const currentSummary = (testState.summaryQuery?.data ?? null) as DashboardSummary;
+    const marketPreviewRows = testState.marketPreview!.rows;
+    const anomalyPreviewRows = testState.anomalyPreview!.rows;
+
+    render(<DashboardPage />);
+
+    expect(testState.summaryCalls).toEqual(["demo"]);
+    expect(testState.marketBuilderCalls.at(-1)).toBe(currentSummary.symbols);
+    expect(testState.anomalyBuilderCalls.at(-1)).toBe(
+      currentSummary.recent_anomalies,
+    );
+    expect(testState.marketDesktopProps.at(-1)?.rows).toBe(marketPreviewRows);
+    expect(testState.marketMobileProps.at(-1)?.rows).toBe(marketPreviewRows);
+    expect(testState.recentDesktopProps.at(-1)?.rows).toBe(anomalyPreviewRows);
+    expect(testState.recentMobileProps.at(-1)?.rows).toBe(anomalyPreviewRows);
+
+    fireEvent.click(
+      within(screen.getByTestId("market-health-desktop")).getByRole("button", {
+        name: "BTCUSDT",
+      }),
+    );
+
+    expect(testState.popupIdentities.at(-1)).toEqual({
+      mode: "demo",
+      returnContext: "dashboard",
+      symbol: "BTCUSDT",
+    });
+    expect(testState.storedSelections).toEqual([
+      { mode: "demo", symbol: "BTCUSDT" },
+    ]);
   });
 
+  it("preserves summary-loading, empty, and success composition", () => {
+    setSummaryQuery(null, true);
+    testState.marketPreview = {
+      allRows: [],
+      rows: [],
+      hasMore: false,
+      isEmpty: true,
+    };
+    testState.anomalyPreview = {
+      allRows: [],
+      rows: [],
+      hasMore: false,
+      isEmpty: true,
+    };
+    const loading = render(<DashboardPage />);
+
+    expect(screen.getByTestId("timeline-panel")).toHaveAttribute(
+      "data-state",
+      "summary-loading",
+    );
+    expect(screen.queryByTestId("market-health-desktop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("recent-anomalies-desktop")).not.toBeInTheDocument();
+    loading.unmount();
+
+    const emptySummary = summary("demo", [], []);
+    setSummaryQuery(emptySummary);
+    setPreviews(emptySummary);
+    const empty = render(<DashboardPage />);
+
+    expect(screen.getByText("No monitored markets available.")).toBeInTheDocument();
+    expect(
+      screen.getByText("No anomalies detected in the current summary."),
+    ).toBeInTheDocument();
+    empty.unmount();
+
+    const successSummary = summary();
+    setSummaryQuery(successSummary);
+    setPreviews(successSummary);
+    render(<DashboardPage />);
+    expect(screen.getByTestId("market-health-desktop")).toBeInTheDocument();
+    expect(screen.getByTestId("recent-anomalies-desktop")).toBeInTheDocument();
+  });
+
+  it("uses preview rows in preview surfaces and full raw collections in modal workflows", () => {
+    const symbols = Object.freeze(
+      Array.from({ length: 9 }, (_, index) =>
+        Object.freeze(observedSymbol(`ASSET${index}USDT`)),
+      ),
+    ) as unknown as DashboardSymbolSummary[];
+    const anomalies = Object.freeze(
+      Array.from({ length: 9 }, (_, index) =>
+        Object.freeze(dashboardAnomaly(`ASSET${index}USDT`, index + 1)),
+      ),
+    ) as unknown as DashboardAnomaly[];
+    const currentSummary = summary("demo", symbols, anomalies);
+    const before = JSON.stringify(currentSummary);
+    setSummaryQuery(currentSummary);
+    setPreviews(currentSummary);
+
+    render(<DashboardPage />);
+
+    expect(testState.marketBuilderCalls.at(-1)).toBe(symbols);
+    expect(testState.anomalyBuilderCalls.at(-1)).toBe(anomalies);
+    expect(testState.marketDesktopProps.at(-1)?.rows).toBe(
+      testState.marketPreview?.rows,
+    );
+    expect(testState.recentDesktopProps.at(-1)?.rows).toBe(
+      testState.anomalyPreview?.rows,
+    );
+    expect(screen.queryByText("ASSET8USDT")).not.toBeInTheDocument();
+
+    const viewAllButtons = screen.getAllByRole("button", { name: "View all" });
+    fireEvent.click(viewAllButtons[0]!);
+    const allMarkets = screen.getByRole("dialog", { name: "All markets" });
+    expect(within(allMarkets).getAllByText("ASSET8USDT").length).toBeGreaterThan(0);
+    fireEvent.click(within(allMarkets).getByRole("button", { name: "Close" }));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "View all" })[1]!);
+    const allAnomalies = screen.getByRole("dialog", { name: "All anomalies" });
+    expect(within(allAnomalies).getAllByText("ASSET8USDT").length).toBeGreaterThan(0);
+    expect(JSON.stringify(currentSummary)).toBe(before);
+  });
+});
+
+describe("dashboard timeline ownership", () => {
+  it.each([
+    ["demo", "observed", true],
+    ["live", "observed", true],
+    ["live", "configured", false],
+    ["live", "awaiting", false],
+    ["live", "unavailable", false],
+  ] as const)(
+    "passes %s %s identity and enabled=%s to the public timeline boundary",
+    (mode, availability, enabled) => {
+      const selected = observedSymbol("ETHUSDT", mode, availability);
+      const currentSummary = summary(mode, [selected], []);
+      testState.mode = mode;
+      testState.selectedSymbol = "ETHUSDT";
+      setSummaryQuery(currentSummary);
+      setPreviews(currentSummary);
+      setTimelineQuery();
+
+      render(<DashboardPage />);
+
+      expect(testState.timelineCalls.at(-1)).toEqual({
+        symbol: "ETHUSDT",
+        mode,
+        enabled,
+      });
+      expect(latestTimelineProps().selectedMarket).toBe(selected);
+      expect(latestTimelineProps().emptyAnchorMs).toBe(123_456);
+    },
+  );
+
+  it("detaches old identity data and preserves loading, error, empty, success, anchor, and retry ownership", () => {
+    const firstSummary = summary("demo", [observedSymbol("BTCUSDT", "demo")], []);
+    setSummaryQuery(firstSummary);
+    setPreviews(firstSummary);
+    setTimelineQuery({ points: [{ timestamp: "old", price: "1" }] });
+    const view = render(<DashboardPage />);
+
+    expect(screen.getByTestId("timeline-panel")).toHaveAttribute(
+      "data-state",
+      "success",
+    );
+    expect(latestTimelineProps().selectedMarket?.symbol).toBe("BTCUSDT");
+
+    const retry = vi.fn();
+    const secondSummary = summary("live", [observedSymbol("ETHUSDT", "live")], []);
+    testState.mode = "live";
+    testState.selectedSymbol = "ETHUSDT";
+    setSummaryQuery(secondSummary);
+    setPreviews(secondSummary);
+    setTimelineQuery({ dataUpdatedAt: Number.POSITIVE_INFINITY, isError: true, refetch: retry });
+    view.rerender(<DashboardPage />);
+
+    expect(screen.getByTestId("timeline-panel")).toHaveAttribute(
+      "data-state",
+      "error",
+    );
+    expect(latestTimelineProps().selectedMarket?.symbol).toBe("ETHUSDT");
+    expect(latestTimelineProps().timelinePoints).toEqual([]);
+    expect(latestTimelineProps().timelineErrorMessage).not.toBeNull();
+    expect(latestTimelineProps().emptyAnchorMs).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "Retry timeline recorder" }));
+    expect(retry).toHaveBeenCalledOnce();
+
+    setTimelineQuery({ isLoading: true });
+    view.rerender(<DashboardPage />);
+    expect(screen.getByTestId("timeline-panel")).toHaveAttribute(
+      "data-state",
+      "loading",
+    );
+
+    setTimelineQuery({ points: [] });
+    view.rerender(<DashboardPage />);
+    expect(screen.getByTestId("timeline-panel")).toHaveAttribute(
+      "data-state",
+      "empty",
+    );
+
+    setTimelineQuery({ points: [{ timestamp: "new", price: "2" }] });
+    view.rerender(<DashboardPage />);
+    expect(screen.getByTestId("timeline-panel")).toHaveAttribute(
+      "data-state",
+      "success",
+    );
+    expect(latestTimelineProps().selectedMarket?.symbol).toBe("ETHUSDT");
+  });
+});
+
+describe("dashboard retained source contracts", () => {
   it("uses canonical market-health presentation owners in full-market surfaces", () => {
     expect(source).toContain(
       'import { HealthScore } from "@/features/dashboard/HealthScore";',
@@ -98,41 +711,6 @@ describe("dashboard feature compositor", () => {
     ).toBe(2);
   });
 
-  it("uses each accepted preview builder exactly once in its preview owner", () => {
-    expect(source).toContain(
-      'import { buildMarketHealthPreview } from "@/features/dashboard/marketHealthPreviewModel";',
-    );
-    expect(source).toContain(
-      'import { buildRecentAnomaliesPreview } from "@/features/dashboard/recentAnomaliesPreviewModel";',
-    );
-    expect(count("buildMarketHealthPreview(symbols)")).toBe(1);
-    expect(count("buildRecentAnomaliesPreview(anomalies)")).toBe(1);
-  });
-
-  it("keeps the timeline query symbol, mode, and observed scoped", () => {
-    expect(source).toContain(
-      `useMarketTimelineQuery(\n    selectedMarket?.symbol ?? null,\n    selectedUiMode,\n    observed,\n  )`,
-    );
-  });
-
-  it("wires every TimelinePanel prop from existing query and summary ownership", () => {
-    for (const wiring of [
-      "selectedMarket={selectedMarket}",
-      "timelinePoints={timelineQuery.data?.points ?? []}",
-      "timelineAnomalies={timelineQuery.data?.anomalies ?? []}",
-      "isSummaryLoading={isLoading}",
-      "isTimelineLoading={timelineQuery.isLoading}",
-      "timelineErrorMessage={timelineErrorMessage}",
-      "onRetryTimeline={() => void timelineQuery.refetch()}",
-      "emptyAnchorMs={emptyAnchorMs}",
-    ]) {
-      expect(source).toContain(wiring);
-    }
-    expect(source).toContain(
-      `const timelineErrorMessage = timelineQuery.isError\n    ? buildErrorMessage(timelineQuery.error)\n    : null;`,
-    );
-  });
-
   it("derives a finite deterministic empty anchor from query metadata", () => {
     expect(source).toContain(
       `const emptyAnchorMs = Number.isFinite(timelineQuery.dataUpdatedAt)\n    ? timelineQuery.dataUpdatedAt\n    : 0;`,
@@ -142,24 +720,6 @@ describe("dashboard feature compositor", () => {
     expect(source).not.toContain("setInterval(");
     expect(source).not.toContain("setTimeout(");
     expect(source).not.toContain("Math.random(");
-  });
-
-  it("passes the same Market Health preview rows and callback to desktop and mobile", () => {
-    expect(source).toMatch(
-      /<MarketHealthDesktopTable\s+rows=\{preview\.rows\}\s+onOpenSymbolDetail=\{onOpenSymbolDetail\}\s+\/>/,
-    );
-    expect(source).toMatch(
-      /<MarketHealthMobileCards\s+rows=\{preview\.rows\}\s+onOpenSymbolDetail=\{onOpenSymbolDetail\}\s+\/>/,
-    );
-  });
-
-  it("passes the same Recent Anomalies preview rows and callback to desktop and mobile", () => {
-    expect(source).toMatch(
-      /<RecentAnomaliesDesktopTable\s+rows=\{preview\.rows\}\s+onOpenSymbolDetail=\{onOpenSymbolDetail\}\s+\/>/,
-    );
-    expect(source).toMatch(
-      /<RecentAnomaliesMobileCards\s+rows=\{preview\.rows\}\s+onOpenSymbolDetail=\{onOpenSymbolDetail\}\s+\/>/,
-    );
   });
 
   it("keeps preview-owned View all and empty-state decisions", () => {
@@ -182,15 +742,6 @@ describe("dashboard feature compositor", () => {
     expect(source).toContain(
       'subtitle="Latest data-quality events across monitored markets."',
     );
-  });
-
-  it("preserves all-markets, all-anomalies, and symbol-detail entry points", () => {
-    expect(source).toContain("<AllSymbolHealthModal");
-    expect(source).toContain("<AllAnomaliesModal");
-    expect(source).toContain("<SymbolDetailModal");
-    expect(source).toContain('openSymbolDetail(symbol, "dashboard")');
-    expect(source).toContain('openSymbolDetail(symbol, "symbols")');
-    expect(source).toContain('openSymbolDetail(symbol, "anomalies")');
   });
 
   it("wires the accepted shared sections into popup success presentation", () => {
@@ -238,16 +789,6 @@ describe("dashboard feature compositor", () => {
     expect(source).toContain(
       'data-popup-identity={`${identity.mode}:${identity.symbol}:${identity.returnContext}`}',
     );
-  });
-
-  it("keeps full raw collections in modal and detail workflows", () => {
-    expect(source).toContain("const symbols = summary?.symbols ?? [];");
-    expect(source).toContain("const anomalies = summary?.recent_anomalies ?? [];");
-    expect(source).toContain("symbols={symbols}");
-    expect(source).toContain("anomalies={anomalies}");
-    expect(source).toContain("summary={summary}");
-    expect(source).not.toContain("symbols={preview.rows}");
-    expect(source).not.toContain("anomalies={preview.rows}");
   });
 
   it("removes direct chart and duplicate inline preview ownership", () => {
