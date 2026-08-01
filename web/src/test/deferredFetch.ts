@@ -93,7 +93,7 @@ export function installControlledFetch({
   return { fetchMock, find, requests, resolve };
 }
 
-export function requestIdentityKey(identity: RequestIdentity): string {
+function requestIdentityKey(identity: RequestIdentity): string {
   return [identity.endpoint, identity.mode ?? "none", identity.symbol ?? "none"].join(":");
 }
 

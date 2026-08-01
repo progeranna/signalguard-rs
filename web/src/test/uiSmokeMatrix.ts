@@ -1,22 +1,22 @@
 export const UI_SMOKE_MODES = ["demo", "live"] as const;
-export type UiSmokeMode = (typeof UI_SMOKE_MODES)[number];
+type UiSmokeMode = (typeof UI_SMOKE_MODES)[number];
 
 export const UI_SMOKE_MARKETS = ["BTCUSDT", "ETHUSDT"] as const;
-export type UiSmokeMarket = (typeof UI_SMOKE_MARKETS)[number];
+type UiSmokeMarket = (typeof UI_SMOKE_MARKETS)[number];
 
 export const UI_SMOKE_SURFACES = [
   "dashboard",
   "symbol-detail-route",
   "symbol-detail-popup",
 ] as const;
-export type UiSmokeSurface = (typeof UI_SMOKE_SURFACES)[number];
+type UiSmokeSurface = (typeof UI_SMOKE_SURFACES)[number];
 
 export const UI_SMOKE_VIEWPORTS = [
   { name: "desktop", width: 1440 },
   { name: "mobile", width: 390 },
 ] as const;
-export type UiSmokeViewport = (typeof UI_SMOKE_VIEWPORTS)[number];
-export type UiSmokeViewportName = UiSmokeViewport["name"];
+type UiSmokeViewport = (typeof UI_SMOKE_VIEWPORTS)[number];
+type UiSmokeViewportName = UiSmokeViewport["name"];
 
 export const UI_SMOKE_STATES = [
   "loading",
@@ -25,7 +25,7 @@ export const UI_SMOKE_STATES = [
   "unavailable",
   "observed-success",
 ] as const;
-export type UiSmokeState = (typeof UI_SMOKE_STATES)[number];
+type UiSmokeState = (typeof UI_SMOKE_STATES)[number];
 
 export const UI_SMOKE_DIALOG_REQUIREMENTS = [
   {
@@ -62,7 +62,7 @@ export const UI_SMOKE_DIALOG_REQUIREMENTS = [
 export type UiSmokeDialogRequirement =
   (typeof UI_SMOKE_DIALOG_REQUIREMENTS)[number];
 
-export type UiSmokeScenarioGroup =
+type UiSmokeScenarioGroup =
   | "steady-state"
   | "mode-switch"
   | "symbol-switch"
@@ -93,7 +93,7 @@ export interface UiSmokeModeSwitchScenario extends UiSmokeScenarioBase {
   readonly toMode: UiSmokeMode;
 }
 
-export type UiSmokeNavigationContinuity =
+type UiSmokeNavigationContinuity =
   | "route-to-route"
   | "popup-to-popup";
 

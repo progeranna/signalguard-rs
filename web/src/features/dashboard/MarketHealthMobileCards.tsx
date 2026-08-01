@@ -117,7 +117,7 @@ export function MobileSymbolMetric({
   );
 }
 
-export function EmptyBlock({ message }: Readonly<{ message: string }>) {
+function EmptyBlock({ message }: Readonly<{ message: string }>) {
   return (
     <div className="border-y border-white/10 px-2 py-5 text-sm leading-6 text-slate-400">
       {message}
