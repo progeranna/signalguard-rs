@@ -1,9 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { ReactElement, ReactNode } from "react";
-import { cloneElement, isValidElement } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TimelinePanel, type TimelinePanelProps } from "./TimelinePanel";
 import type {
@@ -11,74 +9,6 @@ import type {
   DashboardSymbolSummary,
   MarketTimelinePoint,
 } from "./types";
-
-let tooltipProps: Record<string, unknown> = {};
-
-vi.mock("recharts", () => ({
-  ResponsiveContainer: ({
-    children,
-    height,
-    width,
-  }: {
-    children: ReactNode;
-    height: string | number;
-    width: string | number;
-  }) => (
-    <div
-      data-testid="responsive-container"
-      data-height={String(height)}
-      data-width={String(width)}
-    >
-      {children}
-    </div>
-  ),
-  AreaChart: ({
-    children,
-    data,
-    margin,
-  }: {
-    children: ReactNode;
-    data: unknown;
-    margin: unknown;
-  }) => (
-    <div
-      data-testid="chart"
-      data-data={JSON.stringify(data)}
-      data-margin={JSON.stringify(margin)}
-    >
-      {children}
-    </div>
-  ),
-  CartesianGrid: (props: Record<string, unknown>) => (
-    <div data-testid="grid" data-props={JSON.stringify(props)} />
-  ),
-  XAxis: (props: Record<string, unknown>) => (
-    <div data-testid="x-axis" data-domain={JSON.stringify(props.domain)} />
-  ),
-  YAxis: (props: Record<string, unknown>) => (
-    <div data-testid="y-axis" data-domain={JSON.stringify(props.domain)} />
-  ),
-  ReferenceLine: (props: Record<string, unknown>) => (
-    <div
-      data-testid="reference-line"
-      data-stroke={String(props.stroke)}
-      data-x={String(props.x)}
-    />
-  ),
-  Area: (props: Record<string, unknown>) => (
-    <div data-testid="area" data-props={JSON.stringify(props)} />
-  ),
-  Tooltip: ({ content }: { content: ReactNode }) => (
-    <div data-testid="tooltip">
-      {isValidElement(content)
-        ? cloneElement(
-            content as ReactElement<Record<string, unknown>>,
-            tooltipProps,
-          )
-        : null}
-    </div>
-  ),
-}));
 
 const componentSource = readFileSync(
   path.join(process.cwd(), "src/features/dashboard/TimelinePanel.tsx"),
@@ -197,7 +127,9 @@ function chartEvidence(): Array<string | null> {
 }
 
 function snapshotValue(label: string): HTMLElement {
-  const labelElement = screen.getByText(label);
+  const labelElement = within(screen.getByRole("complementary")).getByText(
+    label,
+  );
   const metric = labelElement.parentElement;
 
   if (!metric) {
@@ -206,10 +138,6 @@ function snapshotValue(label: string): HTMLElement {
 
   return metric;
 }
-
-beforeEach(() => {
-  tooltipProps = {};
-});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -382,25 +310,14 @@ describe("TimelinePanel chart, tooltip, and snapshot parity", () => {
 
   it("matches anomalies inclusively at both ±15-second boundaries", () => {
     const timestamp = "2026-07-20T10:01:00.000Z";
-    tooltipProps = {
-      active: true,
-      label: Date.parse(timestamp),
-      payload: [
-        {
-          payload: {
-            timestamp,
-            timestampMs: Date.parse(timestamp),
-            price: 101,
-            priceLabel: "101.0000",
-            spreadPct: 0,
-            tradesPerMinute: 0,
-            lastEventAgeMs: 0,
-          },
-        },
-      ],
-    };
-
     mount({
+      timelinePoints: [
+        point(timestamp, "101.0000", {
+          spread_pct: 0,
+          trades_per_minute: 0,
+          last_event_age_ms: 0,
+        }),
+      ],
       timelineAnomalies: [
         anomaly("before", "warning", "2026-07-20T10:00:45.000Z", {
           anomaly_type: "price_move",
@@ -415,6 +332,7 @@ describe("TimelinePanel chart, tooltip, and snapshot parity", () => {
       ],
     });
 
+    fireEvent.focus(screen.getByTestId("chart"));
     const tooltip = screen.getByTestId("tooltip");
     for (const text of [
       "Price: 101.0000",
@@ -597,10 +515,7 @@ describe("TimelinePanel deterministic ownership and scope", () => {
       emptyAnchorMs,
     });
 
-    // WEB2 incorrectly required zero global Date.now calls. React's renderer
-    // makes those calls itself, so the component boundary is proved by stable
-    // output under changing clock values plus the direct source guard below.
-    expect(dateNow).toHaveBeenCalled();
+    expect(dateNow).not.toHaveBeenCalled();
     expect(chartEvidence()).toEqual(firstEvidence);
     expect(JSON.stringify({ selected, timelinePoints, timelineAnomalies })).toBe(
       before,
