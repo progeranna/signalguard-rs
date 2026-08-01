@@ -9,6 +9,14 @@ import {
   YAxis,
 } from "recharts";
 
+import {
+  availabilityMessage,
+  formatOptionalAge,
+  formatOptionalCompact,
+  formatTickerPercent,
+  formatTickerPrice,
+  statusLabel,
+} from "./marketHealthPresentation";
 import { buildTimelineDomains } from "./timelineDomains";
 import {
   normalizeTimelinePoints,
@@ -22,7 +30,6 @@ import type {
 import { ErrorPanel } from "@/shared/components/ErrorPanel";
 import { LoadingSkeleton } from "@/shared/components/LoadingSkeleton";
 import { StatusBadge } from "@/shared/components/StatusBadge";
-import { formatAgeMs, formatCompactNumber } from "@/shared/lib/format";
 import { toStatusTone } from "@/shared/lib/status";
 
 export type TimelinePanelProps = Readonly<{
@@ -489,46 +496,6 @@ function formatTimelineTooltipTimestamp(
   }).format(date);
 }
 
-function formatOptionalAge(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "Unavailable";
-  }
-
-  return formatAgeMs(value);
-}
-
-function formatOptionalCompact(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return formatCompactNumber(value);
-}
-
-function formatTickerPrice(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  return value;
-}
-
-function formatTickerPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return `${value.toFixed(2)}%`;
-}
-
-function statusLabel(value: string | null | undefined): string {
-  if (!value) {
-    return "Unknown";
-  }
-
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
 function marketStatusLabel(symbol: DashboardSymbolSummary): string {
   switch (symbol.availability) {
     case "configured":
@@ -539,20 +506,5 @@ function marketStatusLabel(symbol: DashboardSymbolSummary): string {
       return "Unavailable";
     case "observed":
       return statusLabel(symbol.health?.status);
-  }
-}
-
-function availabilityMessage(
-  availability: DashboardSymbolSummary["availability"],
-): string {
-  switch (availability) {
-    case "configured":
-      return "Configured for Live; Live ingestion is not active.";
-    case "awaiting":
-      return "Awaiting first Live market data.";
-    case "unavailable":
-      return "Live market data is unavailable.";
-    case "observed":
-      return "No current market state available for this market.";
   }
 }
