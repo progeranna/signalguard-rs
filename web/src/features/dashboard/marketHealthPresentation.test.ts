@@ -6,6 +6,7 @@ import {
   formatOptionalCompact,
   formatTickerPercent,
   formatTickerPrice,
+  marketStatusLabel,
   statusLabel,
 } from "./marketHealthPresentation";
 
@@ -44,6 +45,20 @@ describe("market health presentation", () => {
     );
     expect(availabilityMessage("observed")).toBe(
       "No current market state available for this market.",
+    );
+  });
+
+  it("maps market availability to the canonical market status label", () => {
+    expect(marketStatusLabel("configured", null)).toBe("Configured");
+    expect(marketStatusLabel("awaiting", null)).toBe("Awaiting data");
+    expect(marketStatusLabel("unavailable", null)).toBe("Unavailable");
+    expect(marketStatusLabel("observed", "healthy")).toBe("Healthy");
+    expect(marketStatusLabel("observed", "degraded")).toBe("Degraded");
+    expect(marketStatusLabel("observed", "unhealthy")).toBe("Unhealthy");
+    expect(marketStatusLabel("observed", null)).toBe("Unknown");
+    expect(marketStatusLabel("observed", undefined)).toBe("Unknown");
+    expect(marketStatusLabel("observed", "healthy")).toBe(
+      statusLabel("healthy"),
     );
   });
 });

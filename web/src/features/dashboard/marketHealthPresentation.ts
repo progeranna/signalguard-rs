@@ -56,3 +56,19 @@ export function availabilityMessage(
       return "No current market state available for this market.";
   }
 }
+
+export function marketStatusLabel(
+  availability: MarketHealthPreviewRow["availability"],
+  healthStatus: MarketHealthPreviewRow["healthStatus"] | undefined,
+): string {
+  switch (availability) {
+    case "configured":
+      return "Configured";
+    case "awaiting":
+      return "Awaiting data";
+    case "unavailable":
+      return "Unavailable";
+    case "observed":
+      return statusLabel(healthStatus);
+  }
+}
