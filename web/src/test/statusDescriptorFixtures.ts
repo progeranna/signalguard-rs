@@ -9,7 +9,7 @@ import type {
 } from "@/features/dashboard/statusDescriptors";
 import type { StatusTone } from "@/shared/lib/status";
 
-export type SemanticDescriptorExpectation<Key extends string> = Readonly<{
+type SemanticDescriptorExpectation<Key extends string> = Readonly<{
   key: Key;
   label: string;
   tone: StatusTone;

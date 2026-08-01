@@ -17,7 +17,7 @@ type FetchJsonOptions<TSchema extends z.ZodTypeAny> = {
   signal?: AbortSignal;
 };
 
-export function getApiBaseUrl(): string {
+function getApiBaseUrl(): string {
   const configuredBaseUrl = import.meta.env.VITE_SIGNALGUARD_API_BASE_URL?.trim();
 
   if (!configuredBaseUrl) {
@@ -27,7 +27,7 @@ export function getApiBaseUrl(): string {
   return configuredBaseUrl.replace(/\/+$/, "");
 }
 
-export function buildApiUrl(
+function buildApiUrl(
   path: string,
   query?: Record<string, QueryValue>,
 ): string {
@@ -106,7 +106,7 @@ function buildApiError(status: number, payload: unknown): ApiError {
   });
 }
 
-export function parseWithSchema<TSchema extends z.ZodTypeAny>(
+function parseWithSchema<TSchema extends z.ZodTypeAny>(
   schema: TSchema,
   payload: unknown,
   context: string,

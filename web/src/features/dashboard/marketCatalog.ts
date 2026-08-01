@@ -96,12 +96,6 @@ export function getMarketCatalogAvailability(
   return symbol.availability;
 }
 
-export function isMarketCatalogSymbolList(
-  symbols: DashboardSymbolSummary[],
-): boolean {
-  return symbols.length === 0 || symbols.every((symbol) => getMarketCatalogAvailability(symbol) !== null);
-}
-
 function collectObservedSymbols(
   symbols: readonly DashboardSymbolSummary[],
   mode: UiMode,

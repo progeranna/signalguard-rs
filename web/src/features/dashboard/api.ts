@@ -53,7 +53,7 @@ function withMode(path: string, mode: UiMode): string {
   return search ? `${path}?${search}` : path;
 }
 
-export function fetchDashboardSummary(
+function fetchDashboardSummary(
   mode: UiMode,
   signal?: AbortSignal,
 ): Promise<DashboardSummary> {
@@ -66,7 +66,7 @@ export function fetchDashboardSummary(
   });
 }
 
-export function fetchMarketState(
+function fetchMarketState(
   symbol: string,
   signal?: AbortSignal,
 ): Promise<MarketState> {
@@ -78,7 +78,7 @@ export function fetchMarketState(
   });
 }
 
-export function fetchMarketHealth(
+function fetchMarketHealth(
   symbol: string,
   signal?: AbortSignal,
 ): Promise<MarketHealth> {
@@ -90,7 +90,7 @@ export function fetchMarketHealth(
   });
 }
 
-export function fetchMarketTimeline(
+function fetchMarketTimeline(
   symbol: string,
   mode: UiMode,
   signal?: AbortSignal,
@@ -109,7 +109,7 @@ export function fetchMarketTimeline(
   );
 }
 
-export function fetchMarketAnomalies(
+function fetchMarketAnomalies(
   symbol: string,
   limit = SYMBOL_ANOMALY_LIMIT,
   signal?: AbortSignal,

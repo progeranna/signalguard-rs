@@ -50,7 +50,7 @@ export function matrixSummary(
   };
 }
 
-export function matrixObservedSymbol(
+function matrixObservedSymbol(
   mode: UiMode,
   symbol: MatrixSymbol,
 ): DashboardSymbolSummary {

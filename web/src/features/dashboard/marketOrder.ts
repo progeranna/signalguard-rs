@@ -58,22 +58,6 @@ export function orderMarketEntries<T>(
   return [...knownEntries.map(({ entry }) => entry), ...extraEntries];
 }
 
-export function buildCoveredDashboardSymbols(
-  symbols: DashboardSymbolSummary[],
-): DashboardSymbolSummary[] {
-  return coverCanonicalMarketEntries(
-    symbols,
-    (symbol) => symbol.symbol,
-    (market) => ({
-      source: "demo",
-      availability: "unavailable",
-      symbol: market,
-      state: null,
-      health: null,
-    }),
-  );
-}
-
 export function isDashboardSymbolPlaceholder(
   symbol: DashboardSymbolSummary,
 ): boolean {
@@ -88,41 +72,4 @@ export function isDashboardSymbolPlaceholder(
   }
 
   return symbol.state === null && symbol.health === null;
-}
-
-function coverCanonicalMarketEntries<T>(
-  entries: T[],
-  getMarket: (entry: T) => string,
-  createMissingEntry: (market: string) => T,
-): T[] {
-  const entryByMarket = new Map<string, T>();
-  const extraEntries: T[] = [];
-
-  for (const entry of entries) {
-    const normalizedMarket = parseSymbolId(getMarket(entry));
-
-    if (!normalizedMarket) {
-      extraEntries.push(entry);
-      continue;
-    }
-
-    if (demoMarketIndex.has(normalizedMarket)) {
-      if (!entryByMarket.has(normalizedMarket)) {
-        entryByMarket.set(normalizedMarket, entry);
-      }
-
-      continue;
-    }
-
-    extraEntries.push(entry);
-  }
-
-  return [
-    ...DEMO_MARKETS.map(
-      (market) =>
-        entryByMarket.get(parseSymbolId(market) ?? market) ??
-        createMissingEntry(market),
-    ),
-    ...extraEntries,
-  ];
 }
