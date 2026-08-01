@@ -1,4 +1,5 @@
 {
-  "maxLargestJsBytes": 761856,
-  "maxTotalJsBytes": 761856
+  "maxInitialJsBytes": 409600,
+  "maxLargestJsBytes": 409600,
+  "maxTotalJsBytes": 414720
 }

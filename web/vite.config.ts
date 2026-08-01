@@ -5,6 +5,9 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    manifest: ".vite/manifest.json",
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
