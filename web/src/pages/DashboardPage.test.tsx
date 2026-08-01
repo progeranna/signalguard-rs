@@ -29,6 +29,45 @@ describe("dashboard feature compositor", () => {
     }
   });
 
+  it("uses canonical market-health presentation owners in full-market surfaces", () => {
+    expect(source).toContain(
+      'import { HealthScore } from "@/features/dashboard/HealthScore";',
+    );
+    expect(source).toContain(
+      `import {
+  availabilityMessage,
+  formatOptionalAge,
+  formatOptionalCompact,
+  formatTickerPercent,
+  formatTickerPrice,
+  marketStatusLabel,
+  statusLabel,
+} from "@/features/dashboard/marketHealthPresentation";`,
+    );
+    expect(source).toContain("<HealthScore score={score} status={symbol.health?.status} />");
+    expect(source).toContain(
+      "<HealthScore\n            score={symbol.health?.score ?? null}\n            status={symbol.health?.status}\n          />",
+    );
+    expect(source).toContain(
+      "marketStatusLabel(symbol.availability, symbol.health?.status)",
+    );
+    for (const helper of [
+      "HealthScore",
+      "healthScoreTone",
+      "healthScoreTextClass",
+      "healthScoreBarClass",
+      "formatTickerPrice",
+      "formatTickerPercent",
+      "formatOptionalCompact",
+      "formatOptionalAge",
+      "statusLabel",
+      "availabilityMessage",
+      "marketStatusLabel",
+    ]) {
+      expect(source).not.toContain(`function ${helper}(`);
+    }
+  });
+
   it("uses the canonical anomaly presentation owner without page-local helper copies", () => {
     expect(source).toContain(
       `import {

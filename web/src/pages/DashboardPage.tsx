@@ -7,9 +7,19 @@ import {
 } from "@/features/dashboard/api";
 import { MarketHealthDesktopTable } from "@/features/dashboard/MarketHealthDesktopTable";
 import { MarketHealthMobileCards } from "@/features/dashboard/MarketHealthMobileCards";
+import { HealthScore } from "@/features/dashboard/HealthScore";
 import { buildMarketHealthPreview } from "@/features/dashboard/marketHealthPreviewModel";
 import { adaptMarketResourceToViewModel } from "@/features/dashboard/marketAdapters";
 import type { MarketDetailViewModel } from "@/features/dashboard/marketViewModel";
+import {
+  availabilityMessage,
+  formatOptionalAge,
+  formatOptionalCompact,
+  formatTickerPercent,
+  formatTickerPrice,
+  marketStatusLabel,
+  statusLabel,
+} from "@/features/dashboard/marketHealthPresentation";
 import { RecentAnomaliesDesktopTable } from "@/features/dashboard/RecentAnomaliesDesktopTable";
 import { RecentAnomaliesMobileCards } from "@/features/dashboard/RecentAnomaliesMobileCards";
 import {
@@ -48,11 +58,7 @@ import { ErrorPanel } from "@/shared/components/ErrorPanel";
 import { LoadingSkeleton } from "@/shared/components/LoadingSkeleton";
 import { StatusBadge } from "@/shared/components/StatusBadge";
 import { isApiError, isApiValidationError } from "@/shared/api/errors";
-import {
-  formatAgeMs,
-  formatCompactNumber,
-} from "@/shared/lib/format";
-import { toStatusTone, type StatusTone } from "@/shared/lib/status";
+import { toStatusTone } from "@/shared/lib/status";
 
 type DashboardModalState =
   | { type: "anomalies" }
@@ -95,22 +101,6 @@ export function DashboardPage() {
       />
     </section>
   );
-}
-
-function formatTickerPrice(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
-  }
-
-  return value;
-}
-
-function formatTickerPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return `${value.toFixed(2)}%`;
 }
 
 function MarketTimelineShell({
@@ -339,7 +329,7 @@ function SymbolHealthCard({
   symbol: DashboardSymbolSummary;
 }) {
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
-  const statusText = marketStatusLabel(symbol);
+  const statusText = marketStatusLabel(symbol.availability, symbol.health?.status);
 
   return (
     <button
@@ -391,41 +381,6 @@ function SymbolHealthCard({
         </div> : <div className="mt-4"><EmptyBlock message={availabilityMessage(symbol.availability)} /></div>}
       </article>
     </button>
-  );
-}
-
-function HealthScore({
-  compact = false,
-  score,
-  status,
-}: {
-  compact?: boolean;
-  score: number | null;
-  status: string | null | undefined;
-}) {
-  const tone = healthScoreTone(score, status);
-  const width = score === null ? 0 : Math.max(score, 4);
-
-  return (
-    <div className={compact ? "min-w-0" : "min-w-28"}>
-      <div className={compact ? "flex min-w-0 items-center gap-2" : "flex items-center gap-3"}>
-        <span className={`text-lg font-extrabold ${healthScoreTextClass(tone)}`}>
-          {score ?? "—"}
-        </span>
-        <div
-          className={
-            compact
-              ? "h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-700/70"
-              : "h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/70"
-          }
-        >
-          <div
-            className={`h-full rounded-full ${healthScoreBarClass(tone)}`}
-            style={{ width: `${width}%` }}
-          />
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -742,7 +697,7 @@ function SymbolHealthModalTableRow({
 }) {
   const score = symbol.health?.score ?? null;
   const statusTone = toStatusTone(symbol.health?.status, "neutral");
-  const statusText = marketStatusLabel(symbol);
+  const statusText = marketStatusLabel(symbol.availability, symbol.health?.status);
 
   return (
     <SymbolHealthTableRowShell
@@ -1091,95 +1046,6 @@ function SeverityBadge({
       {statusLabel(severity)}
     </span>
   );
-}
-
-function healthScoreTone(
-  score: number | null,
-  status: string | null | undefined,
-): StatusTone {
-  if (status === "healthy" || (score !== null && score >= 80)) {
-    return "healthy";
-  }
-
-  if (status === "degraded" || (score !== null && score >= 50)) {
-    return "degraded";
-  }
-
-  if (status === "unhealthy" || (score !== null && score < 50)) {
-    return "unhealthy";
-  }
-
-  return "neutral";
-}
-
-function healthScoreTextClass(tone: StatusTone): string {
-  switch (tone) {
-    case "healthy":
-      return "text-emerald-300";
-    case "degraded":
-      return "text-amber-300";
-    case "unhealthy":
-    case "critical":
-      return "text-rose-300";
-    default:
-      return "text-slate-400";
-  }
-}
-
-function healthScoreBarClass(tone: StatusTone): string {
-  switch (tone) {
-    case "healthy":
-      return "bg-emerald-300";
-    case "degraded":
-      return "bg-amber-300";
-    case "unhealthy":
-    case "critical":
-      return "bg-rose-300";
-    default:
-      return "bg-slate-500";
-  }
-}
-
-function formatOptionalAge(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "Unavailable";
-  }
-
-  return formatAgeMs(value);
-}
-
-function formatOptionalCompact(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-
-  return formatCompactNumber(value);
-}
-
-function statusLabel(value: string | null | undefined): string {
-  if (!value) {
-    return "Unknown";
-  }
-
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function marketStatusLabel(symbol: DashboardSymbolSummary): string {
-  switch (symbol.availability) {
-    case "configured": return "Configured";
-    case "awaiting": return "Awaiting data";
-    case "unavailable": return "Unavailable";
-    case "observed": return statusLabel(symbol.health?.status);
-  }
-}
-
-function availabilityMessage(availability: DashboardSymbolSummary["availability"]): string {
-  switch (availability) {
-    case "configured": return "Configured for Live; Live ingestion is not active.";
-    case "awaiting": return "Awaiting first Live market data.";
-    case "unavailable": return "Live market data is unavailable.";
-    case "observed": return "No current market state available for this market.";
-  }
 }
 
 function buildErrorMessage(error: unknown): string {
