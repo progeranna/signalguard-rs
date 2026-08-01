@@ -1,15 +1,4 @@
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-
-import {
   availabilityMessage,
   formatOptionalAge,
   formatOptionalCompact,
@@ -17,11 +6,9 @@ import {
   formatTickerPrice,
   statusLabel,
 } from "./marketHealthPresentation";
+import { TimelineChartRenderer } from "./TimelineChartRenderer";
 import { buildTimelineDomains } from "./timelineDomains";
-import {
-  normalizeTimelinePoints,
-  type NormalizedTimelinePoint,
-} from "./timelineNormalization";
+import { normalizeTimelinePoints } from "./timelineNormalization";
 import type {
   DashboardAnomaly,
   DashboardSymbolSummary,
@@ -122,94 +109,12 @@ export function TimelinePanel({
               ) : timelineDomains !== null ? (
                 <div className="flex min-h-[285px] rounded-xl bg-slate-950/35">
                   <div className="relative min-h-0 flex-1 overflow-hidden">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart
-                        data={normalizedTimelinePoints}
-                        margin={{ top: 4, right: 14, bottom: 2, left: 0 }}
-                      >
-                        <defs>
-                          <linearGradient
-                            id="marketTimelineFill"
-                            x1="0"
-                            x2="0"
-                            y1="0"
-                            y2="1"
-                          >
-                            <stop
-                              offset="0%"
-                              stopColor="#7EE45B"
-                              stopOpacity={0.2}
-                            />
-                            <stop
-                              offset="100%"
-                              stopColor="#7EE45B"
-                              stopOpacity={0.02}
-                            />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid
-                          stroke="rgba(100,116,139,0.18)"
-                          strokeDasharray="3 8"
-                          vertical={false}
-                        />
-                        <XAxis
-                          axisLine={false}
-                          dataKey="timestampMs"
-                          domain={timelineDomains.time}
-                          height={34}
-                          label={{
-                            value: "Time",
-                            position: "insideBottom",
-                            offset: -2,
-                            fill: "#64748b",
-                            fontSize: 11,
-                          }}
-                          tick={{ fill: "#64748b", fontSize: 11 }}
-                          tickFormatter={formatTimelineTick}
-                          tickLine={false}
-                          tickMargin={2}
-                          type="number"
-                        />
-                        <YAxis
-                          axisLine={false}
-                          domain={timelineDomains.price}
-                          label={{
-                            value: "Price",
-                            angle: -90,
-                            position: "insideLeft",
-                            fill: "#64748b",
-                            fontSize: 11,
-                          }}
-                          tick={{ fill: "#64748b", fontSize: 11 }}
-                          tickFormatter={formatTimelinePriceTick}
-                          tickLine={false}
-                          type="number"
-                          width={58}
-                        />
-                        <Tooltip
-                          content={
-                            <TimelineTooltip anomalies={timelineAnomalies} />
-                          }
-                        />
-                        {visibleTimelineAnomalies.map((anomaly) => (
-                          <ReferenceLine
-                            key={anomaly.id}
-                            stroke={anomalySeverityColor(anomaly.severity)}
-                            strokeDasharray="3 4"
-                            strokeOpacity={0.55}
-                            x={anomaly.timestampMs}
-                          />
-                        ))}
-                        <Area
-                          dataKey="price"
-                          fill="url(#marketTimelineFill)"
-                          isAnimationActive={false}
-                          stroke="#7EE45B"
-                          strokeWidth={2.4}
-                          type="monotone"
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                    <TimelineChartRenderer
+                      points={normalizedTimelinePoints}
+                      anomalies={timelineAnomalies}
+                      visibleAnomalies={visibleTimelineAnomalies}
+                      domains={timelineDomains}
+                    />
                   </div>
                 </div>
               ) : null}
@@ -269,82 +174,6 @@ export function TimelinePanel({
 
 }
 
-function TimelineTooltip({
-  active,
-  anomalies,
-  label,
-  payload,
-}: {
-  active?: boolean;
-  anomalies: readonly DashboardAnomaly[];
-  label?: number;
-  payload?: Array<{ payload: NormalizedTimelinePoint }>;
-}) {
-  if (!active || !payload?.length) {
-    return null;
-  }
-
-  const point = payload[0]?.payload;
-
-  if (!point) {
-    return null;
-  }
-
-  const pointAnomalies = anomalies.filter((anomaly) => {
-    const anomalyTime = Date.parse(anomaly.event_time || anomaly.created_at);
-
-    return (
-      Number.isFinite(anomalyTime) &&
-      Math.abs(anomalyTime - point.timestampMs) <= 15_000
-    );
-  });
-
-  return (
-    <div
-      style={{
-        background: "#0E1822",
-        border: "1px solid rgba(148,163,184,0.18)",
-        borderRadius: "10px",
-        color: "#e2e8f0",
-      }}
-      className="min-w-[14rem] px-3 py-2.5 text-sm"
-    >
-      <p className="font-semibold text-white">
-        {formatTimelineTooltipTimestamp(
-          typeof label === "number"
-            ? new Date(label).toISOString()
-            : point.timestamp,
-        )}
-      </p>
-      <div className="mt-2 space-y-1 text-slate-300">
-        <p>Price: {point.priceLabel}</p>
-        {point.spreadPct !== null ? (
-          <p>Spread: {formatTickerPercent(point.spreadPct)}</p>
-        ) : null}
-        {point.tradesPerMinute !== null ? (
-          <p>Trades/min: {formatOptionalCompact(point.tradesPerMinute)}</p>
-        ) : null}
-        {point.lastEventAgeMs !== null ? (
-          <p>Freshness: {formatOptionalAge(point.lastEventAgeMs)}</p>
-        ) : null}
-        {pointAnomalies.length > 0 ? (
-          <p>
-            Anomalies:{" "}
-            {pointAnomalies
-              .map(
-                (anomaly) =>
-                  `${formatAnomalyType(anomaly.anomaly_type)} (${statusLabel(
-                    anomaly.severity,
-                  )})`,
-              )
-              .join(", ")}
-          </p>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 function SignalSnapshotMetric({
   label,
   value,
@@ -397,36 +226,6 @@ function buildVisibleTimelineAnomalies(
     );
 }
 
-function anomalySeverityColor(
-  severity: DashboardAnomaly["severity"] | undefined,
-): string {
-  switch (severity) {
-    case "critical":
-      return "#FF6B5F";
-    case "warning":
-      return "#F5C542";
-    case "info":
-      return "#63A7FF";
-    default:
-      return "#94A3B8";
-  }
-}
-
-function formatTimelineTick(value: number): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
-}
-
-function formatTimelinePriceTick(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: value >= 1_000 ? 0 : 2,
-  }).format(value);
-}
-
 function highestAnomalySeverity(
   anomalies: readonly DashboardAnomaly[],
 ): DashboardAnomaly["severity"] | null {
@@ -458,42 +257,6 @@ function anomalyMarkerBadgeClass(
     default:
       return "border-slate-500/40 bg-slate-700/30 text-slate-300";
   }
-}
-
-function formatAnomalyType(type: string | null | undefined): string {
-  if (!type) {
-    return "Unknown";
-  }
-
-  return type
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function formatTimelineTooltipTimestamp(
-  value: string | null | undefined,
-): string {
-  if (!value) {
-    return "Unavailable";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(date);
 }
 
 function marketStatusLabel(symbol: DashboardSymbolSummary): string {
