@@ -30,7 +30,6 @@ function readSource(repositoryPath: string): string {
 const apiSource = readSource("src/features/dashboard/api.ts");
 const appShellSource = readSource("src/app/AppShell.tsx");
 const dashboardSource = readSource("src/pages/DashboardPage.tsx");
-const symbolDetailSource = readSource("src/pages/SymbolDetailPage.tsx");
 const tickerSource = readSource("src/app/GlobalMarketTicker.tsx");
 
 function serverSummary(mode: UiMode): DashboardSummary {
@@ -70,7 +69,7 @@ describe("market catalog consumer wiring", () => {
   });
 
   it("routes only mode-aware catalog consumers through the catalog hook", () => {
-    for (const source of [appShellSource, dashboardSource, symbolDetailSource]) {
+    for (const source of [appShellSource, dashboardSource]) {
       expect(source).toContain("useCatalogDashboardSummaryQuery");
       expect(source).not.toContain("useDashboardSummaryQuery(selectedUiMode)");
     }
@@ -132,6 +131,6 @@ describe("market catalog consumer wiring", () => {
 
   it("does not let catalog-aware pages reapply Demo coverage", () => {
     expect(dashboardSource).not.toContain("buildCoveredDashboardSymbols");
-    expect(symbolDetailSource).not.toContain("buildCoveredDashboardSymbols");
+    expect(appShellSource).not.toContain("buildCoveredDashboardSymbols");
   });
 });

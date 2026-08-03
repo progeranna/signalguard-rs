@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -42,11 +42,11 @@ const testState = vi.hoisted(() => ({
   }>,
   recentDesktopProps: [] as Array<{
     rows: readonly { id: string; symbol: string }[];
-    onOpenSymbolDetail: (symbol: string) => void;
+    onOpenAnomalyDetail: (anomalyId: string) => void;
   }>,
   recentMobileProps: [] as Array<{
     rows: readonly { id: string; symbol: string }[];
-    onOpenSymbolDetail: (symbol: string) => void;
+    onOpenAnomalyDetail: (anomalyId: string) => void;
   }>,
   selectedSymbol: "BTCUSDT" as string | null,
   storedSelections: [] as Array<{ mode: "demo" | "live"; symbol: string }>,
@@ -167,19 +167,20 @@ vi.mock("@/features/dashboard/MarketHealthMobileCards", () => ({
 vi.mock("@/features/dashboard/RecentAnomaliesDesktopTable", () => ({
   RecentAnomaliesDesktopTable: ({
     rows,
-    onOpenSymbolDetail,
+    onOpenAnomalyDetail,
   }: {
     rows: readonly { id: string; symbol: string }[];
-    onOpenSymbolDetail: (symbol: string) => void;
+    onOpenAnomalyDetail: (anomalyId: string) => void;
   }) => {
-    testState.recentDesktopProps.push({ rows, onOpenSymbolDetail });
+    testState.recentDesktopProps.push({ rows, onOpenAnomalyDetail });
     return (
       <div data-testid="recent-anomalies-desktop">
         {rows.map((row) => (
           <button
             key={`desktop:${row.id}`}
             type="button"
-            onClick={() => onOpenSymbolDetail(row.symbol)}
+            aria-label={`Open anomaly detail ${row.id}`}
+            onClick={() => onOpenAnomalyDetail(row.id)}
           >
             {row.symbol}
           </button>
@@ -192,19 +193,20 @@ vi.mock("@/features/dashboard/RecentAnomaliesDesktopTable", () => ({
 vi.mock("@/features/dashboard/RecentAnomaliesMobileCards", () => ({
   RecentAnomaliesMobileCards: ({
     rows,
-    onOpenSymbolDetail,
+    onOpenAnomalyDetail,
   }: {
     rows: readonly { id: string; symbol: string }[];
-    onOpenSymbolDetail: (symbol: string) => void;
+    onOpenAnomalyDetail: (anomalyId: string) => void;
   }) => {
-    testState.recentMobileProps.push({ rows, onOpenSymbolDetail });
+    testState.recentMobileProps.push({ rows, onOpenAnomalyDetail });
     return (
       <div data-testid="recent-anomalies-mobile">
         {rows.map((row) => (
           <button
             key={`mobile:${row.id}`}
             type="button"
-            onClick={() => onOpenSymbolDetail(row.symbol)}
+            aria-label={`Open anomaly detail ${row.id}`}
+            onClick={() => onOpenAnomalyDetail(row.id)}
           >
             {row.symbol}
           </button>
@@ -554,6 +556,171 @@ describe("dashboard behavior-level composition", () => {
   });
 });
 
+describe("dashboard anomaly detail modal", () => {
+  it("opens the exact same-symbol UUID and renders every accepted field", () => {
+    const first = dashboardAnomaly("BTCUSDT", 1);
+    const second = {
+      ...dashboardAnomaly("BTCUSDT", 2),
+      anomaly_type: "trade_rate_drop",
+      created_at: "2026-07-20T10:02:03.000Z",
+      event_time: "2026-07-20T10:01:02.000Z",
+      message: "Exact second anomaly context",
+      observed_value: 0,
+      severity: "critical" as const,
+      threshold_value: null,
+    };
+    const currentSummary = summary("demo", [observedSymbol("BTCUSDT")], [first, second]);
+    setSummaryQuery(currentSummary);
+    setPreviews(currentSummary);
+    render(<DashboardPage />);
+
+    fireEvent.click(
+      within(screen.getByTestId("recent-anomalies-desktop")).getByRole("button", {
+        name: `Open anomaly detail ${second.id}`,
+      }),
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Anomaly Detail" });
+    expect(within(dialog).getByText(second.id)).toBeInTheDocument();
+    expect(within(dialog).queryByText(first.id)).not.toBeInTheDocument();
+    for (const label of [
+      "Symbol",
+      "Anomaly type",
+      "Severity",
+      "Observed value",
+      "Threshold value",
+      "Event time",
+      "Created time",
+      "UUID",
+      "Message",
+    ]) {
+      expect(within(dialog).getByText(label)).toBeInTheDocument();
+    }
+    expect(within(dialog).getByText("BTCUSDT")).toBeInTheDocument();
+    expect(within(dialog).getByText("Trade Rate Drop")).toBeInTheDocument();
+    expect(within(dialog).getByText("Critical")).toBeInTheDocument();
+    expect(within(dialog).getByText("0")).toBeInTheDocument();
+    expect(within(dialog).getByText("—")).toBeInTheDocument();
+    expect(within(dialog).getByText("Exact second anomaly context"))
+      .toBeInTheDocument();
+    expect(within(dialog).queryByText(/evidence|trading meaning|status/i))
+      .not.toBeInTheDocument();
+  });
+
+  it("supports initial focus, containment, Close, Escape, backdrop, and focus return", () => {
+    const currentSummary = summary();
+    setSummaryQuery(currentSummary);
+    setPreviews(currentSummary);
+    render(<DashboardPage />);
+    const trigger = within(screen.getByTestId("recent-anomalies-desktop"))
+      .getByRole("button", {
+        name: `Open anomaly detail ${currentSummary.recent_anomalies[0]!.id}`,
+      });
+
+    trigger.focus();
+    fireEvent.click(trigger);
+    let dialog = screen.getByRole("dialog", { name: "Anomaly Detail" });
+    const close = within(dialog).getByRole("button", { name: "Close" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.click(close);
+    expect(trigger).toHaveFocus();
+
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Anomaly Detail" }))
+      .not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    dialog = screen.getByRole("dialog", { name: "Anomaly Detail" });
+    fireEvent.mouseDown(dialog);
+    expect(dialog).toBeInTheDocument();
+    fireEvent.mouseDown(dialog.parentElement!);
+    expect(screen.queryByRole("dialog", { name: "Anomaly Detail" }))
+      .not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("opens exact detail from All Anomalies and Back restores the list and row focus", () => {
+    const anomalies = Array.from({ length: 8 }, (_, index) =>
+      dashboardAnomaly(index % 2 === 0 ? "BTCUSDT" : "ETHUSDT", index + 1),
+    );
+    const currentSummary = summary(
+      "demo",
+      [observedSymbol("BTCUSDT"), observedSymbol("ETHUSDT")],
+      anomalies,
+    );
+    setSummaryQuery(currentSummary);
+    setPreviews(currentSummary);
+    render(<DashboardPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "View all" }));
+    const allDialog = screen.getByRole("dialog", { name: "All anomalies" });
+    const selected = anomalies[3]!;
+    const row = within(allDialog).getAllByRole("button", {
+      name: new RegExp(`${selected.id}$`),
+    })[0]!;
+    row.focus();
+    fireEvent.click(row);
+
+    expect(screen.queryByRole("dialog", { name: "All anomalies" }))
+      .not.toBeInTheDocument();
+    const detail = screen.getByRole("dialog", { name: "Anomaly Detail" });
+    expect(within(detail).getByText(selected.id)).toBeInTheDocument();
+    fireEvent.click(
+      within(detail).getByRole("button", { name: "Back to all anomalies" }),
+    );
+
+    const restored = screen.getByRole("dialog", { name: "All anomalies" });
+    expect(within(restored).getAllByRole("button", {
+      name: new RegExp(`${selected.id}$`),
+    })[0]).toHaveFocus();
+  });
+
+  it.each([
+    ["demo", "live"],
+    ["live", "demo"],
+  ] as const)(
+    "does not retain stale anomaly detail across %s to %s",
+    async (fromMode, toMode) => {
+      const stale = dashboardAnomaly("BTCUSDT", 1);
+      const fromSummary = summary(
+        fromMode,
+        [observedSymbol("BTCUSDT", fromMode)],
+        [stale],
+      );
+      testState.mode = fromMode;
+      setSummaryQuery(fromSummary);
+      setPreviews(fromSummary);
+      const view = render(<DashboardPage />);
+      fireEvent.click(
+        within(screen.getByTestId("recent-anomalies-desktop")).getByRole("button", {
+          name: `Open anomaly detail ${stale.id}`,
+        }),
+      );
+      expect(screen.getByRole("dialog", { name: "Anomaly Detail" }))
+        .toBeInTheDocument();
+
+      const nextSummary = summary(
+        toMode,
+        [observedSymbol("ETHUSDT", toMode)],
+        [dashboardAnomaly("ETHUSDT", 2)],
+      );
+      testState.mode = toMode;
+      setSummaryQuery(nextSummary);
+      setPreviews(nextSummary);
+      view.rerender(<DashboardPage />);
+
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: "Anomaly Detail" }))
+          .not.toBeInTheDocument(),
+      );
+      expect(screen.queryByText(stale.id)).not.toBeInTheDocument();
+    },
+  );
+});
+
 describe("dashboard timeline ownership", () => {
   it.each([
     ["demo", "observed", true],
@@ -709,6 +876,8 @@ describe("dashboard retained source contracts", () => {
     expect(
       count("formatAnomalyTime(anomaly.event_time || anomaly.created_at)"),
     ).toBe(2);
+    expect(count("formatAnomalyTime(anomaly.event_time)")).toBe(1);
+    expect(count("formatAnomalyTime(anomaly.created_at)")).toBe(1);
   });
 
   it("derives a finite deterministic empty anchor from query metadata", () => {

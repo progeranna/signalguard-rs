@@ -1,5 +1,5 @@
 import type { KeyboardEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   useCatalogDashboardSummaryQuery,
@@ -61,10 +61,17 @@ import { isApiError, isApiValidationError } from "@/shared/api/errors";
 import { toStatusTone } from "@/shared/lib/status";
 
 type DashboardModalState =
-  | { type: "anomalies" }
+  | { type: "anomalies"; focusAnomalyId?: string }
+  | {
+      type: "anomalyDetail";
+      anomalyId: string;
+      returnContext: "anomalies" | "dashboard";
+    }
   | { type: "symbolDetail"; identity: SymbolPopupIdentity }
   | { type: "symbols" }
   | null;
+
+const EMPTY_DASHBOARD_ANOMALIES: DashboardAnomaly[] = [];
 
 export function DashboardPage() {
   const selectedUiMode = useResolvedUiMode();
@@ -154,7 +161,14 @@ function DashboardTablesGrid({
 }) {
   const [modalState, setModalState] = useState<DashboardModalState>(null);
   const symbols = summary?.symbols ?? [];
-  const anomalies = summary?.recent_anomalies ?? [];
+  const anomalies =
+    summary?.source === selectedUiMode
+      ? summary.recent_anomalies
+      : EMPTY_DASHBOARD_ANOMALIES;
+  const activeAnomaly =
+    modalState?.type === "anomalyDetail"
+      ? anomalies.find((anomaly) => anomaly.id === modalState.anomalyId) ?? null
+      : null;
   const activePopupIdentity =
     modalState?.type === "symbolDetail"
       ? modalState.identity.mode === selectedUiMode
@@ -180,6 +194,21 @@ function DashboardTablesGrid({
       };
     });
   }, [selectedUiMode]);
+
+  useEffect(() => {
+    setModalState((currentState) => {
+      if (
+        currentState?.type !== "anomalyDetail" ||
+        anomalies.some((anomaly) => anomaly.id === currentState.anomalyId)
+      ) {
+        return currentState;
+      }
+
+      return currentState.returnContext === "anomalies"
+        ? { type: "anomalies" }
+        : null;
+    });
+  }, [anomalies]);
 
   function isKnownSummarySymbol(symbol: string): boolean {
     const normalizedSymbol = normalizeSelectedSymbol(symbol);
@@ -211,6 +240,17 @@ function DashboardTablesGrid({
     setModalState({ type: "symbolDetail", identity });
   }
 
+  function openAnomalyDetail(
+    anomalyId: string,
+    returnContext: "anomalies" | "dashboard",
+  ) {
+    if (!anomalies.some((anomaly) => anomaly.id === anomalyId)) {
+      return;
+    }
+
+    setModalState({ type: "anomalyDetail", anomalyId, returnContext });
+  }
+
   return (
     <>
       <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -224,8 +264,8 @@ function DashboardTablesGrid({
         />
         <RecentAnomaliesShell
           onOpenAll={() => setModalState({ type: "anomalies" })}
-          onOpenSymbolDetail={(symbol) =>
-            openSymbolDetail(symbol, "dashboard")
+          onOpenAnomalyDetail={(anomalyId) =>
+            openAnomalyDetail(anomalyId, "dashboard")
           }
           summary={summary}
           isLoading={isLoading}
@@ -241,8 +281,26 @@ function DashboardTablesGrid({
       {modalState?.type === "anomalies" ? (
         <AllAnomaliesModal
           anomalies={anomalies}
+          initialFocusAnomalyId={modalState.focusAnomalyId}
           onClose={() => setModalState(null)}
-          onOpenSymbolDetail={(symbol) => openSymbolDetail(symbol, "anomalies")}
+          onOpenAnomalyDetail={(anomalyId) =>
+            openAnomalyDetail(anomalyId, "anomalies")
+          }
+        />
+      ) : null}
+      {modalState?.type === "anomalyDetail" && activeAnomaly ? (
+        <AnomalyDetailModal
+          anomaly={activeAnomaly}
+          onBack={
+            modalState.returnContext === "anomalies"
+              ? () =>
+                  setModalState({
+                    type: "anomalies",
+                    focusAnomalyId: activeAnomaly.id,
+                  })
+              : undefined
+          }
+          onClose={() => setModalState(null)}
         />
       ) : null}
       {activePopupIdentity ? (
@@ -259,10 +317,7 @@ function DashboardTablesGrid({
           }
           onClose={() => setModalState(null)}
           onOpenSymbolDetail={(symbol) =>
-            openSymbolDetail(
-              symbol,
-              activePopupIdentity.returnContext,
-            )
+            openSymbolDetail(symbol, activePopupIdentity.returnContext)
           }
         />
       ) : null}
@@ -397,12 +452,12 @@ function MobileSymbolMetric({ label, value }: { label: string; value: string }) 
 
 function RecentAnomaliesShell({
   onOpenAll,
-  onOpenSymbolDetail,
+  onOpenAnomalyDetail,
   summary,
   isLoading,
 }: {
   onOpenAll: () => void;
-  onOpenSymbolDetail: (symbol: string) => void;
+  onOpenAnomalyDetail: (anomalyId: string) => void;
   summary: DashboardSummary | null;
   isLoading: boolean;
 }) {
@@ -432,11 +487,11 @@ function RecentAnomaliesShell({
         <>
           <RecentAnomaliesDesktopTable
             rows={preview.rows}
-            onOpenSymbolDetail={onOpenSymbolDetail}
+            onOpenAnomalyDetail={onOpenAnomalyDetail}
           />
           <RecentAnomaliesMobileCards
             rows={preview.rows}
-            onOpenSymbolDetail={onOpenSymbolDetail}
+            onOpenAnomalyDetail={onOpenAnomalyDetail}
           />
         </>
       ) : (
@@ -448,18 +503,25 @@ function RecentAnomaliesShell({
 
 function AllAnomaliesModal({
   anomalies,
+  initialFocusAnomalyId,
   onClose,
-  onOpenSymbolDetail,
+  onOpenAnomalyDetail,
 }: {
   anomalies: DashboardAnomaly[];
+  initialFocusAnomalyId?: string;
   onClose: () => void;
-  onOpenSymbolDetail: (symbol: string) => void;
+  onOpenAnomalyDetail: (anomalyId: string) => void;
 }) {
   return (
     <DashboardTableModal
       title="All anomalies"
       subtitle="Full available anomaly list from the current dashboard summary."
       dialogId="all-anomalies-title"
+      initialFocusSelector={
+        initialFocusAnomalyId
+          ? `[data-anomaly-id="${initialFocusAnomalyId}"]`
+          : undefined
+      }
       onClose={onClose}
     >
       {anomalies.length > 0 ? (
@@ -482,7 +544,7 @@ function AllAnomaliesModal({
                   <AnomalyModalTableRow
                     key={anomaly.id}
                     anomaly={anomaly}
-                    onOpenSymbolDetail={onOpenSymbolDetail}
+                    onOpenAnomalyDetail={onOpenAnomalyDetail}
                   />
                 ))}
               </tbody>
@@ -493,7 +555,7 @@ function AllAnomaliesModal({
               <AnomalyModalCard
                 key={anomaly.id}
                 anomaly={anomaly}
-                onOpenSymbolDetail={onOpenSymbolDetail}
+                onOpenAnomalyDetail={onOpenAnomalyDetail}
               />
             ))}
           </div>
@@ -509,21 +571,21 @@ function AllAnomaliesModal({
 
 function AnomalyModalTableRow({
   anomaly,
-  onOpenSymbolDetail,
+  onOpenAnomalyDetail,
 }: {
   anomaly: DashboardAnomaly;
-  onOpenSymbolDetail: (symbol: string) => void;
+  onOpenAnomalyDetail: (anomalyId: string) => void;
 }) {
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
-  function handleOpenSymbol() {
-    onOpenSymbolDetail(anomaly.symbol);
+  function handleOpenAnomaly() {
+    onOpenAnomalyDetail(anomaly.id);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      handleOpenSymbol();
+      handleOpenAnomaly();
     }
   }
 
@@ -531,8 +593,9 @@ function AnomalyModalTableRow({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${anomaly.symbol} market detail`}
-      onClick={handleOpenSymbol}
+      aria-label={`Open ${anomaly.symbol} ${formatAnomalyType(anomaly.anomaly_type)} anomaly detail ${anomaly.id}`}
+      data-anomaly-id={anomaly.id}
+      onClick={handleOpenAnomaly}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
     >
@@ -565,19 +628,20 @@ function AnomalyModalTableRow({
 
 function AnomalyModalCard({
   anomaly,
-  onOpenSymbolDetail,
+  onOpenAnomalyDetail,
 }: {
   anomaly: DashboardAnomaly;
-  onOpenSymbolDetail: (symbol: string) => void;
+  onOpenAnomalyDetail: (anomalyId: string) => void;
 }) {
   const severityTone = toStatusTone(anomaly.severity, "neutral");
 
   return (
     <button
       type="button"
-      onClick={() => onOpenSymbolDetail(anomaly.symbol)}
+      onClick={() => onOpenAnomalyDetail(anomaly.id)}
+      data-anomaly-id={anomaly.id}
       className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-      aria-label={`Open ${anomaly.symbol} market detail`}
+      aria-label={`Open ${anomaly.symbol} ${formatAnomalyType(anomaly.anomaly_type)} anomaly detail ${anomaly.id}`}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -624,6 +688,105 @@ function AnomalyModalCard({
         {anomaly.message || "—"}
       </p>
     </button>
+  );
+}
+
+function AnomalyDetailModal({
+  anomaly,
+  onBack,
+  onClose,
+}: {
+  anomaly: DashboardAnomaly;
+  onBack?: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <DashboardTableModal
+      title="Anomaly Detail"
+      subtitle={`${anomaly.symbol} · ${formatAnomalyType(anomaly.anomaly_type)}`}
+      dialogId="anomaly-detail-title"
+      onClose={onClose}
+      secondaryAction={
+        onBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+          >
+            Back to all anomalies
+          </button>
+        ) : null
+      }
+    >
+      <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <AnomalyDetailField label="Symbol" value={anomaly.symbol} />
+        <AnomalyDetailField
+          label="Anomaly type"
+          value={formatAnomalyType(anomaly.anomaly_type)}
+        />
+        <div className="rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3">
+          <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Severity
+          </dt>
+          <dd className="mt-2">
+            <SeverityBadge severity={anomaly.severity} />
+          </dd>
+        </div>
+        <AnomalyDetailField
+          label="Observed value"
+          value={formatAnomalyValue(
+            anomaly.anomaly_type,
+            anomaly.observed_value,
+            "observed",
+          )}
+        />
+        <AnomalyDetailField
+          label="Threshold value"
+          value={formatAnomalyValue(
+            anomaly.anomaly_type,
+            anomaly.threshold_value,
+            "threshold",
+          )}
+        />
+        <AnomalyDetailField
+          label="Event time"
+          value={formatAnomalyTime(anomaly.event_time)}
+        />
+        <AnomalyDetailField
+          label="Created time"
+          value={formatAnomalyTime(anomaly.created_at)}
+        />
+        <AnomalyDetailField label="UUID" value={anomaly.id} />
+        <AnomalyDetailField
+          label="Message"
+          value={anomaly.message || "—"}
+          className="sm:col-span-2 xl:col-span-3"
+        />
+      </dl>
+    </DashboardTableModal>
+  );
+}
+
+function AnomalyDetailField({
+  className = "",
+  label,
+  value,
+}: {
+  className?: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div
+      className={`rounded-xl border border-white/[0.08] bg-slate-950/35 px-3 py-3 ${className}`}
+    >
+      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        {label}
+      </dt>
+      <dd className="mt-1 break-words text-sm font-bold text-slate-100">
+        {value}
+      </dd>
+    </div>
   );
 }
 
@@ -870,8 +1033,8 @@ function SymbolPopupSuccess({
   onOpenSymbolDetail,
   viewModel,
 }: {
-  viewModel: MarketDetailViewModel;
   onOpenSymbolDetail: (symbol: string) => void;
+  viewModel: MarketDetailViewModel;
 }) {
   const observed = viewModel.availability === "observed";
 
@@ -903,6 +1066,7 @@ function SymbolPopupSuccess({
 function DashboardTableModal({
   children,
   dialogId,
+  initialFocusSelector,
   onClose,
   secondaryAction,
   subtitle,
@@ -910,28 +1074,79 @@ function DashboardTableModal({
 }: {
   children: React.ReactNode;
   dialogId: string;
+  initialFocusSelector?: string;
   onClose: () => void;
   secondaryAction?: React.ReactNode;
   subtitle?: string;
   title: string;
 }) {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const focusableSelector = [
+      "button:not([disabled])",
+      "[href]",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(",");
 
     function handleKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
-        onClose();
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+
+      if (event.key !== "Tab" || !dialogRef.current) {
+        return;
+      }
+
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(focusableSelector),
+      ).filter((element) => element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+
+      if (!first || !last) {
+        event.preventDefault();
+        return;
+      }
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     }
 
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", handleKeyDown);
+    const requestedInitialFocus = initialFocusSelector
+      ? dialogRef.current?.querySelector<HTMLElement>(initialFocusSelector)
+      : null;
+    (requestedInitialFocus ?? closeButtonRef.current)?.focus();
 
     return () => {
       document.body.style.overflow = previousBodyOverflow;
       document.removeEventListener("keydown", handleKeyDown);
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus();
+      }
     };
-  }, [onClose]);
+  }, [initialFocusSelector]);
 
   return (
     <div
@@ -940,6 +1155,7 @@ function DashboardTableModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm"
     >
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={dialogId}
@@ -960,6 +1176,7 @@ function DashboardTableModal({
           <div className="flex flex-wrap items-center gap-2 self-start">
             {secondaryAction}
             <button
+              ref={closeButtonRef}
               type="button"
               onClick={onClose}
               className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"

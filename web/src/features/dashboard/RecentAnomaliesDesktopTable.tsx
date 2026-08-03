@@ -10,12 +10,12 @@ import {
 
 export type RecentAnomaliesDesktopTableProps = Readonly<{
   rows: readonly RecentAnomaliesPreviewRow[];
-  onOpenSymbolDetail: (symbol: string) => void;
+  onOpenAnomalyDetail: (anomalyId: string) => void;
 }>;
 
 export function RecentAnomaliesDesktopTable({
   rows,
-  onOpenSymbolDetail,
+  onOpenAnomalyDetail,
 }: RecentAnomaliesDesktopTableProps) {
   return (
     <div className="hidden w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain border-y border-white/10 lg:block">
@@ -46,7 +46,7 @@ export function RecentAnomaliesDesktopTable({
             <AnomalyTableRow
               key={row.id}
               row={row}
-              onOpenSymbolDetail={onOpenSymbolDetail}
+              onOpenAnomalyDetail={onOpenAnomalyDetail}
             />
           ))}
         </tbody>
@@ -57,19 +57,19 @@ export function RecentAnomaliesDesktopTable({
 
 function AnomalyTableRow({
   row,
-  onOpenSymbolDetail,
+  onOpenAnomalyDetail,
 }: Readonly<{
   row: RecentAnomaliesPreviewRow;
-  onOpenSymbolDetail: (symbol: string) => void;
+  onOpenAnomalyDetail: (anomalyId: string) => void;
 }>) {
-  function handleOpenSymbol() {
-    onOpenSymbolDetail(row.symbol);
+  function handleOpenAnomaly() {
+    onOpenAnomalyDetail(row.id);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      handleOpenSymbol();
+      handleOpenAnomaly();
     }
   }
 
@@ -77,8 +77,8 @@ function AnomalyTableRow({
     <tr
       tabIndex={0}
       role="button"
-      aria-label={`Open ${row.symbol} market detail`}
-      onClick={handleOpenSymbol}
+      aria-label={`Open ${row.symbol} ${row.detectorLabel} anomaly detail ${row.id}`}
+      onClick={handleOpenAnomaly}
       onKeyDown={handleKeyDown}
       className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 last:border-0"
     >

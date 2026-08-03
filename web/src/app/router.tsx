@@ -1,8 +1,6 @@
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 
-import { CanonicalSymbolRoute } from "@/app/CanonicalSymbolRoute";
 import { ConsoleLayout } from "@/app/ConsoleLayout";
-import { AnomaliesPage } from "@/pages/AnomaliesPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 
 export const appRoutes = [
@@ -20,11 +18,11 @@ export const appRoutes = [
       },
       {
         path: "symbols/:symbol",
-        element: <CanonicalSymbolRoute />,
+        element: <Navigate to="/dashboard" replace />,
       },
       {
         path: "anomalies",
-        element: <AnomaliesPage />,
+        element: <Navigate to="/dashboard" replace />,
       },
     ],
   },

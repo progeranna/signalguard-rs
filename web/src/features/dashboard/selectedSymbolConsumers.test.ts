@@ -18,7 +18,6 @@ function readSource(repositoryPath: string): string {
 
 const appShellSource = readSource("src/app/AppShell.tsx");
 const dashboardSource = readSource("src/pages/DashboardPage.tsx");
-const symbolDetailSource = readSource("src/pages/SymbolDetailPage.tsx");
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -102,7 +101,7 @@ describe("mode-scoped selected-symbol consumers", () => {
   });
 
   it("does not reintroduce the legacy one-argument storage API", () => {
-    for (const source of [appShellSource, dashboardSource, symbolDetailSource]) {
+    for (const source of [appShellSource, dashboardSource]) {
       expect(source).not.toContain("SELECTED_SYMBOL_STORAGE_KEY");
       expect(source).not.toMatch(/\bstoreSelectedSymbol\s*\(\s*[^,\n()]+\s*\)/);
     }
