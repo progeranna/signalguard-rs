@@ -10,12 +10,12 @@ import {
 
 export type RecentAnomaliesMobileCardsProps = Readonly<{
   rows: readonly RecentAnomaliesPreviewRow[];
-  onOpenSymbolDetail: (symbol: string) => void;
+  onOpenAnomalyDetail: (anomalyId: string) => void;
 }>;
 
 export function RecentAnomaliesMobileCards({
   rows,
-  onOpenSymbolDetail,
+  onOpenAnomalyDetail,
 }: RecentAnomaliesMobileCardsProps) {
   return (
     <div className="divide-y divide-white/10 border-y border-white/10 lg:hidden">
@@ -23,9 +23,9 @@ export function RecentAnomaliesMobileCards({
         <button
           key={row.id}
           type="button"
-          onClick={() => onOpenSymbolDetail(row.symbol)}
+          onClick={() => onOpenAnomalyDetail(row.id)}
           className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
-          aria-label={`Open ${row.symbol} market detail`}
+          aria-label={`Open ${row.symbol} ${row.detectorLabel} anomaly detail ${row.id}`}
         >
           <div className="flex items-start justify-between gap-4">
             <div>

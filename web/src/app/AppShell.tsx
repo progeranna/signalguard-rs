@@ -1,6 +1,6 @@
 import type { PropsWithChildren, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { GlobalMarketTicker } from "@/app/GlobalMarketTicker";
 import { useCatalogDashboardSummaryQuery } from "@/features/dashboard/api";
@@ -18,8 +18,6 @@ const headerControlClassName =
   "flex min-w-[11rem] items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#08131d] px-3 py-2 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40";
 
 export function AppShell({ children }: PropsWithChildren) {
-  const location = useLocation();
-  const navigate = useNavigate();
   const symbolMenuRef = useRef<HTMLDivElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const [activeMenu, setActiveMenu] = useState<HeaderMenu>(null);
@@ -27,23 +25,11 @@ export function AppShell({ children }: PropsWithChildren) {
   const dashboardSummaryQuery = useCatalogDashboardSummaryQuery(selectedUiMode);
   const summary = dashboardSummaryQuery.data ?? null;
   const availableSymbols = summary?.symbols.map((symbol) => symbol.symbol) ?? [];
-  const routeSymbolCandidate = location.pathname.startsWith("/symbols/")
-    ? location.pathname.slice("/symbols/".length)
-    : null;
-  const normalizedRouteSymbolCandidate = normalizeSelectedSymbol(routeSymbolCandidate);
   const { selectedSymbol, setSelectedSymbol } = useSelectedSymbol(
     selectedUiMode,
     availableSymbols,
   );
-  const isKnownRouteSymbol =
-    normalizedRouteSymbolCandidate !== null &&
-    availableSymbols.some(
-      (symbol) => normalizeSelectedSymbol(symbol) === normalizedRouteSymbolCandidate,
-    );
-  const displayedHeaderSymbol =
-    routeSymbolCandidate && !isKnownRouteSymbol
-      ? "Unknown market"
-      : selectedSymbol ?? "No market";
+  const displayedHeaderSymbol = selectedSymbol ?? "No market";
   const headerStatus = buildHeaderDataStatus(summary, {
     isError: dashboardSummaryQuery.isError,
     isLoading: dashboardSummaryQuery.isLoading,
@@ -56,7 +42,7 @@ export function AppShell({ children }: PropsWithChildren) {
 
   useEffect(() => {
     setActiveMenu(null);
-  }, [location.pathname, selectedSymbol]);
+  }, [selectedSymbol]);
 
   useEffect(() => {
     if (!activeMenu) {
@@ -91,10 +77,6 @@ export function AppShell({ children }: PropsWithChildren) {
   function handleSymbolSelect(nextSymbol: string) {
     setSelectedSymbol(nextSymbol);
     setActiveMenu(null);
-
-    if (location.pathname.startsWith("/symbols/")) {
-      navigate(`/symbols/${nextSymbol}`);
-    }
   }
 
   return (

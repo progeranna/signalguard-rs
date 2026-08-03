@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MarketDetailViewModel } from "@/features/dashboard/marketViewModel";
 import {
+  formatAnomalyTime,
+  formatAnomalyValue,
+} from "@/features/dashboard/recentAnomaliesPresentation";
+import {
   getStoredSelectedSymbol,
   storeSelectedSymbol,
 } from "@/features/dashboard/selectedSymbol";
@@ -294,9 +298,20 @@ function summaryForMode(mode: UiMode): DashboardSummary {
   const recentAnomalies = [
     popupAnomaly("BTCUSDT"),
     popupAnomaly("ETHUSDT"),
-    ...Array.from({ length: 6 }, (_, index) => ({
-      ...popupAnomaly(index % 2 === 0 ? "BTCUSDT" : "ETHUSDT"),
-      id: `00000000-0000-4000-8000-0000000000${index + 10}`,
+    {
+      ...popupAnomaly("BTCUSDT"),
+      anomaly_type: "event_lag_spike",
+      created_at: "2026-07-20T10:02:03.000Z",
+      event_time: "2026-07-20T10:01:02.000Z",
+      id: "00000000-0000-4000-8000-000000000010",
+      message: "Exact duplicate-symbol anomaly context",
+      observed_value: 0,
+      severity: "critical" as const,
+      threshold_value: null,
+    },
+    ...Array.from({ length: 5 }, (_, index) => ({
+      ...popupAnomaly(index % 2 === 0 ? "ETHUSDT" : "BTCUSDT"),
+      id: `00000000-0000-4000-8000-0000000000${index + 11}`,
     })),
   ];
 
@@ -368,21 +383,66 @@ describe("dashboard popup identity and return context", () => {
     expect(screen.getByRole("dialog", { name: "All markets" })).toBeInTheDocument();
   });
 
-  it("returns from a BTC popup to All anomalies", () => {
+  it("returns from exact anomaly detail to All anomalies", () => {
     render(<DashboardPage />);
+    const viewAll = screen.getAllByRole("button", { name: "View all" })[1]!;
+    viewAll.focus();
     const allAnomalies = openAllAnomalies();
+    const selectedId = "00000000-0000-4000-8000-000000000010";
+    const otherBtcId = "00000000-0000-4000-8000-000000000001";
+    const identitiesBeforeActivation = testState.identities.length;
+    const selectedRows = within(allAnomalies).getAllByRole("button", {
+      name: new RegExp(`${selectedId}$`),
+    });
+    const selectedRow = selectedRows[0]!;
+    const selectedLabel = selectedRow.getAttribute("aria-label") ?? "";
+
+    expect(selectedLabel).toContain("Open BTCUSDT Event Lag Spike anomaly detail");
+    expect(selectedLabel).not.toContain("market detail");
+    expect(
+      within(allAnomalies).getAllByRole("button", {
+        name: new RegExp(`${otherBtcId}$`),
+      }),
+    ).not.toHaveLength(0);
+    selectedRow.focus();
+    fireEvent.click(selectedRow);
+
+    expect(testState.identities).toHaveLength(identitiesBeforeActivation);
+    expect(screen.queryByRole("dialog", { name: /market details/i }))
+      .not.toBeInTheDocument();
+    const detail = screen.getByRole("dialog", { name: "Anomaly Detail" });
+    expect(within(detail).getByText(selectedId)).toBeInTheDocument();
+    expect(within(detail).queryByText(otherBtcId)).not.toBeInTheDocument();
+    expect(within(detail).getByText("BTCUSDT")).toBeInTheDocument();
+    expect(within(detail).getByText("Event Lag Spike")).toBeInTheDocument();
+    expect(within(detail).getByText("Critical")).toBeInTheDocument();
+    expect(
+      within(detail).getByText("Exact duplicate-symbol anomaly context"),
+    ).toBeInTheDocument();
+    expect(
+      within(detail).getByText(
+        formatAnomalyValue("event_lag_spike", 0, "observed"),
+      ),
+    ).toBeInTheDocument();
+    expect(within(detail).getByText("—")).toBeInTheDocument();
+    expect(
+      within(detail).getByText(formatAnomalyTime("2026-07-20T10:01:02.000Z")),
+    ).toBeInTheDocument();
+    expect(
+      within(detail).getByText(formatAnomalyTime("2026-07-20T10:02:03.000Z")),
+    ).toBeInTheDocument();
 
     fireEvent.click(
-      within(allAnomalies).getAllByLabelText("Open BTCUSDT market detail")[0]!,
+      within(detail).getByRole("button", { name: "Back to all anomalies" }),
     );
-
-    expect(latestIdentity()).toEqual({
-      mode: "demo",
-      returnContext: "anomalies",
-      symbol: "BTCUSDT",
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Back to all anomalies" }));
-    expect(screen.getByRole("dialog", { name: "All anomalies" })).toBeInTheDocument();
+    const restored = screen.getByRole("dialog", { name: "All anomalies" });
+    expect(
+      within(restored).getAllByRole("button", {
+        name: new RegExp(`${selectedId}$`),
+      })[0],
+    ).toHaveFocus();
+    fireEvent.click(within(restored).getByRole("button", { name: "Close" }));
+    expect(viewAll).toHaveFocus();
   });
 });
 

@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import type { RouteObject } from "react-router-dom";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { createMemoryRouter, Navigate, RouterProvider } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/ConsoleLayout", async () => {
@@ -8,42 +8,22 @@ vi.mock("@/app/ConsoleLayout", async () => {
     "react-router-dom",
   );
 
-  return {
-    ConsoleLayout: () => <Outlet />,
-  };
+  return { ConsoleLayout: () => <Outlet /> };
 });
 
 vi.mock("@/pages/DashboardPage", () => ({
   DashboardPage: () => <main aria-label="Dashboard page boundary" />,
 }));
 
-vi.mock("@/pages/SymbolDetailPage", () => ({
-  SymbolDetailPage: () => <main aria-label="Symbol detail page boundary" />,
-}));
-
-vi.mock("@/pages/AnomaliesPage", () => ({
-  AnomaliesPage: () => <main aria-label="Anomalies page boundary" />,
-}));
-
-import { canonicalSymbolRoutePath } from "@/app/symbolRoutePath";
 import { appRoutes } from "@/app/router";
 
-const REQUIRED_ROUTE_PATHS = [
-  "/",
-  "/anomalies",
-  "/dashboard",
-  "/symbols/:symbol",
-] as const;
-
 function renderPath(path: string) {
-  const router = createMemoryRouter(appRoutes, {
-    initialEntries: [path],
-  });
-
-  return render(<RouterProvider router={router} />);
+  const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
+  render(<RouterProvider router={router} />);
+  return router;
 }
 
-function registeredPagePaths(routes: RouteObject[]): string[] {
+function registeredPaths(routes: RouteObject[]): string[] {
   const rootRoute = routes.find((route) => route.path === "/");
 
   return (rootRoute?.children ?? [])
@@ -57,60 +37,58 @@ function registeredPagePaths(routes: RouteObject[]): string[] {
     .sort();
 }
 
-describe("dashboard route inventory", () => {
-  it("keeps every required page route registered", () => {
-    expect(registeredPagePaths(appRoutes)).toEqual([...REQUIRED_ROUTE_PATHS].sort());
-  });
+describe("modal-only route inventory", () => {
+  it("keeps Dashboard as the only visual page while retaining compatibility paths", () => {
+    expect(registeredPaths(appRoutes)).toEqual([
+      "/",
+      "/anomalies",
+      "/dashboard",
+      "/symbols/:symbol",
+    ]);
 
-  it.each(["/", "/dashboard"])(
-    "renders the dashboard page boundary for %s",
-    (path) => {
-      renderPath(path);
-
-      expect(
-        screen.getByRole("main", { name: "Dashboard page boundary" }),
-      ).toBeInTheDocument();
-    },
-  );
-
-  it("renders the symbol detail page boundary for a concrete symbol", () => {
-    renderPath("/symbols/BTCUSDT");
-
-    expect(
-      screen.getByRole("main", { name: "Symbol detail page boundary" }),
-    ).toBeInTheDocument();
-  });
-
-  it("renders the anomalies page boundary", () => {
-    renderPath("/anomalies");
-
-    expect(
-      screen.getByRole("main", { name: "Anomalies page boundary" }),
-    ).toBeInTheDocument();
-  });
-
-  it("documents the current gap: no explicit unknown-route boundary is registered", () => {
-    const rootRoute = appRoutes.find((route) => route.path === "/");
-    const hasExplicitUnknownRoute = rootRoute?.children?.some(
-      (route) => route.path === "*",
+    const children = appRoutes[0]?.children ?? [];
+    const visualRoutes = children.filter(
+      (route) => route.index || route.path === "dashboard",
+    );
+    const compatibilityRoutes = children.filter(
+      (route) => route.path === "symbols/:symbol" || route.path === "anomalies",
     );
 
-    expect(hasExplicitUnknownRoute).toBe(false);
+    expect(visualRoutes).toHaveLength(2);
+    expect(compatibilityRoutes).toHaveLength(2);
+    for (const route of compatibilityRoutes) {
+      expect(route.element?.type).toBe(Navigate);
+      expect(route.element?.props).toMatchObject({ replace: true, to: "/dashboard" });
+    }
   });
-});
 
-describe("symbol route identity", () => {
+  it.each(["/", "/dashboard"])("renders Dashboard for %s", (path) => {
+    renderPath(path);
+    expect(
+      screen.getByRole("main", { name: "Dashboard page boundary" }),
+    ).toBeInTheDocument();
+  });
+
   it.each([
-    ["btcusdt", "/symbols/BTCUSDT"],
-    [" eThUsDt ", "/symbols/ETHUSDT"],
-  ] as const)("redirects %s to %s", (value, expected) => {
-    expect(canonicalSymbolRoutePath(value)).toBe(expected);
+    "/symbols/BTCUSDT",
+    "/symbols/ETHUSDT",
+    "/symbols/bTcUsDt",
+    "/anomalies",
+  ])("replacement-redirects %s directly to Dashboard", async (path) => {
+    const router = renderPath(path);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/dashboard"));
+    expect(router.state.historyAction).toBe("REPLACE");
+    expect(
+      screen.getByRole("main", { name: "Dashboard page boundary" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/placeholder page/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sample symbol/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
-  it.each(["BTCUSDT", "", "BTC-USDT", undefined] as const)(
-    "does not redirect canonical or invalid value %s",
-    (value) => {
-      expect(canonicalSymbolRoutePath(value)).toBeNull();
-    },
-  );
+  it("does not add an unknown-route visual boundary", () => {
+    const rootRoute = appRoutes.find((route) => route.path === "/");
+    expect(rootRoute?.children?.some((route) => route.path === "*")).toBe(false);
+  });
 });
