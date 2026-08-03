@@ -914,12 +914,16 @@ describe("dashboard retained source contracts", () => {
   });
 
   it("wires the accepted shared sections into popup success presentation", () => {
+    const popupSuccessSource = source.slice(
+      source.indexOf("function SymbolPopupSuccess"),
+      source.indexOf("function DashboardTableModal"),
+    );
+
     expect(source).toContain(
       `<div className="space-y-6" data-testid="symbol-popup-success">`,
     );
     expect(source).toContain(
       `<SymbolDetailHeader
-        variant="popup"
         symbol={viewModel.identity.symbol}
         statusTone={viewModel.status.tone}
         statusText={viewModel.status.text}
@@ -927,19 +931,18 @@ describe("dashboard retained source contracts", () => {
       />`,
     );
     expect(source).toContain(
-      `<SymbolDetailMetrics
-        surface="popup"
-        viewModel={viewModel}
-      />`,
+      `<SymbolDetailMetrics viewModel={viewModel} />`,
     );
     expect(source).toContain(
       `<SymbolDetailAnomalies
-          variant="popup"
           symbol={viewModel.identity.symbol}
           anomalies={viewModel.anomalies}
-          onOpenSymbolDetail={onOpenSymbolDetail}
+          onOpenAnomalyDetail={onOpenAnomalyDetail}
         />`,
     );
+    expect(popupSuccessSource).not.toContain('variant="popup"');
+    expect(popupSuccessSource).not.toContain('surface="popup"');
+    expect(popupSuccessSource).not.toContain("onOpenSymbolDetail");
     expect(source).not.toContain("function SymbolDetailMetric");
     expect(source).not.toContain("function SymbolDetailAnomalyRow");
     expect(source).not.toContain("function SymbolDetailAnomalyCard");

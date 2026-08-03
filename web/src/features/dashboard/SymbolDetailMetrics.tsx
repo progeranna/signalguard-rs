@@ -8,7 +8,6 @@ const AVAILABILITY_MESSAGE: Record<MarketDetailViewModel["availability"], string
 };
 
 export type SymbolDetailMetricsProps = Readonly<{
-  surface: "popup";
   viewModel: MarketDetailViewModel;
 }>;
 

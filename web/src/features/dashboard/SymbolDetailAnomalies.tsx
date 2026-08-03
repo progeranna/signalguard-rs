@@ -12,10 +12,9 @@ const POPUP_SEVERITY_CLASS: Record<MarketAnomalyViewModel["severity"]["key"], st
 };
 
 export type SymbolDetailAnomaliesProps = Readonly<{
-  variant: "popup";
   symbol: MarketDetailViewModel["identity"]["symbol"];
   anomalies: MarketDetailViewModel["anomalies"];
-  onOpenSymbolDetail: (symbol: MarketAnomalyViewModel["symbol"]) => void;
+  onOpenAnomalyDetail: (anomalyId: MarketAnomalyViewModel["id"]) => void;
 }>;
 
 export function SymbolDetailAnomalies(props: SymbolDetailAnomaliesProps) {
@@ -37,7 +36,7 @@ export function SymbolDetailAnomalies(props: SymbolDetailAnomaliesProps) {
       {anomalies.length > 0 ? (
         <AnomalyPresentation
           anomalies={anomalies}
-          onOpenSymbolDetail={props.onOpenSymbolDetail}
+          onOpenAnomalyDetail={props.onOpenAnomalyDetail}
         />
       ) : (
         <div className="border-y border-white/10 px-2 py-5 text-sm leading-6 text-slate-400">
@@ -50,17 +49,20 @@ export function SymbolDetailAnomalies(props: SymbolDetailAnomaliesProps) {
 
 function AnomalyPresentation({
   anomalies,
-  onOpenSymbolDetail,
-}: Pick<SymbolDetailAnomaliesProps, "anomalies" | "onOpenSymbolDetail">) {
+  onOpenAnomalyDetail,
+}: Pick<SymbolDetailAnomaliesProps, "anomalies" | "onOpenAnomalyDetail">) {
   return (
     <>
-      <AnomalyDesktopTable anomalies={anomalies} />
+      <AnomalyDesktopTable
+        anomalies={anomalies}
+        onOpenAnomalyDetail={onOpenAnomalyDetail}
+      />
       <div className={ANOMALY_MOBILE_DIVIDER_CLASS}>
         {anomalies.map((anomaly) => (
           <AnomalyMobileItem
             key={anomaly.id}
             anomaly={anomaly}
-            onOpenSymbolDetail={onOpenSymbolDetail}
+            onOpenAnomalyDetail={onOpenAnomalyDetail}
           />
         ))}
       </div>
@@ -70,8 +72,10 @@ function AnomalyPresentation({
 
 function AnomalyDesktopTable({
   anomalies,
+  onOpenAnomalyDetail,
 }: Readonly<{
   anomalies: MarketDetailViewModel["anomalies"];
+  onOpenAnomalyDetail: SymbolDetailAnomaliesProps["onOpenAnomalyDetail"];
 }>) {
   return (
     <div className="hidden overflow-hidden border-y border-white/10 lg:block">
@@ -88,7 +92,11 @@ function AnomalyDesktopTable({
         </thead>
         <tbody>
           {anomalies.map((anomaly) => (
-            <AnomalyDesktopRow key={anomaly.id} anomaly={anomaly} />
+            <AnomalyDesktopRow
+              key={anomaly.id}
+              anomaly={anomaly}
+              onOpenAnomalyDetail={onOpenAnomalyDetail}
+            />
           ))}
         </tbody>
       </table>
@@ -98,11 +106,32 @@ function AnomalyDesktopTable({
 
 function AnomalyDesktopRow({
   anomaly,
+  onOpenAnomalyDetail,
 }: Readonly<{
   anomaly: MarketAnomalyViewModel;
+  onOpenAnomalyDetail: SymbolDetailAnomaliesProps["onOpenAnomalyDetail"];
 }>) {
+  function handleOpenAnomaly() {
+    onOpenAnomalyDetail(anomaly.id);
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLTableRowElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleOpenAnomaly();
+    }
+  }
+
   return (
-    <tr className="border-b border-white/[0.06] transition hover:bg-white/[0.025] last:border-0">
+    <tr
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${anomaly.symbol} ${anomaly.type} anomaly detail ${anomaly.id}`}
+      data-anomaly-id={anomaly.id}
+      onClick={handleOpenAnomaly}
+      onKeyDown={handleKeyDown}
+      className="cursor-pointer border-b border-white/[0.06] transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/40 last:border-0"
+    >
       <td className="px-2 py-3 pr-4 text-sm font-bold text-slate-100">
         {anomaly.type}
       </td>
@@ -130,16 +159,17 @@ function AnomalyDesktopRow({
 
 function AnomalyMobileItem({
   anomaly,
-  onOpenSymbolDetail,
+  onOpenAnomalyDetail,
 }: Readonly<{
   anomaly: MarketAnomalyViewModel;
-  onOpenSymbolDetail: (symbol: MarketAnomalyViewModel["symbol"]) => void;
+  onOpenAnomalyDetail: SymbolDetailAnomaliesProps["onOpenAnomalyDetail"];
 }>) {
   return (
     <button
       type="button"
-      onClick={() => onOpenSymbolDetail(anomaly.symbol)}
-      aria-label={`Open ${anomaly.symbol} market detail`}
+      onClick={() => onOpenAnomalyDetail(anomaly.id)}
+      aria-label={`Open ${anomaly.symbol} ${anomaly.type} anomaly detail ${anomaly.id}`}
+      data-anomaly-id={anomaly.id}
       className="block w-full py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
     >
       <div className="flex items-start justify-between gap-4">

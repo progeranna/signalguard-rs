@@ -1,10 +1,7 @@
 import { parseSymbolId, type SymbolId } from "./symbolId";
 import type { UiMode } from "./types";
 
-export type SymbolPopupReturnContext =
-  | "dashboard"
-  | "symbols"
-  | "anomalies";
+export type SymbolPopupReturnContext = "dashboard" | "symbols";
 
 export type SymbolPopupIdentity = Readonly<{
   mode: UiMode;

@@ -488,7 +488,7 @@ describe("popup compatibility", () => {
     const identity = createSymbolPopupIdentity(
       "live",
       "BTCUSDT",
-      "anomalies",
+      "symbols",
     );
 
     if (!identity) {
@@ -501,8 +501,10 @@ describe("popup compatibility", () => {
 
     await waitFor(() => expect(requests).toHaveLength(3));
     expect(result.current.identity).toBe(identity);
+    expect(result.current.identity.returnContext).toBe("symbols");
     expect(requests.every((request) => !request.url.includes("popup"))).toBe(true);
-    expect(requests.every((request) => !request.url.includes("anomalies%3A"))).toBe(true);
+    expect(requests.every((request) => !request.url.includes("symbols%3A"))).toBe(true);
+    expect(requests.every((request) => !request.url.includes("returnContext"))).toBe(true);
   });
 
   it("preserves popup resolver return context", () => {
