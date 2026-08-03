@@ -16,8 +16,8 @@ function anomaly(id: string, severity: MarketAnomalyViewModel["severity"]["key"]
     symbol,
     type: `${text} anomaly ${id}`,
     severity: { key: severity, text, tone: severity },
-    observed: { route: "unused", popup: `${id} observed` },
-    threshold: { route: "unused", popup: `${id} threshold` },
+    observed: `${id} observed`,
+    threshold: `${id} threshold`,
     detected: `${id} detected`,
     detectedAt: "unused",
     context: `${id} context`,
@@ -54,8 +54,8 @@ describe("SymbolDetailAnomalies popup-only presentation", () => {
 
     for (const item of fixtures) {
       const row = within(screen.getByRole("table")).getByText(item.type).closest("tr");
-      expect(row).toHaveTextContent(item.observed.popup);
-      expect(row).toHaveTextContent(item.threshold.popup);
+      expect(row).toHaveTextContent(item.observed);
+      expect(row).toHaveTextContent(item.threshold);
       expect(row).toHaveTextContent(item.detected);
       expect(row).toHaveTextContent(item.context);
     }

@@ -142,10 +142,10 @@ function AnomalyDesktopRow({
         />
       </td>
       <td className={`${ANOMALY_TABLE_CELL_PADDING_CLASS} text-sm font-bold ${anomaly.valueClassName}`}>
-        {anomaly.observed.popup}
+        {anomaly.observed}
       </td>
       <td className={ANOMALY_TABLE_CELL_CLASS}>
-        {anomaly.threshold.popup}
+        {anomaly.threshold}
       </td>
       <td className={ANOMALY_TABLE_CELL_CLASS}>
         {anomaly.detected}
@@ -185,8 +185,8 @@ function AnomalyMobileItem({
         />
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <PopupMobileMetric label="Observed" value={anomaly.observed.popup} />
-        <PopupMobileMetric label="Threshold" value={anomaly.threshold.popup} />
+        <PopupMobileMetric label="Observed" value={anomaly.observed} />
+        <PopupMobileMetric label="Threshold" value={anomaly.threshold} />
         <PopupMobileMetric label="Detected" value={anomaly.detected} />
         <PopupMobileMetric
           label="Severity"
