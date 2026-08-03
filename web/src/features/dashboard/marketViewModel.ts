@@ -32,15 +32,10 @@ export type MarketAnomalyViewModel = Readonly<{
   symbol: SymbolId;
   type: string;
   severity: Readonly<{ key: "info" | "warning" | "critical"; text: string; tone: StatusTone }>;
-  observed: MarketDisplayVariants;
-  threshold: MarketDisplayVariants;
+  observed: string;
+  threshold: string;
   detected: string;
   detectedAt: string;
   context: string;
   valueClassName: string;
-}>;
-
-export type MarketDisplayVariants = Readonly<{
-  route: string;
-  popup: string;
 }>;

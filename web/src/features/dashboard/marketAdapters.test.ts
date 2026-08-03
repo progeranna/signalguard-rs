@@ -97,7 +97,7 @@ describe("market resource adapters", () => {
     expect(adaptMarketResourceToViewModel(resource()).anomalies).toEqual([]);
   });
 
-  it("preserves anomaly identity and route/popup display variants", () => {
+  it("preserves anomaly identity and direct display strings", () => {
     const anomaly = {
       id: "00000000-0000-0000-0000-000000000001",
       symbol,
@@ -114,33 +114,34 @@ describe("market resource adapters", () => {
       id: anomaly.id,
       symbol,
       type: "Spread Spike",
-      observed: { route: "2.5", popup: "2.500%" },
+      observed: "2.500%",
+      threshold: "1.000%",
     });
     expect(viewModel.anomalies[0].severity).toMatchObject({ text: "Warning", tone: "warning", key: "warning" });
   });
 
-  it("keeps generic route values and type-aware popup units", () => {
+  it("keeps type-aware direct display units", () => {
     const anomalies = [
       { id: "00000000-0000-0000-0000-000000000002", symbol, anomaly_type: "event_lag_spike", severity: "critical" as const, message: "", observed_value: 2500, threshold_value: 1000, event_time: "2026-07-26T10:00:00.000Z", created_at: "2026-07-26T10:00:00.000Z" },
       { id: "00000000-0000-0000-0000-000000000003", symbol, anomaly_type: "trade_burst", severity: "warning" as const, message: "", observed_value: 12, threshold_value: 10, event_time: "2026-07-26T10:00:00.000Z", created_at: "2026-07-26T10:00:00.000Z" },
       { id: "00000000-0000-0000-0000-000000000004", symbol, anomaly_type: "depth_sequence_gap", severity: "warning" as const, message: "", observed_value: 3, threshold_value: 2, event_time: "2026-07-26T10:00:00.000Z", created_at: "2026-07-26T10:00:00.000Z" },
     ];
     const mapped = adaptMarketResourceToViewModel(resource({ anomalies })).anomalies;
-    expect(mapped.map((anomaly) => [anomaly.observed.route, anomaly.observed.popup])).toEqual([
-      ["2,500", "2.5 s"],
-      ["12", "12 /m"],
-      ["3", "3 gap"],
+    expect(mapped.map((anomaly) => anomaly.observed)).toEqual([
+      "2.5 s",
+      "12 /m",
+      "3 gap",
     ]);
-    expect(mapped[2].threshold).toEqual({ route: "2", popup: "2 limit" });
+    expect(mapped[2].threshold).toBe("2 limit");
   });
 
-  it("keeps null anomaly values unavailable in both variants", () => {
+  it("keeps null anomaly values unavailable as direct strings", () => {
     const anomaly = {
       id: "00000000-0000-0000-0000-000000000005", symbol, anomaly_type: "spread_spike", severity: "info" as const, message: "", observed_value: null, threshold_value: null, event_time: "2026-07-26T10:00:00.000Z", created_at: "2026-07-26T10:00:00.000Z",
     };
     const mapped = adaptMarketResourceToViewModel(resource({ anomalies: [anomaly] })).anomalies[0];
-    expect(mapped.observed).toEqual({ route: "—", popup: "—" });
-    expect(mapped.threshold).toEqual({ route: "—", popup: "—" });
+    expect(mapped.observed).toBe("—");
+    expect(mapped.threshold).toBe("—");
   });
 
   it("preserves absent state and real zero depth gaps", () => {
