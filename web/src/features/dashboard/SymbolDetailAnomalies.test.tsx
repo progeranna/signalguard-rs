@@ -34,10 +34,9 @@ const fixtures = [
 function renderAnomalies(anomalies: readonly MarketAnomalyViewModel[] = fixtures) {
   return render(
     <SymbolDetailAnomalies
-      variant="popup"
       symbol={symbol}
       anomalies={anomalies}
-      onOpenSymbolDetail={() => undefined}
+      onOpenAnomalyDetail={() => undefined}
     />,
   );
 }
@@ -70,35 +69,62 @@ describe("SymbolDetailAnomalies popup-only presentation", () => {
     const second = anomaly("second-id", "info");
     const view = renderAnomalies([first, second]);
     const firstRow = within(screen.getByRole("table")).getByText(first.type).closest("tr");
-    const firstButton = screen.getAllByRole("button")[0];
+    const firstMobileButton = screen.getAllByRole("button", {
+      name: /first-id anomaly detail first-id$/,
+    })[1];
 
     view.rerender(
       <SymbolDetailAnomalies
-        variant="popup"
         symbol={symbol}
         anomalies={[second, first]}
-        onOpenSymbolDetail={() => undefined}
+        onOpenAnomalyDetail={() => undefined}
       />,
     );
     expect(within(screen.getByRole("table")).getByText(first.type).closest("tr"))
       .toBe(firstRow);
-    expect(screen.getAllByRole("button")[1]).toBe(firstButton);
+    expect(screen.getAllByRole("button", {
+      name: /first-id anomaly detail first-id$/,
+    })[1]).toBe(firstMobileButton);
   });
 
-  it("keeps the existing popup mobile market control scoped to the supplied callback", () => {
-    const onOpenSymbolDetail = vi.fn();
+  it.each([
+    ["click", (element: HTMLElement) => fireEvent.click(element)],
+    ["Enter", (element: HTMLElement) => fireEvent.keyDown(element, { key: "Enter" })],
+    ["Space", (element: HTMLElement) => fireEvent.keyDown(element, { key: " " })],
+  ] as const)("opens the exact desktop anomaly UUID with %s", (_input, activate) => {
+    const onOpenAnomalyDetail = vi.fn();
     render(
       <SymbolDetailAnomalies
-        variant="popup"
         symbol={symbol}
         anomalies={[fixtures[0]]}
-        onOpenSymbolDetail={onOpenSymbolDetail}
+        onOpenAnomalyDetail={onOpenAnomalyDetail}
       />,
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Open BTCUSDT market detail" }),
+    const [desktopRow] = screen.getAllByRole("button", {
+      name: /Open BTCUSDT Critical anomaly critical-id anomaly detail critical-id/,
+    });
+    activate(desktopRow!);
+    expect(onOpenAnomalyDetail).toHaveBeenCalledWith("critical-id");
+  });
+
+  it("opens the exact mobile anomaly UUID and never exposes market-detail activation", () => {
+    const onOpenAnomalyDetail = vi.fn();
+    render(
+      <SymbolDetailAnomalies
+        symbol={symbol}
+        anomalies={[fixtures[0]]}
+        onOpenAnomalyDetail={onOpenAnomalyDetail}
+      />,
     );
-    expect(onOpenSymbolDetail).toHaveBeenCalledWith(symbol);
+    const controls = screen.getAllByRole("button", {
+      name: /Open BTCUSDT Critical anomaly critical-id anomaly detail critical-id/,
+    });
+    expect(controls).toHaveLength(2);
+    expect(controls[0]).toHaveAttribute("data-anomaly-id", "critical-id");
+    expect(controls[1]).toHaveAttribute("data-anomaly-id", "critical-id");
+    fireEvent.click(controls[1]!);
+    expect(onOpenAnomalyDetail).toHaveBeenCalledWith("critical-id");
+    expect(screen.queryByLabelText(/market detail/i)).not.toBeInTheDocument();
   });
 
   it("renders the accepted empty state", () => {

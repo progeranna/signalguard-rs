@@ -40,7 +40,7 @@ function fixture(
 describe("SymbolDetailMetrics popup-only presentation", () => {
   it("renders the accepted eight-card metric order", () => {
     const { container } = render(
-      <SymbolDetailMetrics surface="popup" viewModel={fixture()} />,
+      <SymbolDetailMetrics viewModel={fixture()} />,
     );
     const labels = Array.from(container.querySelectorAll("div > p:first-child"))
       .map((node) => node.textContent);
@@ -75,7 +75,7 @@ describe("SymbolDetailMetrics popup-only presentation", () => {
     ["unavailable", "Live market data is unavailable."],
   ] as const)("renders the accepted %s unavailable state", (availability, message) => {
     render(
-      <SymbolDetailMetrics surface="popup" viewModel={fixture(availability)} />,
+      <SymbolDetailMetrics viewModel={fixture(availability)} />,
     );
     expect(screen.getByText(message)).toBeInTheDocument();
     expect(screen.queryByText("PRICE-VALUE")).not.toBeInTheDocument();
@@ -84,7 +84,7 @@ describe("SymbolDetailMetrics popup-only presentation", () => {
   it("uses the supplied view model without mutation or external ownership", () => {
     const viewModel = Object.freeze(fixture());
     const snapshot = JSON.stringify(viewModel);
-    render(<SymbolDetailMetrics surface="popup" viewModel={viewModel} />);
+    render(<SymbolDetailMetrics viewModel={viewModel} />);
     expect(JSON.stringify(viewModel)).toBe(snapshot);
 
     const source = readFileSync("src/features/dashboard/SymbolDetailMetrics.tsx", "utf8");

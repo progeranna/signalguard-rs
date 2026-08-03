@@ -9,7 +9,6 @@ describe("SymbolDetailHeader popup-only presentation", () => {
   it("renders the compact symbol, status, and source badges", () => {
     const { container } = render(
       <SymbolDetailHeader
-        variant="popup"
         symbol="ETHUSDT"
         statusTone="degraded"
         statusText="Degraded"
@@ -33,7 +32,6 @@ describe("SymbolDetailHeader popup-only presentation", () => {
   ] as const)("preserves %s source and %s status", (sourceLabel, statusTone, statusText) => {
     render(
       <SymbolDetailHeader
-        variant="popup"
         symbol="BTCUSDT"
         statusTone={statusTone}
         statusText={statusText}
@@ -51,7 +49,6 @@ describe("SymbolDetailHeader popup-only presentation", () => {
 
     const { container } = render(
       <SymbolDetailHeader
-        variant="popup"
         symbol="BTCUSDT"
         statusTone="healthy"
         statusText="Healthy"

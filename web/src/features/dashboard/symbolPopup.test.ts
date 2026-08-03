@@ -18,16 +18,13 @@ describe("symbol popup identity", () => {
     });
   });
 
-  it.each([
-    ["symbols", "ETHUSDT"],
-    ["anomalies", "BTCUSDT"],
-  ] as const)("creates an explicit %s return context", (returnContext, symbol) => {
+  it("creates the all-symbols return context", () => {
     expect(
-      createSymbolPopupIdentity("live", symbol, returnContext),
+      createSymbolPopupIdentity("live", "ETHUSDT", "symbols"),
     ).toEqual({
       mode: "live",
-      returnContext,
-      symbol,
+      returnContext: "symbols",
+      symbol: "ETHUSDT",
     });
   });
 
@@ -44,13 +41,13 @@ describe("symbol popup identity", () => {
     const identity = createSymbolPopupIdentity(
       "live",
       "BTCUSDT",
-      "anomalies",
+      "symbols",
     );
 
     expect(identity).not.toBeNull();
     expect(replaceSymbolPopupSymbol(identity!, " ethusdt ")).toEqual({
       mode: "live",
-      returnContext: "anomalies",
+      returnContext: "symbols",
       symbol: "ETHUSDT",
     });
   });

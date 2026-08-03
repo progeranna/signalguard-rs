@@ -4,7 +4,6 @@ import type { StatusTone } from "@/shared/lib/status";
 const HEADER_LAYOUT_CLASS = "flex flex-wrap items-center gap-3";
 
 export type SymbolDetailHeaderProps = {
-  variant: "popup";
   symbol: string;
   sourceLabel: "Demo" | "Live";
   statusTone: StatusTone;

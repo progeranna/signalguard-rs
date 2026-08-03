@@ -36,13 +36,14 @@ const testState = vi.hoisted(() => ({
   headerProps: [] as SymbolDetailHeaderProps[],
   identities: [] as Array<{
     mode: "demo" | "live";
-    returnContext: "dashboard" | "symbols" | "anomalies";
+    returnContext: "dashboard" | "symbols";
     symbol: string;
   }>,
   metricsProps: [] as SymbolDetailMetricsProps[],
   mode: "demo" as "demo" | "live",
   nonObserved: false,
   resourceRefetchByIdentity: new Map<string, PopupResourceRefetch>(),
+  resourceAnomaliesByIdentity: new Map<string, DashboardAnomaly[]>(),
   timelineEnabled: [] as boolean[],
   resourceStatusByIdentity: new Map<string, "error" | "loading" | "success" | "unavailable">(),
 }));
@@ -207,7 +208,7 @@ vi.mock("@/features/dashboard/symbolPopupResource", () => ({
       identity,
       refetch,
       resource: {
-        anomalies: [popupAnomaly(identity.symbol)],
+        anomalies: testState.resourceAnomaliesByIdentity.get(key) ?? [popupAnomaly(identity.symbol)],
         mode: identity.mode,
         summary,
         symbol: identity.symbol,
@@ -228,6 +229,7 @@ beforeEach(() => {
   testState.mode = "demo";
   testState.nonObserved = false;
   testState.resourceRefetchByIdentity.clear();
+  testState.resourceAnomaliesByIdentity.clear();
   testState.timelineEnabled.splice(0);
   testState.resourceStatusByIdentity.clear();
   window.localStorage.clear();
@@ -351,6 +353,15 @@ function openAllAnomalies() {
   return screen.getByRole("dialog", { name: "All anomalies" });
 }
 
+function openSymbolAnomaly(anomalyId: string, responsiveIndex = 0) {
+  const symbolDialog = screen.getByRole("dialog", { name: /market details$/i });
+  const control = within(symbolDialog).getAllByRole("button", {
+    name: new RegExp(`${anomalyId}$`),
+  })[responsiveIndex]!;
+  fireEvent.click(control);
+  return control;
+}
+
 describe("dashboard popup identity and return context", () => {
   it("opens a direct dashboard symbol with canonical dashboard context", () => {
     render(<DashboardPage />);
@@ -444,6 +455,97 @@ describe("dashboard popup identity and return context", () => {
     fireEvent.click(within(restored).getByRole("button", { name: "Close" }));
     expect(viewAll).toHaveFocus();
   });
+
+  it("opens only the exact same-symbol UUID from the parent resource even when absent from dashboard summary", () => {
+    const selectedId = "10000000-0000-4000-8000-000000000001";
+    const otherId = "10000000-0000-4000-8000-000000000002";
+    testState.resourceAnomaliesByIdentity.set("demo:BTCUSDT", [
+      { ...popupAnomaly("BTCUSDT"), id: otherId, message: "Other resource anomaly" },
+      {
+        ...popupAnomaly("BTCUSDT"),
+        anomaly_type: "event_lag_spike",
+        id: selectedId,
+        message: "Selected resource-only anomaly",
+      },
+    ]);
+    render(<DashboardPage />);
+    openDirectSymbol("BTCUSDT");
+    const identitiesBeforeActivation = testState.identities.length;
+
+    openSymbolAnomaly(selectedId);
+
+    const detail = screen.getByRole("dialog", { name: "Anomaly Detail" });
+    expect(within(detail).getByText(selectedId)).toBeInTheDocument();
+    expect(within(detail).queryByText(otherId)).not.toBeInTheDocument();
+    expect(within(detail).getByText("Selected resource-only anomaly")).toBeInTheDocument();
+    expect(within(detail).queryByText("Other resource anomaly")).not.toBeInTheDocument();
+    expect(testState.identities.slice(identitiesBeforeActivation)).toEqual([
+      { mode: "demo", returnContext: "dashboard", symbol: "BTCUSDT" },
+    ]);
+    expect(screen.queryByRole("dialog", { name: /market details/i })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["desktop row", 0, "TR"],
+    ["mobile card", 1, "BUTTON"],
+  ] as const)("Back restores the exact visible originating %s", (_surface, index, tagName) => {
+    const selectedId = "20000000-0000-4000-8000-000000000001";
+    const otherId = "20000000-0000-4000-8000-000000000002";
+    testState.resourceAnomaliesByIdentity.set("demo:BTCUSDT", [
+      { ...popupAnomaly("BTCUSDT"), id: selectedId },
+      { ...popupAnomaly("BTCUSDT"), id: otherId },
+    ]);
+    const getClientRects = vi.spyOn(HTMLElement.prototype, "getClientRects")
+      .mockImplementation(function (this: HTMLElement) {
+        const isSelected = this.getAttribute("data-anomaly-id") === selectedId;
+        const isVisibleVariant = index === 0
+          ? this.tagName === "TR"
+          : this.tagName === "BUTTON";
+        return {
+          length: isSelected && isVisibleVariant ? 1 : 0,
+          item: () => null,
+          [Symbol.iterator]: function* () {},
+        } as DOMRectList;
+      });
+    render(<DashboardPage />);
+    openDirectSymbol("BTCUSDT");
+    openSymbolAnomaly(selectedId, index);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to symbol detail" }));
+
+    const restored = screen.getByRole("dialog", { name: "BTCUSDT market details" });
+    const matches = within(restored).getAllByRole("button", {
+      name: new RegExp(`${selectedId}$`),
+    });
+    expect(matches[index]).toHaveFocus();
+    expect(matches[index]).toHaveProperty("tagName", tagName);
+    expect(matches[1 - index]).not.toHaveFocus();
+    expect(within(restored).getAllByRole("button", {
+      name: new RegExp(`${otherId}$`),
+    })).not.toContain(document.activeElement);
+    getClientRects.mockRestore();
+  });
+
+  it("preserves the All Markets parent identity across exact anomaly detail and Back", () => {
+    render(<DashboardPage />);
+    const allMarkets = openAllMarkets();
+    fireEvent.click(within(allMarkets).getAllByLabelText("Open ETHUSDT market detail")[0]!);
+    const anomalyId = popupAnomaly("ETHUSDT").id;
+    openSymbolAnomaly(anomalyId);
+    fireEvent.click(screen.getByRole("button", { name: "Back to symbol detail" }));
+
+    expect(
+      screen.getByRole("dialog", { name: "ETHUSDT market details" })
+        .querySelector('[data-popup-identity="demo:ETHUSDT:symbols"]'),
+    ).not.toBeNull();
+    expect(latestIdentity()).toEqual({
+      mode: "demo",
+      returnContext: "symbols",
+      symbol: "ETHUSDT",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back to all markets" }));
+    expect(screen.getByRole("dialog", { name: "All markets" })).toBeInTheDocument();
+  });
 });
 
 describe("dashboard popup state and presentation contracts", () => {
@@ -489,23 +591,18 @@ describe("dashboard popup state and presentation contracts", () => {
     const anomalyProps = testState.anomalyProps.at(-1);
 
     expect(adapterCall?.identity).toEqual({ mode: "demo", symbol: "ETHUSDT" });
-    expect(headerProps?.variant).toBe("popup");
     expect(headerProps?.symbol).toBe("ETHUSDT");
-    expect(metricsProps?.surface).toBe("popup");
     expect(metricsProps?.viewModel).toBe(adapterCall?.viewModel);
-    expect(anomalyProps?.variant).toBe("popup");
     expect(anomalyProps?.symbol).toBe("ETHUSDT");
     expect(anomalyProps?.anomalies).toBe(adapterCall?.viewModel.anomalies);
 
     const dialog = screen.getByRole("dialog", { name: "ETHUSDT market details" });
-    const anomalyButton = within(dialog).getByRole("button", {
-      name: "Open ETHUSDT market detail",
+    const anomalyControls = within(dialog).getAllByRole("button", {
+      name: /Open ETHUSDT Spread Spike anomaly detail .*0002$/,
     });
-    expect(anomalyButton).toBeInstanceOf(HTMLButtonElement);
-    expect(anomalyButton).toHaveAttribute("type", "button");
-    anomalyButton.focus();
-    expect(anomalyButton).toHaveFocus();
-    fireEvent.click(anomalyButton);
+    fireEvent.click(anomalyControls[1]!);
+    expect(screen.getByRole("dialog", { name: "Anomaly Detail" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /market details/i })).not.toBeInTheDocument();
     expect(latestIdentity()).toEqual({
       mode: "demo",
       returnContext: "dashboard",
@@ -570,9 +667,96 @@ describe("dashboard popup close behavior", () => {
     fireEvent.mouseDown(backdrop!);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it.each(["Close", "Escape", "backdrop"] as const)(
+    "%s closes the complete symbol-owned anomaly workflow",
+    (method) => {
+      render(<DashboardPage />);
+      const externalTrigger = screen.getAllByLabelText("Open BTCUSDT market detail")[0]!;
+      externalTrigger.focus();
+      fireEvent.click(externalTrigger);
+      openSymbolAnomaly(popupAnomaly("BTCUSDT").id);
+      const detail = screen.getByRole("dialog", { name: "Anomaly Detail" });
+      expect(document.body.style.overflow).toBe("hidden");
+
+      if (method === "Close") {
+        fireEvent.click(within(detail).getByRole("button", { name: "Close" }));
+      } else if (method === "Escape") {
+        fireEvent.keyDown(document, { key: "Escape" });
+      } else {
+        fireEvent.mouseDown(detail.parentElement!);
+      }
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(document.body.style.overflow).toBe("");
+      expect(externalTrigger).toHaveFocus();
+    },
+  );
+
+  it("contains Tab and Shift+Tab inside symbol-owned anomaly detail", () => {
+    const getClientRects = vi.spyOn(HTMLElement.prototype, "getClientRects")
+      .mockReturnValue({
+        length: 1,
+        item: () => null,
+        [Symbol.iterator]: function* () {},
+      } as DOMRectList);
+    render(<DashboardPage />);
+    openDirectSymbol("BTCUSDT");
+    openSymbolAnomaly(popupAnomaly("BTCUSDT").id);
+    const back = screen.getByRole("button", { name: "Back to symbol detail" });
+    const close = screen.getByRole("button", { name: "Close" });
+
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(back).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(close).toHaveFocus();
+    getClientRects.mockRestore();
+  });
 });
 
 describe("dashboard popup mode ownership", () => {
+  it("mode replacement clears a nested UUID and ignores the late old resource", () => {
+    const oldId = popupAnomaly("BTCUSDT").id;
+    const view = render(<DashboardPage />);
+    openDirectSymbol("BTCUSDT");
+    openSymbolAnomaly(oldId);
+    expect(screen.getByText(oldId)).toBeInTheDocument();
+
+    testState.mode = "live";
+    testState.resourceStatusByIdentity.set("live:BTCUSDT", "loading");
+    view.rerender(<DashboardPage />);
+
+    expect(screen.queryByRole("dialog", { name: "Anomaly Detail" })).not.toBeInTheDocument();
+    expect(screen.getByText("Loading BTCUSDT market details for Live mode.")).toBeInTheDocument();
+    testState.resourceAnomaliesByIdentity.set("demo:BTCUSDT", [
+      { ...popupAnomaly("BTCUSDT"), message: "Late old resource" },
+    ]);
+    view.rerender(<DashboardPage />);
+    expect(screen.queryByText("Late old resource")).not.toBeInTheDocument();
+    expect(screen.queryByText(oldId)).not.toBeInTheDocument();
+  });
+
+  it("symbol replacement clears a nested UUID and ignores the late old symbol resource", () => {
+    const oldId = popupAnomaly("BTCUSDT").id;
+    const view = render(<DashboardPage />);
+    openDirectSymbol("BTCUSDT");
+    openSymbolAnomaly(oldId);
+
+    testState.resourceStatusByIdentity.set("demo:ETHUSDT", "loading");
+    storeSelectedSymbol("demo", "ETHUSDT");
+    view.rerender(<DashboardPage />);
+
+    expect(screen.queryByRole("dialog", { name: "Anomaly Detail" })).not.toBeInTheDocument();
+    expect(screen.getByText("Loading ETHUSDT market details for Demo mode.")).toBeInTheDocument();
+    testState.resourceAnomaliesByIdentity.set("demo:BTCUSDT", [
+      { ...popupAnomaly("BTCUSDT"), message: "Late BTC resource" },
+    ]);
+    view.rerender(<DashboardPage />);
+    expect(screen.queryByText("Late BTC resource")).not.toBeInTheDocument();
+    expect(screen.queryByText(oldId)).not.toBeInTheDocument();
+  });
+
   it("uses the exact empty state and disables timeline for a configured Live market", () => {
     testState.mode = "live";
     testState.nonObserved = true;
