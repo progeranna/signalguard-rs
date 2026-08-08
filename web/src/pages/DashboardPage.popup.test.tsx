@@ -555,6 +555,92 @@ describe("dashboard popup identity and return context", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to all markets" }));
     expect(screen.getByRole("dialog", { name: "All markets" })).toBeInTheDocument();
   });
+
+  it.each([
+    ["desktop row", 0, "TR"],
+    ["mobile card", 1, "BUTTON"],
+  ] as const)(
+    "restores the exact visible All Markets %s after the complete nested Back flow",
+    (_surface, index, tagName) => {
+      const selectedId = "30000000-0000-4000-8000-000000000001";
+      const otherId = "30000000-0000-4000-8000-000000000002";
+      const selectedMarketLabel = "Open BTCUSDT market detail";
+      const otherMarketLabel = "Open ETHUSDT market detail";
+      const pathnameBefore = window.location.pathname;
+      testState.resourceAnomaliesByIdentity.set("demo:BTCUSDT", [
+        { ...popupAnomaly("BTCUSDT"), id: selectedId },
+        { ...popupAnomaly("BTCUSDT"), id: otherId },
+      ]);
+      const getClientRects = vi.spyOn(HTMLElement.prototype, "getClientRects")
+        .mockImplementation(function (this: HTMLElement) {
+          const isVisibleVariant = index === 0
+            ? this.tagName === "TR"
+            : this.tagName === "BUTTON";
+          const isSelectedAnomaly =
+            this.getAttribute("data-anomaly-id") === selectedId;
+          const isSelectedMarket =
+            this.getAttribute("aria-label") === selectedMarketLabel;
+          return {
+            length:
+              isVisibleVariant && (isSelectedAnomaly || isSelectedMarket)
+                ? 1
+                : 0,
+            item: () => null,
+            [Symbol.iterator]: function* () {},
+          } as DOMRectList;
+        });
+      render(<DashboardPage />);
+      const allMarkets = openAllMarkets();
+      expect(within(allMarkets).getByRole("button", { name: "Close" }))
+        .toHaveFocus();
+      const originatingMarkets = within(allMarkets).getAllByLabelText(
+        selectedMarketLabel,
+      );
+
+      fireEvent.click(originatingMarkets[index]!);
+
+      expect(latestIdentity()).toEqual({
+        mode: "demo",
+        returnContext: "symbols",
+        symbol: "BTCUSDT",
+      });
+      openSymbolAnomaly(selectedId, index);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Back to symbol detail" }),
+      );
+      const restoredSymbol = screen.getByRole("dialog", {
+        name: "BTCUSDT market details",
+      });
+      const restoredAnomalies = within(restoredSymbol).getAllByRole("button", {
+        name: new RegExp(`${selectedId}$`),
+      });
+      expect(restoredAnomalies[index]).toHaveFocus();
+      expect(restoredAnomalies[1 - index]).not.toHaveFocus();
+      expect(within(restoredSymbol).getAllByRole("button", {
+        name: new RegExp(`${otherId}$`),
+      })).not.toContain(document.activeElement);
+
+      fireEvent.click(
+        within(restoredSymbol).getByRole("button", {
+          name: "Back to all markets",
+        }),
+      );
+
+      const restoredMarkets = screen.getByRole("dialog", {
+        name: "All markets",
+      });
+      const selectedMarkets = within(restoredMarkets).getAllByLabelText(
+        selectedMarketLabel,
+      );
+      expect(selectedMarkets[index]).toHaveFocus();
+      expect(selectedMarkets[index]).toHaveProperty("tagName", tagName);
+      expect(selectedMarkets[1 - index]).not.toHaveFocus();
+      expect(within(restoredMarkets).getAllByLabelText(otherMarketLabel))
+        .not.toContain(document.activeElement);
+      expect(window.location.pathname).toBe(pathnameBefore);
+      getClientRects.mockRestore();
+    },
+  );
 });
 
 describe("dashboard popup state and presentation contracts", () => {
