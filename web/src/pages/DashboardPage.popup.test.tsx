@@ -286,7 +286,6 @@ function summaryForMode(mode: UiMode): DashboardSummary {
     observedSymbol("BNBUSDT", `${mode}-BNB-LIST`, mode),
     observedSymbol("ADAUSDT", `${mode}-ADA-LIST`, mode),
     observedSymbol("DOGEUSDT", `${mode}-DOGE-LIST`, mode),
-    observedSymbol("LTCUSDT", `${mode}-LTC-LIST`, mode),
   ];
   if (mode === "live" && testState.nonObserved) {
     symbols[0] = {
@@ -311,10 +310,6 @@ function summaryForMode(mode: UiMode): DashboardSummary {
       severity: "critical" as const,
       threshold_value: null,
     },
-    ...Array.from({ length: 5 }, (_, index) => ({
-      ...popupAnomaly(index % 2 === 0 ? "ETHUSDT" : "BTCUSDT"),
-      id: `00000000-0000-4000-8000-0000000000${index + 11}`,
-    })),
   ];
 
   return {
@@ -363,6 +358,20 @@ function openSymbolAnomaly(anomalyId: string, responsiveIndex = 0) {
 }
 
 describe("dashboard popup identity and return context", () => {
+  it("keeps both View all modal entry points reachable at accepted Demo cardinalities", () => {
+    const demoSummary = summaryForMode("demo");
+    expect(demoSummary.symbols).toHaveLength(7);
+    expect(demoSummary.recent_anomalies).toHaveLength(3);
+
+    render(<DashboardPage />);
+
+    expect(screen.getAllByRole("button", { name: "View all" })).toHaveLength(2);
+    const allMarkets = openAllMarkets();
+    expect(allMarkets).toBeInTheDocument();
+    fireEvent.click(within(allMarkets).getByRole("button", { name: "Close" }));
+    expect(openAllAnomalies()).toBeInTheDocument();
+  });
+
   it("opens a direct dashboard symbol with canonical dashboard context", () => {
     render(<DashboardPage />);
 

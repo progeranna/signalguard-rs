@@ -402,7 +402,7 @@ function SymbolHealthShell({
         title="Market Health"
         subtitle="Current health signals for monitored markets."
         action={
-          preview.hasMore ? (
+          symbols.length > 0 ? (
             <button
               type="button"
               onClick={onOpenAll}
@@ -527,7 +527,7 @@ function RecentAnomaliesShell({
         title="Recent Anomalies"
         subtitle="Latest data-quality events across monitored markets."
         action={
-          preview.hasMore ? (
+          anomalies.length > 0 ? (
             <button
               type="button"
               onClick={onOpenAll}
