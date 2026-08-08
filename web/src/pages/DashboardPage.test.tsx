@@ -416,6 +416,14 @@ function latestTimelineProps() {
   return props;
 }
 
+function viewAllButtonInSection(title: "Market Health" | "Recent Anomalies") {
+  const section = screen.getByRole("heading", { name: title }).closest("section");
+  if (!section) {
+    throw new Error(`Missing ${title} section`);
+  }
+  return within(section).queryByRole("button", { name: "View all" });
+}
+
 beforeEach(() => {
   testState.anomalyBuilderCalls.splice(0);
   testState.marketBuilderCalls.splice(0);
@@ -556,6 +564,60 @@ describe("dashboard behavior-level composition", () => {
   });
 });
 
+describe("dashboard modal entry-point reachability", () => {
+  it.each([
+    [0, false],
+    [1, true],
+    [7, true],
+    [8, true],
+  ] as const)(
+    "renders Market Health View all for collection size %i iff non-empty",
+    (collectionSize, shouldRender) => {
+      const symbols = Array.from({ length: collectionSize }, (_, index) =>
+        observedSymbol(`MARKET${index}USDT`),
+      );
+      const currentSummary = summary("demo", symbols, []);
+      setSummaryQuery(currentSummary);
+      setPreviews(currentSummary);
+
+      render(<DashboardPage />);
+
+      expect(testState.marketPreview?.hasMore).toBe(collectionSize > 7);
+      if (shouldRender) {
+        expect(viewAllButtonInSection("Market Health")).toBeInTheDocument();
+      } else {
+        expect(viewAllButtonInSection("Market Health")).not.toBeInTheDocument();
+      }
+    },
+  );
+
+  it.each([
+    [0, false],
+    [1, true],
+    [7, true],
+    [8, true],
+  ] as const)(
+    "renders Recent Anomalies View all for collection size %i iff non-empty",
+    (collectionSize, shouldRender) => {
+      const anomalies = Array.from({ length: collectionSize }, (_, index) =>
+        dashboardAnomaly("BTCUSDT", index + 1),
+      );
+      const currentSummary = summary("demo", [], anomalies);
+      setSummaryQuery(currentSummary);
+      setPreviews(currentSummary);
+
+      render(<DashboardPage />);
+
+      expect(testState.anomalyPreview?.hasMore).toBe(collectionSize > 7);
+      if (shouldRender) {
+        expect(viewAllButtonInSection("Recent Anomalies")).toBeInTheDocument();
+      } else {
+        expect(viewAllButtonInSection("Recent Anomalies")).not.toBeInTheDocument();
+      }
+    },
+  );
+});
+
 describe("dashboard anomaly detail modal", () => {
   it("opens the exact same-symbol UUID and renders every accepted field", () => {
     const first = dashboardAnomaly("BTCUSDT", 1);
@@ -655,7 +717,9 @@ describe("dashboard anomaly detail modal", () => {
     setPreviews(currentSummary);
     render(<DashboardPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: "View all" }));
+    const viewAll = viewAllButtonInSection("Recent Anomalies");
+    expect(viewAll).toBeInTheDocument();
+    fireEvent.click(viewAll!);
     const allDialog = screen.getByRole("dialog", { name: "All anomalies" });
     const selected = anomalies[3]!;
     const row = within(allDialog).getAllByRole("button", {
@@ -891,8 +955,20 @@ describe("dashboard retained source contracts", () => {
     expect(source).not.toContain("Math.random(");
   });
 
-  it("keeps preview-owned View all and empty-state decisions", () => {
-    expect(count("preview.hasMore ? (")).toBe(2);
+  it("keeps collection-owned View all and preview-owned empty-state decisions", () => {
+    const marketHealthShellSource = source.slice(
+      source.indexOf("function SymbolHealthShell"),
+      source.indexOf("function SymbolHealthCard"),
+    );
+    const recentAnomaliesShellSource = source.slice(
+      source.indexOf("function RecentAnomaliesShell"),
+      source.indexOf("function AllAnomaliesModal"),
+    );
+
+    expect(marketHealthShellSource).toContain("symbols.length > 0 ? (");
+    expect(recentAnomaliesShellSource).toContain("anomalies.length > 0 ? (");
+    expect(marketHealthShellSource).not.toContain("preview.hasMore");
+    expect(recentAnomaliesShellSource).not.toContain("preview.hasMore");
     expect(count("!preview.isEmpty ? (")).toBe(2);
     expect(source).toContain("No monitored markets available.");
     expect(source).toContain("No anomalies detected in the current summary.");
