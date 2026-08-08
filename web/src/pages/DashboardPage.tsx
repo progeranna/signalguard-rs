@@ -78,7 +78,7 @@ type DashboardModalState =
       identity: SymbolPopupIdentity;
       focusAnomalyId?: string;
     }
-  | { type: "symbols" }
+  | { type: "symbols"; focusSymbol?: string }
   | null;
 
 const EMPTY_DASHBOARD_ANOMALIES: DashboardAnomaly[] = [];
@@ -299,6 +299,7 @@ function DashboardTablesGrid({
       </section>
       {modalState?.type === "symbols" ? (
         <AllSymbolHealthModal
+          initialFocusSymbol={modalState.focusSymbol}
           symbols={symbols}
           onClose={() => setModalState(null)}
           onOpenSymbolDetail={(symbol) => openSymbolDetail(symbol, "symbols")}
@@ -365,7 +366,11 @@ function DashboardTablesGrid({
           summary={summary}
           onBack={
             activePopupIdentity.returnContext === "symbols"
-              ? () => setModalState({ type: "symbols" })
+              ? () =>
+                  setModalState({
+                    type: "symbols",
+                    focusSymbol: activePopupIdentity.symbol,
+                  })
               : undefined
           }
           onClose={() => setModalState(null)}
@@ -850,10 +855,12 @@ function AnomalyDetailField({
 }
 
 function AllSymbolHealthModal({
+  initialFocusSymbol,
   onOpenSymbolDetail,
   symbols,
   onClose,
 }: {
+  initialFocusSymbol?: string;
   onOpenSymbolDetail: (symbol: string) => void;
   symbols: DashboardSymbolSummary[];
   onClose: () => void;
@@ -863,6 +870,11 @@ function AllSymbolHealthModal({
       title="All markets"
       subtitle="Full available market list from the current dashboard summary."
       dialogId="all-symbol-health-title"
+      initialFocusSelector={
+        initialFocusSymbol
+          ? `[aria-label="Open ${initialFocusSymbol} market detail"]`
+          : undefined
+      }
       onClose={onClose}
     >
       {symbols.length > 0 ? (
