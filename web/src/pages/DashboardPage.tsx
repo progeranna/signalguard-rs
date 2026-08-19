@@ -83,6 +83,22 @@ type DashboardModalState =
 
 const EMPTY_DASHBOARD_ANOMALIES: DashboardAnomaly[] = [];
 
+function reconcileSymbolPopupIdentity(
+  identity: SymbolPopupIdentity,
+  selectedUiMode: UiMode,
+  selectedSymbol: string | null,
+): SymbolPopupIdentity {
+  let nextIdentity = identity.mode === selectedUiMode
+    ? identity
+    : replaceSymbolPopupMode(identity, selectedUiMode);
+
+  if (selectedSymbol && nextIdentity.symbol !== selectedSymbol) {
+    nextIdentity = replaceSymbolPopupSymbol(nextIdentity, selectedSymbol) ?? nextIdentity;
+  }
+
+  return nextIdentity;
+}
+
 export function DashboardPage() {
   const selectedUiMode = useResolvedUiMode();
   const dashboardSummaryQuery = useCatalogDashboardSummaryQuery(selectedUiMode);
@@ -173,7 +189,6 @@ function DashboardTablesGrid({
   selectedSymbol: string | null;
 }) {
   const [modalState, setModalState] = useState<DashboardModalState>(null);
-  const previousUiModeRef = useRef(selectedUiMode);
   const symbols = summary?.symbols ?? [];
   const anomalies =
     summary?.source === selectedUiMode
@@ -185,15 +200,14 @@ function DashboardTablesGrid({
       : null;
   const activePopupIdentity =
     modalState?.type === "symbolDetail"
-      ? modalState.identity.mode === selectedUiMode
-        ? modalState.identity
-        : replaceSymbolPopupMode(modalState.identity, selectedUiMode)
+      ? reconcileSymbolPopupIdentity(
+          modalState.identity,
+          selectedUiMode,
+          selectedSymbol,
+        )
       : null;
 
   useEffect(() => {
-    const modeChanged = previousUiModeRef.current !== selectedUiMode;
-    previousUiModeRef.current = selectedUiMode;
-
     setModalState((currentState) => {
       if (
         currentState?.type !== "symbolDetail" &&
@@ -205,13 +219,11 @@ function DashboardTablesGrid({
       const currentIdentity = currentState.type === "symbolDetail"
         ? currentState.identity
         : currentState.parentIdentity;
-      let nextIdentity = currentIdentity.mode === selectedUiMode
-        ? currentIdentity
-        : replaceSymbolPopupMode(currentIdentity, selectedUiMode);
-
-      if (!modeChanged && selectedSymbol && nextIdentity.symbol !== selectedSymbol) {
-        nextIdentity = replaceSymbolPopupSymbol(nextIdentity, selectedSymbol) ?? nextIdentity;
-      }
+      const nextIdentity = reconcileSymbolPopupIdentity(
+        currentIdentity,
+        selectedUiMode,
+        selectedSymbol,
+      );
 
       if (nextIdentity === currentIdentity) {
         return currentState;
