@@ -811,6 +811,123 @@ describe("dashboard popup close behavior", () => {
 });
 
 describe("dashboard popup mode ownership", () => {
+  it("reconciles the open parent to the restored per-mode symbol", () => {
+    const demoBtcId = "40000000-0000-4000-8000-000000000001";
+    const liveBtcId = "40000000-0000-4000-8000-000000000002";
+    const liveEthId = "40000000-0000-4000-8000-000000000003";
+    testState.resourceAnomaliesByIdentity.set("demo:BTCUSDT", [
+      {
+        ...popupAnomaly("BTCUSDT"),
+        id: demoBtcId,
+        message: "Final Demo BTC content",
+      },
+    ]);
+    testState.resourceAnomaliesByIdentity.set("live:BTCUSDT", [
+      {
+        ...popupAnomaly("BTCUSDT"),
+        id: liveBtcId,
+        message: "Live BTC content",
+      },
+    ]);
+    testState.resourceAnomaliesByIdentity.set("live:ETHUSDT", [
+      {
+        ...popupAnomaly("ETHUSDT"),
+        id: liveEthId,
+        message: "Stale Live ETH content",
+      },
+    ]);
+    storeSelectedSymbol("demo", "BTCUSDT");
+    storeSelectedSymbol("live", "BTCUSDT");
+
+    const view = render(<DashboardPage />);
+    const allMarkets = openAllMarkets();
+    fireEvent.click(
+      within(allMarkets).getAllByLabelText("Open BTCUSDT market detail")[0]!,
+    );
+    openSymbolAnomaly(demoBtcId);
+
+    testState.mode = "live";
+    view.rerender(<DashboardPage />);
+
+    expect(screen.queryByRole("dialog", { name: "Anomaly Detail" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(demoBtcId)).not.toBeInTheDocument();
+    expect(latestIdentity()).toEqual({
+      mode: "live",
+      returnContext: "symbols",
+      symbol: "BTCUSDT",
+    });
+    openSymbolAnomaly(liveBtcId);
+
+    storeSelectedSymbol("live", "ETHUSDT");
+    view.rerender(<DashboardPage />);
+
+    expect(screen.queryByRole("dialog", { name: "Anomaly Detail" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(liveBtcId)).not.toBeInTheDocument();
+    expect(latestIdentity()).toEqual({
+      mode: "live",
+      returnContext: "symbols",
+      symbol: "ETHUSDT",
+    });
+    openSymbolAnomaly(liveEthId);
+
+    const identitiesBeforeDemoReturn = testState.identities.length;
+    testState.mode = "demo";
+    view.rerender(<DashboardPage />);
+
+    expect(getStoredSelectedSymbol("demo")).toBe("BTCUSDT");
+    expect(getStoredSelectedSymbol("live")).toBe("ETHUSDT");
+    expect(screen.queryByRole("dialog", { name: "Anomaly Detail" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(liveEthId)).not.toBeInTheDocument();
+    expect(screen.queryByText("Stale Live ETH content")).not.toBeInTheDocument();
+    const restoredDialog = screen.getByRole("dialog", {
+      name: "BTCUSDT market details",
+    });
+    expect(
+      restoredDialog.querySelector(
+        '[data-popup-identity="demo:BTCUSDT:symbols"]',
+      ),
+    ).not.toBeNull();
+    expect(within(restoredDialog).getAllByText("Final Demo BTC content"))
+      .not.toHaveLength(0);
+    expect(testState.identities.slice(identitiesBeforeDemoReturn)).not.toContainEqual({
+      mode: "demo",
+      returnContext: "symbols",
+      symbol: "ETHUSDT",
+    });
+    expect(latestIdentity()).toEqual({
+      mode: "demo",
+      returnContext: "symbols",
+      symbol: "BTCUSDT",
+    });
+
+    testState.resourceAnomaliesByIdentity.set("live:ETHUSDT", [
+      {
+        ...popupAnomaly("ETHUSDT"),
+        id: liveEthId,
+        message: "Late Live ETH resource",
+      },
+    ]);
+    testState.resourceAnomaliesByIdentity.set("demo:ETHUSDT", [
+      {
+        ...popupAnomaly("ETHUSDT"),
+        message: "Late Demo ETH resource",
+      },
+    ]);
+    view.rerender(<DashboardPage />);
+
+    expect(screen.queryByText("Late Live ETH resource")).not.toBeInTheDocument();
+    expect(screen.queryByText("Late Demo ETH resource")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Final Demo BTC content")).not.toHaveLength(0);
+    expect(latestIdentity()).toEqual({
+      mode: "demo",
+      returnContext: "symbols",
+      symbol: "BTCUSDT",
+    });
+  });
+
   it("mode replacement clears a nested UUID and ignores the late old resource", () => {
     const oldId = popupAnomaly("BTCUSDT").id;
     const view = render(<DashboardPage />);
@@ -892,6 +1009,7 @@ describe("dashboard popup mode ownership", () => {
   });
 
   it("ignores late old-symbol and old-mode resolutions", () => {
+    storeSelectedSymbol("live", "ETHUSDT");
     testState.resourceStatusByIdentity.set("demo:BTCUSDT", "loading");
     const view = render(<DashboardPage />);
     openDirectSymbol("BTCUSDT");
@@ -932,6 +1050,7 @@ describe("dashboard popup mode ownership", () => {
   });
 
   it("preserves All markets return context across a mode change", () => {
+    storeSelectedSymbol("live", "ETHUSDT");
     const view = render(<DashboardPage />);
     const allMarkets = openAllMarkets();
     fireEvent.click(
